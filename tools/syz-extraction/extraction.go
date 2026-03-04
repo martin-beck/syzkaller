@@ -212,7 +212,6 @@ func saveProg2File(p *prog.Prog, prefix string, index int) {
 	if err := osutil.WriteFile(outName, p.Serialize()); err != nil {
 		log.Fatalf("failed to output file: %v", err)
 	}
-	// log.Logf(0, "Stored program %s", outName)
 }
 
 // a map from TID to clone depth
