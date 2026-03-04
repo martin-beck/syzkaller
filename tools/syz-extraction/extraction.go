@@ -4,7 +4,6 @@
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
 	"os"
@@ -30,6 +29,8 @@ var (
 	flagDeserialize = flag.String("deserialize", "", "(Optional) directory to store deserialized programs")
 	flagMinCalls    = flag.Int("minCalls", 5, "minimum number of remaining syscalls after minimization")
 	flagTopCalls    = flag.Int("topCalls", 2, "number of most used usyscalls to be used for file name generation")
+
+	syscallIDxPerTid = make(map[int64][]int)
 )
 
 func help() {
@@ -118,19 +119,31 @@ func generateAllProgs(p *prog.Prog, threadList []int64) (pF *prog.Prog) {
 	c.Rets = make([]map[any]bool, numCalls)
 	c.UsesBFs = make([]*bloom.BloomFilter, numCalls)
 	c.RetsBFs = make([]*bloom.BloomFilter, numCalls)
-	fmt.Fprintf(os.Stderr, "Number of syscalls before: %d\n", numCalls)
+	fmt.Fprintf(os.Stderr, "Total number of syscalls: %d\n", numCalls)
+
+	totalStartSyscalls := 0
+	usedStartSyscalls := 0
+	for _, tid := range threadList {
+		totalStartSyscalls += len(syscallIDxPerTid[tid])
+	}
+	var status string
 
 	// go over all thread IDs in decreasing depth starting with the highest depth
 	for idx, tid := range threadList {
-		fmt.Printf("Working on TID %d (%d/%d)\n", tid, idx+1, len(threadList))
+		numCallsTid := len(syscallIDxPerTid[tid])
+		fmt.Printf("[%d/%d] Working on TID %d - %d syscalls\n", idx+1, len(threadList), tid, numCallsTid)
 
-		for i := numCalls - 1; i > 0; {
+		for subIdx, i := range syscallIDxPerTid[tid] {
+			usedStartSyscalls++
 			if !nonStartCalls[i] && p.Calls[i].StraceTid == tid {
+				if usedStartSyscalls%100 == 0 {
+					status = fmt.Sprintf("-- Progress TID [%03.1f/100%%] -- Progress overall [%03.1f/100%%] --", (100.0 * float32(subIdx) / float32(numCallsTid)), (100 * float32(usedStartSyscalls) / float32(totalStartSyscalls)))
+					fmt.Fprintf(os.Stderr, "%s\r", status)
+				}
 				pF, processedCalls, keepCalls = generateMinimizedProg(p, i, processedCalls, c)
 				nonStartCalls = prog.Sliceor(prog.Sliceor(processedCalls, keepCalls), nonStartCalls)
 
 				if len(pF.Calls) >= *flagMinCalls {
-					fmt.Fprintf(os.Stderr, "(%d/%d) Number of syscalls after: %d\n", i, len(p.Calls), len(pF.Calls))
 					prefixLen = 2
 					progBase := filepath.Base(*flagProg)
 					splitBase := strings.Split(progBase, "_")
@@ -149,12 +162,16 @@ func generateAllProgs(p *prog.Prog, threadList []int64) (pF *prog.Prog) {
 						outPrefixesIdx[outPrefix]++
 					}
 
-					saveProg2File(filterOutPolls(pF), outPrefix, outPrefixesIdx[outPrefix])
+					pF = filterOutPolls(pF)
+
+					fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
+					fmt.Fprintf(os.Stderr, "    Extracted %d syscalls into %s_%d\n", len(pF.Calls), outPrefix, outPrefixesIdx[outPrefix])
+					saveProg2File(pF, outPrefix, outPrefixesIdx[outPrefix])
 				}
 			}
 			i--
 		}
-
+		fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 	}
 
 	return
@@ -180,43 +197,6 @@ func saveProg2File(p *prog.Prog, prefix string, index int) {
 	if err := osutil.WriteFile(outName, p.Serialize()); err != nil {
 		log.Fatalf("failed to output file: %v", err)
 	}
-	log.Logf(0, "Stored program %s", outName)
-}
-
-func extractResources(c *prog.Call) map[any]bool {
-	used := make(map[any]bool)
-
-	prog.ForeachArg(c, func(arg prog.Arg, _ *prog.ArgCtx) {
-		switch typ := arg.Type().(type) {
-		case *prog.ResourceType:
-			a := arg.(*prog.ResultArg)
-			used[a] = true
-			if a.Res != nil {
-				used[a.Res] = true
-			}
-			for use := range prog.GetUses(a) {
-				used[use] = true
-			}
-		case *prog.BufferType:
-			a := arg.(*prog.DataArg)
-			if a.Dir() != prog.DirOut && typ.Kind == prog.BufferFilename {
-				val := string(bytes.TrimRight(a.Data(), "\x00"))
-				used[val] = true
-			}
-		}
-	})
-
-	return used
-}
-
-// subtracts list1 from list, returns true if there are elements in list1, that are not present in list
-func mapsNewInRightAny(list map[any]bool, list1 map[any]bool) bool {
-	for what := range list1 {
-		if !list[what] {
-			return true
-		}
-	}
-	return false
 }
 
 // a map from TID to clone depth
@@ -226,8 +206,10 @@ func buildThreadList(p *prog.Prog) []int64 {
 	tt := make(ThreadSet)
 	tl := make([]int64, 0)
 
-	for _, c := range p.Calls {
+	for idx, c := range p.Calls {
 		tt[c.StraceTid] = true
+		tid := c.StraceTid
+		syscallIDxPerTid[tid] = append(syscallIDxPerTid[tid], idx)
 	}
 	for t := range tt {
 		tl = append(tl, t)
