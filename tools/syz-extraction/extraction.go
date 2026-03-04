@@ -71,6 +71,40 @@ func generateMinimizedProg(p *prog.Prog, callIndex0 int, processedCallsIn []bool
 	return
 }
 
+func isPollLike(syscallName string) bool {
+	pollLikes := []string{
+		"epoll_pwait",
+		"epoll_wait",
+		"poll",
+		"ppoll",
+		"select",
+	}
+	for _, v := range pollLikes {
+		if syscallName == v {
+			return true
+		}
+	}
+	return false
+}
+
+func filterOutPolls(p *prog.Prog) *prog.Prog {
+	notPolls := make([]bool, len(p.Calls))
+	prevPoll := make(map[int64]int)
+	for idx, c := range p.Calls {
+		if isPollLike(c.Meta.Name) {
+			prevPoll[c.StraceTid] = idx
+		} else if oldIdx, ok := prevPoll[c.StraceTid]; ok {
+			notPolls[oldIdx] = true // Keep the last poll in the sequence.
+			delete(prevPoll, c.StraceTid)
+			notPolls[idx] = true
+		} else {
+			notPolls[idx] = true
+		}
+	}
+	px := p.CloneFilter(notPolls)
+	return px
+}
+
 func generateAllProgs(p *prog.Prog, threadList []int64) (pF *prog.Prog) {
 	numCalls := len(p.Calls)
 	processedCalls := make([]bool, numCalls)
@@ -115,7 +149,7 @@ func generateAllProgs(p *prog.Prog, threadList []int64) (pF *prog.Prog) {
 						outPrefixesIdx[outPrefix]++
 					}
 
-					saveProg2File(pF, outPrefix, outPrefixesIdx[outPrefix])
+					saveProg2File(filterOutPolls(pF), outPrefix, outPrefixesIdx[outPrefix])
 				}
 			}
 			i--
