@@ -782,10 +782,10 @@ func (ctx *context) fmtCallBody(call prog.ExecCall) string {
 			// argument index 1
 			case 1:
 				switch call.Meta.Name {
-				case "connect$inet4":
+				case "connect$inet":
 					argsStrs = append(argsStrs, "UNIQUE_VAR(ctx->connect4_arg)")
 					continue
-				case "bind$inet4":
+				case "bind$inet":
 					argsStrs = append(argsStrs, "UNIQUE_VAR(ctx->bind4_arg)")
 					continue
 				case "connect$inet6":
@@ -797,10 +797,10 @@ func (ctx *context) fmtCallBody(call prog.ExecCall) string {
 				}
 			case 2:
 				switch call.Meta.Name {
-				case "connect$inet4":
+				case "connect$inet":
 					argsStrs = append(argsStrs, "sizeof(*(UNIQUE_VAR(ctx->connect4_arg)))")
 					continue
-				case "bind$inet4":
+				case "bind$inet":
 					argsStrs = append(argsStrs, "sizeof(*(UNIQUE_VAR(ctx->bind4_arg)))")
 					continue
 				case "connect$inet6":
