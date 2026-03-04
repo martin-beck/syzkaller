@@ -106,16 +106,6 @@ func filterOutPolls(p *prog.Prog) *prog.Prog {
 	return px
 }
 
-func countSyscalls(p *prog.Prog, tid int64) int64 {
-	num := int64(0)
-	for _, c := range p.Calls {
-		if c.StraceTid == tid {
-			num++
-		}
-	}
-	return num
-}
-
 func generateAllProgs(p *prog.Prog, threadList []int64) (pF *prog.Prog) {
 	numCalls := len(p.Calls)
 	processedCalls := make([]bool, numCalls)
@@ -141,11 +131,6 @@ func generateAllProgs(p *prog.Prog, threadList []int64) (pF *prog.Prog) {
 	// go over all thread IDs in decreasing depth starting with the highest depth
 	for idx, tid := range threadList {
 		numCallsTid := len(syscallIDxPerTid[tid])
-		if len(syscallIDxPerTid[tid]) < *flagMinCalls {
-			fmt.Printf("[%d/%d] Skipping TID %d - not enough syscalls %d\n", idx+1, len(threadList), tid, numCallsTid)
-			usedStartSyscalls += numCallsTid
-			continue
-		}
 		fmt.Printf("[%d/%d] Working on TID %d - %d syscalls\n", idx+1, len(threadList), tid, numCallsTid)
 
 		for subIdx, i := range syscallIDxPerTid[tid] {
@@ -221,20 +206,15 @@ func buildThreadList(p *prog.Prog) []int64 {
 	tt := make(ThreadSet)
 	tl := make([]int64, 0)
 
-	for _, c := range p.Calls {
+	for idx, c := range p.Calls {
 		tt[c.StraceTid] = true
+		tid := c.StraceTid
+		syscallIDxPerTid[tid] = append(syscallIDxPerTid[tid], idx)
 	}
 	for t := range tt {
 		tl = append(tl, t)
 	}
 	return tl
-}
-
-func populateSyscallIdx(p *prog.Prog) {
-	for idx, c := range p.Calls {
-		tid := c.StraceTid
-		syscallIDxPerTid[tid] = append(syscallIDxPerTid[tid], idx)
-	}
 }
 
 func main() {
@@ -243,8 +223,6 @@ func main() {
 	p := readProg()
 
 	threads := buildThreadList(p)
-
-	populateSyscallIdx(p)
 
 	generateAllProgs(p, threads)
 }
