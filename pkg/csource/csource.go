@@ -29,6 +29,7 @@ import (
 	"math/bits"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -59,6 +60,7 @@ var (
 	NetOpsFDs         = make(map[uint64]([]NetOpSize))
 	NetOpsFDsConnect  = make(map[uint64]([]NetOpSize))
 	NetOpsFDsAccept   = make(map[uint64]([]NetOpSize))
+	listenFDs         = make(map[uint64](bool))
 )
 
 func AddToNetOps(res uint64, op NetOp, size uint64) {
@@ -253,21 +255,23 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	}
 
 	varsBuf := new(bytes.Buffer)
-	if len(vars) != 0 {
-		fmt.Fprintf(varsBuf, "uint64 UNIQUE_VAR(r)[%v] = {", len(vars))
-		for i, v := range vars {
-			if i != 0 {
-				fmt.Fprintf(varsBuf, ", ")
+	if !ctx.opts.CSB {
+		if len(vars) != 0 {
+			fmt.Fprintf(varsBuf, "uint64 UNIQUE_VAR(ctx->r)[%v] = {", len(vars))
+			for i, v := range vars {
+				if i != 0 {
+					fmt.Fprintf(varsBuf, ", ")
+				}
+				fmt.Fprintf(varsBuf, "0x%x", v)
 			}
-			fmt.Fprintf(varsBuf, "0x%x", v)
+			fmt.Fprintf(varsBuf, "};\n")
 		}
-		fmt.Fprintf(varsBuf, "};\n")
 	}
 
 	closeBuf := new(bytes.Buffer)
 	for fdRes, open := range missedFDResources {
 		if open {
-			fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(r)[%v]);\n", fdRes)
+			fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(ctx->r)[%v]);\n", fdRes)
 		}
 	}
 
@@ -283,7 +287,76 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	sandboxFunc := generateSandboxFunctionSignature(ctx.opts.Sandbox, ctx.opts.SandboxArg, ctx)
 
 	results := varsBuf.String()
-	syscalls := ctx.generateSyscalls(calls, len(vars) != 0)
+
+	// // generate all indices for relevant annotations
+	// netListenIdxs := ctx.p.GetAnnotationIndices(prog.LISTEN)
+	// if len(netListenIdxs) > 0 {
+	// 	// got all indices of calls that use the listen socket in the program
+	// 	fmt.Fprintf(os.Stderr, "Found LISTEN indices:\n%#v\n", netListenIdxs)
+	// }
+
+	// netConnectIdxs := ctx.p.GetAnnotationIndices(prog.CONNECT)
+	// if len(netConnectIdxs) > 0 {
+	// 	// got all indices of calls that use the connect socket in the program
+	// 	// fmt.Fprintf(os.Stderr, "Found CONNECT indices:\n%#v\n", netConnectIdxs)
+	// }
+
+	var excludeIdices []int
+
+	netSrvListen := prog.CallAnnotationMarker{prog.LISTEN, "listen", prog.ENDINCLUDE}
+	netSrvListenIdxs := ctx.p.GetAnnotationIndicesMarker(netSrvListen)
+	if len(netSrvListenIdxs) > 0 {
+		// got all indices of calls that use the listen socket in the program
+		// fmt.Fprintf(os.Stderr, "Found LISTEN-listen indices:\n%#v\n", netSrvListenIdxs)
+		excludeIdices = append(excludeIdices, netSrvListenIdxs...)
+	}
+
+	netSrvClose := prog.CallAnnotationMarker{prog.LISTEN, "close", prog.STARTINCLUDE}
+	netSrvCloseIdxs := ctx.p.GetAnnotationIndicesMarker(netSrvClose)
+	if len(netSrvCloseIdxs) > 0 {
+		// got all indices of calls that use the listen socket in the program
+		// fmt.Fprintf(os.Stderr, "Found LISTEN-close indices:\n%#v\n", netSrvCloseIdxs)
+		excludeIdices = append(excludeIdices, netSrvCloseIdxs...)
+	}
+
+	var callsNetSrvReg []string
+	if len(vars) > 0 {
+		callsNetSrvReg = append(callsNetSrvReg, fmt.Sprintf("\tUNIQUE_VAR(ctx->r) = (uint64*)malloc(sizeof(uint64)*%d);\n", len(vars)))
+		for i, v := range vars {
+			callsNetSrvReg = append(callsNetSrvReg, fmt.Sprintf("\tUNIQUE_VAR(ctx->r)[%d] = 0x%x;\n", i, v))
+		}
+	}
+	for idx, call := range calls {
+		if slices.Contains(netSrvListenIdxs, idx) {
+			callsNetSrvReg = append(callsNetSrvReg, call)
+		}
+	}
+	// fmt.Fprintf(os.Stderr, "callsNetSrvReg:\n%#v\n", callsNetSrvReg)
+
+	syscallsNetSrvReg := ctx.generateSyscalls(callsNetSrvReg, len(vars) != 0)
+
+	// use all but
+	var callsNetSrvBody []string
+	for idx, call := range calls {
+		if slices.Contains(netSrvListenIdxs, idx) {
+			continue
+		}
+		if slices.Contains(netSrvCloseIdxs, idx) {
+			continue
+		}
+		callsNetSrvBody = append(callsNetSrvBody, call)
+	}
+	syscallsBody := ctx.generateSyscalls(callsNetSrvBody, len(vars) != 0)
+
+	// Get number of listen annotations
+	var callsNetSrvDereg []string
+	for rIdx := range listenFDs {
+		callsNetSrvDereg = append(callsNetSrvDereg, fmt.Sprintf("\tclose(UNIQUE_VAR(ctx->r)[%d]);", rIdx))
+	}
+	callsNetSrvDereg = append(callsNetSrvDereg, "\tfree(UNIQUE_VAR(ctx->r));")
+	syscallsNetSrvDereg := strings.Join(callsNetSrvDereg, "\n")
+
+	syscalls := syscallsBody
 
 	if ctx.opts.CSB {
 		results = ""
@@ -291,21 +364,23 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	}
 
 	replacements := map[string]string{
-		"PROCS":           fmt.Sprint(ctx.opts.Procs),
-		"REPEAT_TIMES":    fmt.Sprint(ctx.opts.RepeatTimes),
-		"NUM_CALLS":       fmt.Sprint(len(ctx.p.Calls)),
-		"MMAP_DATA":       strings.Join(mmapCalls, ""),
-		"SYSCALL_DEFINES": ctx.generateSyscallDefines(),
-		"SANDBOX_FUNC":    sandboxFunc,
-		"RESULTS":         results,
-		"SYSCALLS":        syscalls,
-		"NUM_NOP":         fmt.Sprint(ctx.opts.NumNop),
-		"NUMSUBDIRS":      fmt.Sprint(len(ctx.opts.SubDirs)),
-		"SUBDIRS":         subdirs,
-		"NUMFILESIZES":    fmt.Sprint(len(ctx.opts.FileSizes)),
-		"FILESIZES":       filesizes,
-		"NUMFILENAMES":    fmt.Sprint(len(ctx.opts.FileNames)),
-		"FILENAMES":       filenames,
+		"PROCS":                  fmt.Sprint(ctx.opts.Procs),
+		"REPEAT_TIMES":           fmt.Sprint(ctx.opts.RepeatTimes),
+		"NUM_CALLS":              fmt.Sprint(len(ctx.p.Calls)),
+		"MMAP_DATA":              strings.Join(mmapCalls, ""),
+		"SYSCALL_DEFINES":        ctx.generateSyscallDefines(),
+		"SANDBOX_FUNC":           sandboxFunc,
+		"RESULTS":                results,
+		"SYSCALLS":               syscalls,
+		"SYSCALLS_NET_SRV_REG":   syscallsNetSrvReg,
+		"SYSCALLS_NET_SRV_DEREG": syscallsNetSrvDereg,
+		"NUM_NOP":                fmt.Sprint(ctx.opts.NumNop),
+		"NUMSUBDIRS":             fmt.Sprint(len(ctx.opts.SubDirs)),
+		"SUBDIRS":                subdirs,
+		"NUMFILESIZES":           fmt.Sprint(len(ctx.opts.FileSizes)),
+		"FILESIZES":              filesizes,
+		"NUMFILENAMES":           fmt.Sprint(len(ctx.opts.FileNames)),
+		"FILENAMES":              filenames,
 	}
 
 	if !ctx.opts.Threaded && !ctx.opts.Repeat && ctx.opts.Sandbox == "" {
@@ -414,6 +489,9 @@ func (ctx *context) generateSyscalls(calls []string, hasVars bool) string {
 	if !opts.Threaded && !opts.Collide {
 		if len(calls) > 0 && (hasVars || opts.Trace) {
 			fmt.Fprintf(buf, "\tintptr_t res = 0;\n")
+			if opts.CSB {
+				fmt.Fprintf(buf, "\tV_UNUSED(res);\n")
+			}
 		}
 		if !ctx.opts.CSB {
 			fmt.Fprintf(buf, "\tif (write(1, \"executing program\\n\", sizeof(\"executing program\\n\") - 1)) {}\n")
@@ -631,6 +709,13 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			fdRes := arg0.(prog.ExecArgResult).Index
 
 			connectFDs[fdRes] = true
+		}
+
+		if callName == "listen" {
+			arg0 := call.Args[0]
+			fdRes := arg0.(prog.ExecArgResult).Index
+
+			listenFDs[fdRes] = true
 		}
 
 		if callName == "accept" || callName == "accept4" {
@@ -1032,14 +1117,14 @@ func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, resCopyout bool
 	}
 	fmt.Fprintf(w, "\n")
 	if resCopyout {
-		fmt.Fprintf(w, "\t\tUNIQUE_VAR(r)[%v] = res;\n", call.Index)
+		fmt.Fprintf(w, "\t\tUNIQUE_VAR(ctx->r)[%v] = res;\n", call.Index)
 	}
 	for _, copyout := range call.Copyout {
 		PTR_OFFSET_STR_ADDR := ""
 		if valInMMapRange(ctx, copyout.Addr) {
 			PTR_OFFSET_STR_ADDR = "+PTR_OFFSET"
 		}
-		fmt.Fprintf(w, "\t\tNONFAILING(UNIQUE_VAR(r)[%v] = *(uint%v*)(0x%xul%v));\n", copyout.Index, copyout.Size*8, copyout.Addr, PTR_OFFSET_STR_ADDR)
+		fmt.Fprintf(w, "\t\tNONFAILING(UNIQUE_VAR(ctx->r)[%v] = *(uint%v*)(0x%xul%v));\n", copyout.Index, copyout.Size*8, copyout.Addr, PTR_OFFSET_STR_ADDR)
 	}
 	if copyoutMultiple {
 		fmt.Fprintf(w, "\t}\n")
@@ -1159,7 +1244,7 @@ func handleBigEndian(arg prog.ExecArgConst, val string) string {
 }
 
 func (ctx *context) resultArgToStr(arg prog.ExecArgResult) string {
-	res := fmt.Sprintf("UNIQUE_VAR(r)[%v]", arg.Index)
+	res := fmt.Sprintf("UNIQUE_VAR(ctx->r)[%v]", arg.Index)
 	if arg.DivOp != 0 {
 		res = fmt.Sprintf("%v/%v", res, arg.DivOp)
 	}
