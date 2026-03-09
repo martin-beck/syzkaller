@@ -268,8 +268,8 @@ func sanitizeReadlinkat(call *prog.Call, subdirs map[string](bool)) map[string](
 	return subdirs
 }
 
-func sanitizeBindInet(call *prog.Call) {
-	a1 := call.Args[1].(*prog.PointerArg)
+func sanitizeSockaddrInArg(call *prog.Call, argNum int, sockTypeIn uint64) {
+	a1 := call.Args[argNum].(*prog.PointerArg)
 	// sockaddr_in argument
 	var d1 []prog.Arg
 	switch a1.Res.(type) {
@@ -282,27 +282,8 @@ func sanitizeBindInet(call *prog.Call) {
 	}
 	sockType := d1[0].(*prog.ConstArg).Val
 
-	if sockType != syscall.AF_INET {
+	if sockType != sockTypeIn {
 		panic("Expected type AF_INET for bind$inet sockaddr")
-	}
-}
-
-func sanitizeBindInet6(call *prog.Call) {
-	a1 := call.Args[1].(*prog.PointerArg)
-	// sockaddr_in6 argument
-	var d1 []prog.Arg
-	switch a1.Res.(type) {
-	case *prog.UnionArg:
-		d1 = a1.Res.(*prog.UnionArg).Option.(*prog.GroupArg).Inner
-	case *prog.GroupArg:
-		d1 = a1.Res.(*prog.GroupArg).Inner
-	default:
-		panic(fmt.Sprintf("Bind Inet IPv6 argument 1 unknown format %#v", a1.Res))
-	}
-	sockType := d1[0].(*prog.ConstArg).Val
-
-	if sockType != syscall.AF_INET6 {
-		panic("Expected type AF_INET6 for bind$inet sockaddr")
 	}
 }
 
@@ -390,9 +371,9 @@ func sanitizeProgram(p *prog.Prog, progName string) (*prog.Prog, map[string](boo
 		case "connect$inet":
 			sanitizeConnect(call)
 		case "bind$inet":
-			sanitizeBindInet(call)
+			sanitizeSockaddrInArg(call, 1, syscall.AF_INET)
 		case "bind$inet6":
-			sanitizeBindInet6(call)
+			sanitizeSockaddrInArg(call, 1, syscall.AF_INET6)
 		}
 	}
 
