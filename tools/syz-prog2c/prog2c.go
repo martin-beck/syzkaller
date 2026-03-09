@@ -82,6 +82,9 @@ func sanitizeMaxWriteSize(call *prog.Call, idxBuffer int, idxSize int, maxWriteS
 func sanitizePath(path []byte) ([]byte, string) {
 	ret := path
 	f := string(ret[:])
+	if len(f) == 0 {
+		return path, "."
+	}
 	if f[0] == '/' {
 		ret = []byte("." + f)
 	}
@@ -265,38 +268,29 @@ func sanitizeReadlinkat(call *prog.Call, subdirs map[string](bool)) map[string](
 	return subdirs
 }
 
-func sanitizeBindInet(call *prog.Call) {
-	a1 := call.Args[1].(*prog.PointerArg)
-	// path argument
-	d1 := a1.Res.(*prog.UnionArg).Option.(*prog.GroupArg).Inner
+func sanitizeSockaddrInArg(call *prog.Call, argNum int, sockTypeIn uint64) {
+	a1 := call.Args[argNum].(*prog.PointerArg)
+	// sockaddr_in argument
+	var d1 []prog.Arg
+	switch a1.Res.(type) {
+	case *prog.UnionArg:
+		d1 = a1.Res.(*prog.UnionArg).Option.(*prog.GroupArg).Inner
+	case *prog.GroupArg:
+		d1 = a1.Res.(*prog.GroupArg).Inner
+	default:
+		verStr := "IPv4"
+		if sockTypeIn == syscall.AF_INET6 {
+			verStr = "IPv6"
+		}
+		panic(fmt.Sprintf("Bind Inet %s argument 1 unknown format %#v", verStr, a1.Res))
+	}
 	sockType := d1[0].(*prog.ConstArg).Val
 
-	if sockType != syscall.AF_INET {
-		panic("Expected type AF_INET for bind$inet sockaddr")
+	if sockType != sockTypeIn {
+		panic("Expected type AF_INET/AF_INET6 for bind$inet sockaddr")
 	}
 }
 
-func sanitizeBindInet6(call *prog.Call) {
-	a1 := call.Args[1].(*prog.PointerArg)
-	// path argument
-	d1 := a1.Res.(*prog.GroupArg).Inner
-	sockType := d1[0].(*prog.ConstArg).Val
-
-	if sockType != syscall.AF_INET6 {
-		panic("Expected type AF_INET6 for bind$inet sockaddr")
-	}
-}
-
-//	addr: ptr[in, sockaddr_in] {
-//	  sockaddr_in {
-//	    family: const = 0x2 (2 bytes)
-//	    port: int16be = 0xc38 (2 bytes)
-//	    addr: union ipv4_addr {
-//	      rand_addr: int32be = 0x7f000001 (4 bytes)
-//	    }
-//	    pad = 0x0 (8 bytes)
-//	  }
-//	}
 func sanitizeConnect(call *prog.Call) {
 	a1 := call.Args[1].(*prog.PointerArg)
 	// struct sockaddr *addr
@@ -309,9 +303,6 @@ func sanitizeConnect(call *prog.Call) {
 
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint32(b, uint32(addr))
-
-	fmt.Fprintf(os.Stderr, "Connect Port: %d\n", port)
-	fmt.Fprintf(os.Stderr, "Connect Addr: %d.%d.%d.%d\n", b[0], b[1], b[2], b[3])
 
 	b[0] = 127
 	b[1] = 0
@@ -371,9 +362,9 @@ func sanitizeProgram(p *prog.Prog, progName string) (*prog.Prog, map[string](boo
 		case "connect$inet":
 			sanitizeConnect(call)
 		case "bind$inet":
-			sanitizeBindInet(call)
+			sanitizeSockaddrInArg(call, 1, syscall.AF_INET)
 		case "bind$inet6":
-			sanitizeBindInet6(call)
+			sanitizeSockaddrInArg(call, 1, syscall.AF_INET6)
 		}
 	}
 
