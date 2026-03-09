@@ -287,16 +287,6 @@ func sanitizeSockaddrInArg(call *prog.Call, argNum int, sockTypeIn uint64) {
 	}
 }
 
-//	addr: ptr[in, sockaddr_in] {
-//	  sockaddr_in {
-//	    family: const = 0x2 (2 bytes)
-//	    port: int16be = 0xc38 (2 bytes)
-//	    addr: union ipv4_addr {
-//	      rand_addr: int32be = 0x7f000001 (4 bytes)
-//	    }
-//	    pad = 0x0 (8 bytes)
-//	  }
-//	}
 func sanitizeConnect(call *prog.Call) {
 	a1 := call.Args[1].(*prog.PointerArg)
 	// struct sockaddr *addr
@@ -309,9 +299,6 @@ func sanitizeConnect(call *prog.Call) {
 
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint32(b, uint32(addr))
-
-	fmt.Fprintf(os.Stderr, "Connect Port: %d\n", port)
-	fmt.Fprintf(os.Stderr, "Connect Addr: %d.%d.%d.%d\n", b[0], b[1], b[2], b[3])
 
 	b[0] = 127
 	b[1] = 0
