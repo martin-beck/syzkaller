@@ -278,7 +278,11 @@ func sanitizeSockaddrInArg(call *prog.Call, argNum int, sockTypeIn uint64) {
 	case *prog.GroupArg:
 		d1 = a1.Res.(*prog.GroupArg).Inner
 	default:
-		panic(fmt.Sprintf("Bind Inet %s argument 1 unknown format %#v", a1.Res, sockTypeIn == syscall.AF_INET? "IPv4": "IPv6"))
+		verStr := "IPv4"
+		if sockTypeIn == syscall.AF_INET6 {
+			verStr = "IPv6"
+		}
+		panic(fmt.Sprintf("Bind Inet %s argument 1 unknown format %#v", verStr, a1.Res))
 	}
 	sockType := d1[0].(*prog.ConstArg).Val
 
