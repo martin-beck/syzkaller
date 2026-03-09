@@ -5,6 +5,7 @@ package prog
 
 import (
 	"bytes"
+	"maps"
 	"fmt"
 	"reflect"
 
@@ -357,8 +358,8 @@ func relatedCallsFullThread(p0 *Prog, callIndex0 int, c *Cache, processedCallsIn
 	keepCalls := make([]bool, len(p0.Calls))
 	keepCalls[callIndex0] = true
 	removeCalls := make([]bool, len(p0.Calls))
-	usedBF := usesBF(p0.Calls[callIndex0], callIndex0, c)
-	used := usesCache(p0.Calls[callIndex0], callIndex0, c)
+	usedBF := usesBF(p0.Calls[callIndex0], callIndex0, c).Copy()
+	used := maps.Clone(usesCache(p0.Calls[callIndex0], callIndex0, c))
 	tid := p0.Calls[callIndex0].StraceTid
 	if retBF(p0.Calls[callIndex0], callIndex0, c).BitSet().None() {
 		removeCalls[callIndex0] = true
