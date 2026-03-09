@@ -283,7 +283,7 @@ func sanitizeSockaddrInArg(call *prog.Call, argNum int, sockTypeIn uint64) {
 	sockType := d1[0].(*prog.ConstArg).Val
 
 	if sockType != sockTypeIn {
-		panic("Expected type AF_INET for bind$inet sockaddr")
+		panic("Expected type AF_INET/AF_INET6 for bind$inet sockaddr")
 	}
 }
 
