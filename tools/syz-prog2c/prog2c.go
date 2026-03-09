@@ -82,6 +82,9 @@ func sanitizeMaxWriteSize(call *prog.Call, idxBuffer int, idxSize int, maxWriteS
 func sanitizePath(path []byte) ([]byte, string) {
 	ret := path
 	f := string(ret[:])
+	if len(f) == 0 {
+		return path, "."
+	}
 	if f[0] == '/' {
 		ret = []byte("." + f)
 	}
@@ -267,8 +270,16 @@ func sanitizeReadlinkat(call *prog.Call, subdirs map[string](bool)) map[string](
 
 func sanitizeBindInet(call *prog.Call) {
 	a1 := call.Args[1].(*prog.PointerArg)
-	// path argument
-	d1 := a1.Res.(*prog.UnionArg).Option.(*prog.GroupArg).Inner
+	// sockaddr_in argument
+	var d1 []prog.Arg
+	switch a1.Res.(type) {
+	case *prog.UnionArg:
+		d1 = a1.Res.(*prog.UnionArg).Option.(*prog.GroupArg).Inner
+	case *prog.GroupArg:
+		d1 = a1.Res.(*prog.GroupArg).Inner
+	default:
+		panic(fmt.Sprintf("Bind Inet IPv4 argument 1 unknown format %#v", a1.Res))
+	}
 	sockType := d1[0].(*prog.ConstArg).Val
 
 	if sockType != syscall.AF_INET {
@@ -278,8 +289,16 @@ func sanitizeBindInet(call *prog.Call) {
 
 func sanitizeBindInet6(call *prog.Call) {
 	a1 := call.Args[1].(*prog.PointerArg)
-	// path argument
-	d1 := a1.Res.(*prog.GroupArg).Inner
+	// sockaddr_in6 argument
+	var d1 []prog.Arg
+	switch a1.Res.(type) {
+	case *prog.UnionArg:
+		d1 = a1.Res.(*prog.UnionArg).Option.(*prog.GroupArg).Inner
+	case *prog.GroupArg:
+		d1 = a1.Res.(*prog.GroupArg).Inner
+	default:
+		panic(fmt.Sprintf("Bind Inet IPv6 argument 1 unknown format %#v", a1.Res))
+	}
 	sockType := d1[0].(*prog.ConstArg).Val
 
 	if sockType != syscall.AF_INET6 {
