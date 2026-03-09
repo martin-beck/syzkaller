@@ -364,7 +364,6 @@ func relatedCallsFullThread(p0 *Prog, callIndex0 int, c *Cache, processedCallsIn
 		removeCalls[callIndex0] = true
 	}
 	numCalls := len(p0.Calls)
-	matchingTIDOrAllowed := true
 
 	for {
 		n := len(used)
@@ -374,11 +373,7 @@ func relatedCallsFullThread(p0 *Prog, callIndex0 int, c *Cache, processedCallsIn
 			}
 
 			call := p0.Calls[i]
-			if call.StraceTid == tid || checkAllowedCalls(call) {
-				matchingTIDOrAllowed = true
-			} else {
-				matchingTIDOrAllowed = false
-			}
+			matchingTIDOrAllowed := (call.StraceTid == tid || checkAllowedCalls(call))
 			var used1 map[any]bool
 			var usedBF1 *bloom.BloomFilter
 			if matchingTIDOrAllowed {

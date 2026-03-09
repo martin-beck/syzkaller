@@ -4,11 +4,13 @@
 package main
 
 import (
+	"cmp"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -106,20 +108,39 @@ func filterOutPolls(p *prog.Prog) *prog.Prog {
 	return px
 }
 
-func generateAllProgs(p *prog.Prog, threadList []int64) (pF *prog.Prog) {
-	numCalls := len(p.Calls)
-	processedCalls := make([]bool, numCalls)
-	processedCalls[numCalls-1] = false
-	keepCalls := make([]bool, numCalls)
-	nonStartCalls := make([]bool, numCalls)
-	outPrefixesIdx := make(map[string]int)
+func getOutPrefix() string {
 	prefixLen := 2
+	progBase := filepath.Base(*flagProg)
+	splitBase := strings.Split(progBase, "_")
+	if len(splitBase) > 1 && (splitBase[0] == "thread" || splitBase[0] == "program") {
+		progBase = strings.Join(splitBase[1:], "_")
+		prefixLen = 1
+	}
+	splitBase = strings.Split(progBase, "_")
+	if len(splitBase) < prefixLen {
+		prefixLen = len(splitBase)
+	}
+	outPrefix := strings.Join(splitBase[:prefixLen], "_")
+	return outPrefix
+}
+
+func newCache(numCalls int) *prog.Cache {
 	c := new(prog.Cache)
 	c.Uses = make([]map[any]bool, numCalls)
 	c.Rets = make([]map[any]bool, numCalls)
 	c.UsesBFs = make([]*bloom.BloomFilter, numCalls)
 	c.RetsBFs = make([]*bloom.BloomFilter, numCalls)
+	return c
+}
+
+func generateAllProgs(p *prog.Prog, threadList []int64) {
+	numCalls := len(p.Calls)
+	outPrefixesIdx := make(map[string]int)
+	outPrefix := getOutPrefix()
+
 	fmt.Fprintf(os.Stderr, "Total number of syscalls: %d\n", numCalls)
+
+	c := newCache(numCalls)
 
 	totalStartSyscalls := 0
 	usedStartSyscalls := 0
@@ -130,6 +151,9 @@ func generateAllProgs(p *prog.Prog, threadList []int64) (pF *prog.Prog) {
 
 	// go over all thread IDs in decreasing depth starting with the highest depth
 	for idx, tid := range threadList {
+		processedCalls := make([]bool, numCalls)
+		nonStartCalls := make([]bool, numCalls)
+
 		numCallsTid := len(syscallIDxPerTid[tid])
 		fmt.Printf("[%d/%d] Working on TID %d - %d syscalls\n", idx+1, len(threadList), tid, numCallsTid)
 
@@ -140,41 +164,33 @@ func generateAllProgs(p *prog.Prog, threadList []int64) (pF *prog.Prog) {
 					status = fmt.Sprintf("-- Progress TID [%03.1f/100%%] -- Progress overall [%03.1f/100%%] --", (100.0 * float32(subIdx) / float32(numCallsTid)), (100 * float32(usedStartSyscalls) / float32(totalStartSyscalls)))
 					fmt.Fprintf(os.Stderr, "%s\r", status)
 				}
-				pF, processedCalls, keepCalls = generateMinimizedProg(p, i, processedCalls, c)
-				nonStartCalls = prog.Sliceor(prog.Sliceor(processedCalls, keepCalls), nonStartCalls)
+				pF, pCallsOut, keepCalls := generateMinimizedProg(p, i, processedCalls, c)
+				nonStartCalls = prog.Sliceor(prog.Sliceor(pCallsOut, keepCalls), nonStartCalls)
+				processedCalls = pCallsOut
 
 				if len(pF.Calls) >= *flagMinCalls {
-					prefixLen = 2
-					progBase := filepath.Base(*flagProg)
-					splitBase := strings.Split(progBase, "_")
-					if len(splitBase) > 1 && (splitBase[0] == "thread" || splitBase[0] == "program") {
-						progBase = strings.Join(splitBase[1:], "_")
-						prefixLen = 1
-					}
+					pF = filterOutPolls(pF)
 
 					scallHist := genSyscallHist(pF)
 					topNames := stat.TopKNames(scallHist, *flagTopCalls)
-					outPrefix := strings.Join(strings.Split(progBase, "_")[:prefixLen], "_") + "_" + strings.Join(topNames, "_")
-					_, ok := outPrefixesIdx[outPrefix]
+					prefix := outPrefix + "_" + strings.Join(topNames, "_")
+
+					_, ok := outPrefixesIdx[prefix]
 					if !ok {
-						outPrefixesIdx[outPrefix] = 0
+						outPrefixesIdx[prefix] = 0
 					} else {
-						outPrefixesIdx[outPrefix]++
+						outPrefixesIdx[prefix]++
 					}
 
-					pF = filterOutPolls(pF)
-
 					fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
-					fmt.Fprintf(os.Stderr, "    Extracted %d syscalls into %s_%d\n", len(pF.Calls), outPrefix, outPrefixesIdx[outPrefix])
-					saveProg2File(pF, outPrefix, outPrefixesIdx[outPrefix])
+					fmt.Fprintf(os.Stderr, "    Extracted %d syscalls into %s_%d\n", len(pF.Calls), prefix, outPrefixesIdx[prefix])
+					saveProg2File(pF, prefix, outPrefixesIdx[prefix])
 				}
 			}
 			i--
 		}
 		fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 	}
-
-	return
 }
 
 func genSyscallHist(p *prog.Prog) map[string]int {
@@ -214,6 +230,12 @@ func buildThreadList(p *prog.Prog) []int64 {
 	for t := range tt {
 		tl = append(tl, t)
 	}
+
+	slices.SortStableFunc(tl, func(a, b int64) int {
+		return cmp.Compare(a, b)
+	})
+	slices.Reverse(tl)
+
 	return tl
 }
 
