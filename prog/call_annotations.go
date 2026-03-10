@@ -67,9 +67,10 @@ func (p *Prog) AnnotateResources(callIdx int) {
 	call := p.Calls[callIdx]
 
 	switch call.Meta.Name {
-	case "accept4":
-		resArg = call.Ret.Res
+	case "accept$inet", "accept$inet6":
+		resArg = call.Ret
 		resTag = ACCEPT
+		// fmt.Fprintf(os.Stderr, "Accept4 Resource Arg:\n\t\t%#v\n", resArg)
 	case "bind$inet", "bind$inet6":
 		resArg = call.Args[0].(*ResultArg).Res
 		resTag = BIND
@@ -84,6 +85,15 @@ func (p *Prog) AnnotateResources(callIdx int) {
 		// if slices.Contains(annotations, resTag) {
 		// 	panic("Call has resource with the same tag already.\n")
 		// }
+
+		// only use the first ACCEPT, discard any further ones
+		if resTag == ACCEPT {
+			for _, an := range p.Annotations {
+				if an.Tag == ACCEPT {
+					return
+				}
+			}
+		}
 		p.Annotations = append(p.Annotations, CallAnnotation{resTag, resArg, callIdx, resID})
 		// fmt.Fprintf(os.Stderr, "Annotating %s with tag %d\n", call.Meta.CallName, resTag)
 	}
