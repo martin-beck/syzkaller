@@ -328,6 +328,10 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		}
 	}
 
+	netSrvListenIdxsAll := ctx.p.GetAnnotationIndices(prog.LISTEN)
+	netSrvAcceptIdxsAll := ctx.p.GetAnnotationIndices(prog.ACCEPT)
+	// fmt.Fprintf(os.Stderr, "Accept idxs:\n%#v\n", netSrvAcceptIdxsAll)
+
 	// generate c source for reg function
 	syscallsNetSrvReg := ctx.generateSyscalls(callsNetSrvReg, len(vars) != 0)
 
@@ -338,6 +342,9 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 			continue
 		}
 		if slices.Contains(netSrvCloseIdxs, idx) {
+			continue
+		}
+		if slices.Contains(netSrvListenIdxsAll, idx) && !slices.Contains(netSrvAcceptIdxsAll, idx) {
 			continue
 		}
 		callsNetSrvBody = append(callsNetSrvBody, call)
