@@ -323,7 +323,8 @@ func sanitizeProgram(p *prog.Prog, progName string) (*prog.Prog, map[string](boo
 	filesizes := make(map[uint64](uint64))
 	filemap := make(map[uint64](string))
 	maxWriteSize := uint64(0)
-	for _, call := range p.Calls {
+	for idx, call := range p.Calls {
+		p.AnnotateResources(idx)
 		switch call.Meta.Name {
 		case "openat":
 			subdirs, filemap = sanitizeOpenAt(call, subdirs, filemap)

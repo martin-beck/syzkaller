@@ -22,6 +22,11 @@ import (
 	_ "github.com/google/syzkaller/sys"
 )
 
+type TIDIndices struct {
+	Tid     int64
+	Indices []int
+}
+
 var (
 	flagOS   = flag.String("os", runtime.GOOS, "target os")
 	flagArch = flag.String("arch", runtime.GOARCH, "target arch")

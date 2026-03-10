@@ -29,6 +29,7 @@ import (
 	"math/bits"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -59,6 +60,8 @@ var (
 	NetOpsFDs         = make(map[uint64]([]NetOpSize))
 	NetOpsFDsConnect  = make(map[uint64]([]NetOpSize))
 	NetOpsFDsAccept   = make(map[uint64]([]NetOpSize))
+	listenFDs         = make(map[uint64](bool))
+	initFDs           = make(map[uint64](bool))
 )
 
 func AddToNetOps(res uint64, op NetOp, size uint64) {
@@ -226,7 +229,26 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	metaData := ""
 
 	ctx.filterCalls()
-	calls, vars, err := ctx.generateProgCalls(ctx.p, ctx.opts.Trace, ctx.opts.CallComments)
+
+	var excludeIdices []int
+
+	netSrvListen := prog.CallAnnotationMarker{prog.LISTEN, "listen", prog.ENDINCLUDE}
+	netSrvListenIdxs := ctx.p.GetAnnotationIndicesMarker(netSrvListen)
+	if len(netSrvListenIdxs) > 0 {
+		// got all indices of calls that use the listen socket in the program
+		// fmt.Fprintf(os.Stderr, "Found LISTEN-listen indices:\n%#v\n", netSrvListenIdxs)
+		excludeIdices = append(excludeIdices, netSrvListenIdxs...)
+	}
+
+	netSrvClose := prog.CallAnnotationMarker{prog.LISTEN, "close", prog.STARTINCLUDE}
+	netSrvCloseIdxs := ctx.p.GetAnnotationIndicesMarker(netSrvClose)
+	if len(netSrvCloseIdxs) > 0 {
+		// got all indices of calls that use the listen socket in the program
+		// fmt.Fprintf(os.Stderr, "Found LISTEN-close indices:\n%#v\n", netSrvCloseIdxs)
+		excludeIdices = append(excludeIdices, netSrvCloseIdxs...)
+	}
+
+	calls, vars, err := ctx.generateProgCalls(ctx.p, ctx.opts.Trace, ctx.opts.CallComments, netSrvListenIdxs)
 	if err != nil {
 		return nil, metaData, err
 	}
@@ -236,7 +258,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	// for a program and always very similar. Comments on these provide
 	// little-to-no additional context that can't be inferred from looking at
 	// the call arguments directly, and just make the source longer.
-	mmapCalls, _, err := ctx.generateProgCalls(mmapProg, false, false)
+	mmapCalls, _, err := ctx.generateProgCalls(mmapProg, false, false, []int{})
 	if err != nil {
 		return nil, metaData, err
 	}
@@ -253,21 +275,27 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	}
 
 	varsBuf := new(bytes.Buffer)
-	if len(vars) != 0 {
-		fmt.Fprintf(varsBuf, "uint64 UNIQUE_VAR(r)[%v] = {", len(vars))
-		for i, v := range vars {
-			if i != 0 {
-				fmt.Fprintf(varsBuf, ", ")
+	if !ctx.opts.CSB {
+		if len(vars) != 0 {
+			fmt.Fprintf(varsBuf, "uint64 UNIQUE_VAR(ctx->r)[%v] = {", len(vars))
+			for i, v := range vars {
+				if i != 0 {
+					fmt.Fprintf(varsBuf, ", ")
+				}
+				fmt.Fprintf(varsBuf, "0x%x", v)
 			}
-			fmt.Fprintf(varsBuf, "0x%x", v)
+			fmt.Fprintf(varsBuf, "};\n")
 		}
-		fmt.Fprintf(varsBuf, "};\n")
 	}
 
+	// Leaking file descriptors
 	closeBuf := new(bytes.Buffer)
 	for fdRes, open := range missedFDResources {
 		if open {
-			fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(r)[%v]);\n", fdRes)
+			// only close file descriptors that are not part if the reg init function
+			if initFDs[fdRes] != true {
+				fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(ctx->r)[%v]);\n", fdRes)
+			}
 		}
 	}
 
@@ -283,7 +311,48 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	sandboxFunc := generateSandboxFunctionSignature(ctx.opts.Sandbox, ctx.opts.SandboxArg, ctx)
 
 	results := varsBuf.String()
-	syscalls := ctx.generateSyscalls(calls, len(vars) != 0)
+
+	// initialization of resource array in reg function
+	var callsNetSrvReg []string
+	if len(vars) > 0 {
+		callsNetSrvReg = append(callsNetSrvReg, fmt.Sprintf("\tUNIQUE_VAR(ctx->r) = (uint64*)malloc(sizeof(uint64)*%d);\n", len(vars)))
+		for i, v := range vars {
+			callsNetSrvReg = append(callsNetSrvReg, fmt.Sprintf("\tUNIQUE_VAR(ctx->r)[%d] = 0x%x;\n", i, v))
+		}
+	}
+
+	// put syscalls into reg function if their index is stored in netSrvListenIdxs
+	for idx, call := range calls {
+		if slices.Contains(netSrvListenIdxs, idx) {
+			callsNetSrvReg = append(callsNetSrvReg, call)
+		}
+	}
+
+	// generate c source for reg function
+	syscallsNetSrvReg := ctx.generateSyscalls(callsNetSrvReg, len(vars) != 0)
+
+	// use all but reg and dereg syscalls
+	var callsNetSrvBody []string
+	for idx, call := range calls {
+		if slices.Contains(netSrvListenIdxs, idx) {
+			continue
+		}
+		if slices.Contains(netSrvCloseIdxs, idx) {
+			continue
+		}
+		callsNetSrvBody = append(callsNetSrvBody, call)
+	}
+	syscallsBody := ctx.generateSyscalls(callsNetSrvBody, len(vars) != 0)
+
+	// Get number of listen annotations
+	var callsNetSrvDereg []string
+	for rIdx := range listenFDs {
+		callsNetSrvDereg = append(callsNetSrvDereg, fmt.Sprintf("\tclose(UNIQUE_VAR(ctx->r)[%d]);", rIdx))
+	}
+	callsNetSrvDereg = append(callsNetSrvDereg, "\tfree(UNIQUE_VAR(ctx->r));")
+	syscallsNetSrvDereg := strings.Join(callsNetSrvDereg, "\n")
+
+	syscalls := syscallsBody
 
 	if ctx.opts.CSB {
 		results = ""
@@ -291,21 +360,23 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	}
 
 	replacements := map[string]string{
-		"PROCS":           fmt.Sprint(ctx.opts.Procs),
-		"REPEAT_TIMES":    fmt.Sprint(ctx.opts.RepeatTimes),
-		"NUM_CALLS":       fmt.Sprint(len(ctx.p.Calls)),
-		"MMAP_DATA":       strings.Join(mmapCalls, ""),
-		"SYSCALL_DEFINES": ctx.generateSyscallDefines(),
-		"SANDBOX_FUNC":    sandboxFunc,
-		"RESULTS":         results,
-		"SYSCALLS":        syscalls,
-		"NUM_NOP":         fmt.Sprint(ctx.opts.NumNop),
-		"NUMSUBDIRS":      fmt.Sprint(len(ctx.opts.SubDirs)),
-		"SUBDIRS":         subdirs,
-		"NUMFILESIZES":    fmt.Sprint(len(ctx.opts.FileSizes)),
-		"FILESIZES":       filesizes,
-		"NUMFILENAMES":    fmt.Sprint(len(ctx.opts.FileNames)),
-		"FILENAMES":       filenames,
+		"PROCS":                  fmt.Sprint(ctx.opts.Procs),
+		"REPEAT_TIMES":           fmt.Sprint(ctx.opts.RepeatTimes),
+		"NUM_CALLS":              fmt.Sprint(len(ctx.p.Calls)),
+		"MMAP_DATA":              strings.Join(mmapCalls, ""),
+		"SYSCALL_DEFINES":        ctx.generateSyscallDefines(),
+		"SANDBOX_FUNC":           sandboxFunc,
+		"RESULTS":                results,
+		"SYSCALLS":               syscalls,
+		"SYSCALLS_NET_SRV_REG":   syscallsNetSrvReg,
+		"SYSCALLS_NET_SRV_DEREG": syscallsNetSrvDereg,
+		"NUM_NOP":                fmt.Sprint(ctx.opts.NumNop),
+		"NUMSUBDIRS":             fmt.Sprint(len(ctx.opts.SubDirs)),
+		"SUBDIRS":                subdirs,
+		"NUMFILESIZES":           fmt.Sprint(len(ctx.opts.FileSizes)),
+		"FILESIZES":              filesizes,
+		"NUMFILENAMES":           fmt.Sprint(len(ctx.opts.FileNames)),
+		"FILENAMES":              filenames,
 	}
 
 	if !ctx.opts.Threaded && !ctx.opts.Repeat && ctx.opts.Sandbox == "" {
@@ -414,6 +485,9 @@ func (ctx *context) generateSyscalls(calls []string, hasVars bool) string {
 	if !opts.Threaded && !opts.Collide {
 		if len(calls) > 0 && (hasVars || opts.Trace) {
 			fmt.Fprintf(buf, "\tintptr_t res = 0;\n")
+			if opts.CSB {
+				fmt.Fprintf(buf, "\tV_UNUSED(res);\n")
+			}
 		}
 		if !ctx.opts.CSB {
 			fmt.Fprintf(buf, "\tif (write(1, \"executing program\\n\", sizeof(\"executing program\\n\") - 1)) {}\n")
@@ -497,7 +571,7 @@ func generateComment(call *prog.Call) string {
 	return linesToCStyleComment(lines)
 }
 
-func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool) ([]string, []uint64, error) {
+func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool, initIndices []int) ([]string, []uint64, error) {
 	msgSizes := make([]uint64, len(p.Calls))
 	var comments []string
 	if addComments {
@@ -539,12 +613,12 @@ func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool) ([]
 	if err != nil {
 		return nil, nil, err
 	}
-	calls, vars := ctx.generateCalls(decoded, trace, addComments, comments, msgSizes)
+	calls, vars := ctx.generateCalls(decoded, trace, addComments, comments, msgSizes, initIndices)
 	return calls, vars, nil
 }
 
 func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
-	callComments []string, msgSizes []uint64) ([]string, []uint64) {
+	callComments []string, msgSizes []uint64, initIndices []int) ([]string, []uint64) {
 	var calls []string
 	csumSeq := 0
 	for ci, call := range p.Calls {
@@ -564,12 +638,17 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		resCopyout := call.Index != prog.ExecNoCopyout
 		argCopyout := len(call.Copyout) != 0
 
-		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace)
+		initCall := false
+		if slices.Contains(initIndices, ci) {
+			initCall = true
+		}
+
+		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall)
 
 		if call.Props.Rerun > 0 {
 			fmt.Fprintf(w, "\tfor (int i = 0; i < %v; i++) {\n", call.Props.Rerun)
 			// Rerun invocations should not affect the result value.
-			ctx.emitCall(w, call, ci, false, false)
+			ctx.emitCall(w, call, ci, false, false, initCall)
 			fmt.Fprintf(w, "\t}\n")
 		}
 		// Copyout.
@@ -633,6 +712,13 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			connectFDs[fdRes] = true
 		}
 
+		if callName == "listen" {
+			arg0 := call.Args[0]
+			fdRes := arg0.(prog.ExecArgResult).Index
+
+			listenFDs[fdRes] = true
+		}
+
 		if callName == "accept" || callName == "accept4" {
 			fdRes := call.Index
 
@@ -670,7 +756,7 @@ func isNative(sysTarget *targets.Target, callName string) bool {
 	return sysTarget.HasCallNumber(callName) && !trampoline
 }
 
-func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCopyout, trace bool) {
+func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCopyout, trace bool, initCall bool) {
 	native := isNative(ctx.sysTarget, call.Meta.CallName)
 	fmt.Fprintf(w, "\t")
 	if !native {
@@ -688,7 +774,7 @@ func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCo
 	if haveCopyout || trace {
 		fmt.Fprintf(w, "res = ")
 	}
-	w.WriteString(ctx.fmtCallBody(call))
+	w.WriteString(ctx.fmtCallBody(call, initCall))
 	if !native {
 		fmt.Fprintf(w, ")") // close NONFAILING macro
 	}
@@ -723,7 +809,7 @@ func valInMMapRange(ctx *context, val uint64) bool {
 	return false
 }
 
-func (ctx *context) fmtCallBody(call prog.ExecCall) string {
+func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool) string {
 	native := isNative(ctx.sysTarget, call.Meta.CallName)
 	callName, ok := ctx.sysTarget.SyscallTrampolines[call.Meta.CallName]
 	if !ok {
@@ -872,6 +958,9 @@ func (ctx *context) fmtCallBody(call prog.ExecCall) string {
 
 			argsStrs = append(argsStrs, com+handleBigEndian(arg, ctx.constArgToStr(arg, native))+PTR_OFFSET_STR)
 		case prog.ExecArgResult:
+			if initCall {
+				initFDs[arg.Index] = true
+			}
 			if arg.Format != prog.FormatNative && arg.Format != prog.FormatBigEndian {
 				panic("string format in syscall argument")
 			}
@@ -1032,14 +1121,15 @@ func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, resCopyout bool
 	}
 	fmt.Fprintf(w, "\n")
 	if resCopyout {
-		fmt.Fprintf(w, "\t\tUNIQUE_VAR(r)[%v] = res;\n", call.Index)
+		initFDs[call.Index] = true
+		fmt.Fprintf(w, "\t\tUNIQUE_VAR(ctx->r)[%v] = res;\n", call.Index)
 	}
 	for _, copyout := range call.Copyout {
 		PTR_OFFSET_STR_ADDR := ""
 		if valInMMapRange(ctx, copyout.Addr) {
 			PTR_OFFSET_STR_ADDR = "+PTR_OFFSET"
 		}
-		fmt.Fprintf(w, "\t\tNONFAILING(UNIQUE_VAR(r)[%v] = *(uint%v*)(0x%xul%v));\n", copyout.Index, copyout.Size*8, copyout.Addr, PTR_OFFSET_STR_ADDR)
+		fmt.Fprintf(w, "\t\tNONFAILING(UNIQUE_VAR(ctx->r)[%v] = *(uint%v*)(0x%xul%v));\n", copyout.Index, copyout.Size*8, copyout.Addr, PTR_OFFSET_STR_ADDR)
 	}
 	if copyoutMultiple {
 		fmt.Fprintf(w, "\t}\n")
@@ -1159,7 +1249,7 @@ func handleBigEndian(arg prog.ExecArgConst, val string) string {
 }
 
 func (ctx *context) resultArgToStr(arg prog.ExecArgResult) string {
-	res := fmt.Sprintf("UNIQUE_VAR(r)[%v]", arg.Index)
+	res := fmt.Sprintf("UNIQUE_VAR(ctx->r)[%v]", arg.Index)
 	if arg.DivOp != 0 {
 		res = fmt.Sprintf("%v/%v", res, arg.DivOp)
 	}
