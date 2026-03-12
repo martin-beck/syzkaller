@@ -251,5 +251,19 @@ func main() {
 
 	threads := buildThreadList(p)
 
+	for ci, c := range p.Calls {
+		switch c.Meta.Name {
+		case "io_setup":
+			fmt.Fprintf(os.Stderr, "  Idx %d io_setup\n", ci)
+			fmt.Fprintf(os.Stderr, "    Arg 1 io_context_t: %#v\n", c.Args[1])
+		case "io_getevents":
+			fmt.Fprintf(os.Stderr, "  Idx %d io_getevents\n", ci)
+			fmt.Fprintf(os.Stderr, "    Arg 0 io_context_t: %#v\n", c.Args[0])
+			return
+		}
+	}
+
+	return
+
 	generateAllProgs(p, threads)
 }

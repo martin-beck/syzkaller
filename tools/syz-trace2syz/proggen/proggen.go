@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"slices"
 
 	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/prog"
@@ -71,6 +72,9 @@ type context struct {
 
 // genProg converts a trace to one of our programs.
 func genProg(trace *parser.Trace, target *prog.Target, argLength bool) *prog.Prog {
+	interest = append(interest, "io_setup")
+	interest = append(interest, "io_getevents")
+
 	retCache := newRCache()
 	ctx := &context{
 		builder:     prog.MakeProgGen(target),
@@ -105,7 +109,12 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength bool) *prog.Pro
 	return p
 }
 
+var interest []string
+
 func (ctx *context) genCall() *prog.Call {
+	// if slices.Contains(interest, ctx.currentStraceCall.CallName) {
+	// 	log.Logf(0, "parsing call: %s", ctx.currentStraceCall.CallName)
+	// }
 	log.Logf(3, "parsing call: %s", ctx.currentStraceCall.CallName)
 	straceCall := ctx.currentStraceCall
 	meta := ctx.Select(straceCall)
@@ -121,8 +130,31 @@ func (ctx *context) genCall() *prog.Call {
 		if i < len(straceCall.Args) {
 			strArg = straceCall.Args[i]
 		}
+		// if slices.Contains(interest, ctx.currentStraceCall.CallName) {
+		// 	fmt.Fprintf(os.Stderr, "  Arg %d: verbose: %#v\n", i, syzCall.Meta.Args[i])
+		// }
 		res := ctx.genArg(syzCall.Meta.Args[i].Type, prog.DirIn, strArg)
 		syzCall.Args = append(syzCall.Args, res)
+		arg := syzCall.Meta.Args[i]
+		ptrType, isPtr := arg.Type.(*prog.PtrType)
+		if !isPtr || ptrType.ElemDir != prog.DirOut {
+			continue
+		}
+		resType, isRes := ptrType.Elem.(*prog.ResourceType)
+		if !isRes {
+			continue
+		}
+		constArg, ok := res.(*prog.ConstArg)
+		if !ok {
+			continue
+		}
+		if syzCall.Ret == nil || syzCall.Ret.Val < 0 {
+			continue
+		}
+		ctx.returnCache.cache(resType, strArg, prog.MakeResultArg(resType, prog.DirOut, nil, constArg.Val))
+		if slices.Contains(interest, ctx.currentStraceCall.CallName) {
+			fmt.Fprintf(os.Stderr, "Found out ptr argument\n")
+		}
 	}
 	ctx.genResult(syzCall.Meta.Ret, straceCall.Ret)
 	syzCall.StraceRetVal = straceCall.Ret
@@ -373,13 +405,19 @@ func (ctx *context) genPtr(syzType *prog.PtrType, dir prog.Dir, traceType parser
 		if a.Val() == 0 {
 			return prog.MakeSpecialPointerArg(syzType, dir, 0)
 		}
+		_, isRes := syzType.Elem.(*prog.ResourceType)
+		if dir == prog.DirIn && isRes {
+			res := ctx.genArg(syzType.Elem, syzType.ElemDir, traceType)
+			fmt.Fprintf(os.Stderr, "Ptr->Res\n")
+			return res
+		}
 		// Likely have a type of the form bind(3, 0xfffffffff, [3]);
 		res := syzType.Elem.DefaultArg(syzType.ElemDir)
 		return ctx.addr(syzType, dir, res.Size(), res)
-	default:
-		res := ctx.genArg(syzType.Elem, syzType.ElemDir, a)
-		return ctx.addr(syzType, dir, res.Size(), res)
 	}
+	res := ctx.genArg(syzType.Elem, syzType.ElemDir, traceType)
+	return ctx.addr(syzType, dir, res.Size(), res)
+	// return res
 }
 
 func (ctx *context) genConst(syzType prog.Type, dir prog.Dir, traceType parser.IrType) prog.Arg {
@@ -433,15 +471,23 @@ func (ctx *context) genConst(syzType prog.Type, dir prog.Dir, traceType parser.I
 
 func (ctx *context) genResource(syzType *prog.ResourceType, dir prog.Dir, traceType parser.IrType) prog.Arg {
 	if dir == prog.DirOut {
-		log.Logf(2, "resource returned by call argument: %s", traceType.String())
 		res := prog.MakeResultArg(syzType, dir, nil, syzType.Default())
 		ctx.returnCache.cache(syzType, traceType, res)
+		if slices.Contains(interest, ctx.currentStraceCall.CallName) {
+			log.Logf(0, "%s\n    resource type %#v\n    returned by call argument: %s\n   Created resource: %#v", ctx.currentStraceCall.CallName, syzType, traceType.String(), res)
+		}
 		return res
 	}
 	switch a := traceType.(type) {
 	case parser.Constant:
 		val := a.Val()
+		// if slices.Contains(interest, ctx.currentStraceCall.CallName) {
+		// 	log.Logf(0, "%s\n    resource type %#v\n    returned by call argument: %s", ctx.currentStraceCall.CallName, syzType, traceType.String())
+		// }
 		if arg := ctx.returnCache.get(syzType, traceType); arg != nil {
+			if slices.Contains(interest, ctx.currentStraceCall.CallName) {
+				log.Logf(0, "Cache result for call %s\n", ctx.currentStraceCall.CallName)
+			}
 			res := prog.MakeResultArg(syzType, dir, arg.(*prog.ResultArg), syzType.Default())
 			return res
 		}
