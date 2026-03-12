@@ -173,8 +173,8 @@ func generateAllProgs(p *prog.Prog, threadList []int64) {
 				nonStartCalls = prog.Sliceor(prog.Sliceor(pCallsOut, keepCalls), nonStartCalls)
 				processedCalls = pCallsOut
 
+				pF = filterOutPolls(pF)
 				if len(pF.Calls) >= *flagMinCalls {
-					pF = filterOutPolls(pF)
 
 					scallHist := genSyscallHist(pF)
 					topNames := stat.TopKNames(scallHist, *flagTopCalls)
