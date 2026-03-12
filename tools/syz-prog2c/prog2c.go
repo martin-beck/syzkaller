@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"flag"
@@ -79,22 +80,26 @@ func sanitizeMaxWriteSize(call *prog.Call, idxBuffer int, idxSize int, maxWriteS
 
 }
 
+func removeTrailingNullChars(b []byte) []byte {
+	return bytes.TrimRight(b, "\x00")
+}
+
 func sanitizePath(path []byte) ([]byte, string) {
 	ret := path
-	f := string(ret[:])
+	f := string(removeTrailingNullChars(ret))
 	if len(f) == 0 {
 		return path, "."
 	}
 	if f[0] == '/' {
 		ret = []byte("." + f)
 	}
-	f = string(ret[:])
+	f = string(removeTrailingNullChars(ret))
 	upDir := "../"
 	numUp := strings.Count(f, upDir)
 	if numUp > 0 {
 		ret = []byte(strings.Repeat("a/", numUp) + f)
 	}
-	f = string(ret[:])
+	f = string(removeTrailingNullChars(ret))
 
 	directory_path := filepath.Dir(f)
 	if f[len(f)-1] == '/' {
@@ -133,10 +138,8 @@ func sanitizeOpenAt(call *prog.Call, subdirs map[string](bool), filemap map[uint
 	a1 := call.Args[1].(*prog.PointerArg)
 	// path argument
 	d1 := a1.Res.(*prog.DataArg)
-	data := d1.Data()
-	for len(data) > 1 && data[len(data)-1] == 0x00 {
-		data = data[:len(data)-1]
-	}
+	data := removeTrailingNullChars(d1.Data())
+
 	d1_str := string(data)
 
 	if len(d1_str) > 0 && byte(d1_str[len(d1_str)-1]) == 0x00 {
@@ -251,10 +254,7 @@ func sanitizeReadlinkat(call *prog.Call, subdirs map[string](bool)) map[string](
 	a1 := call.Args[1].(*prog.PointerArg)
 	// path argument
 	d1 := a1.Res.(*prog.DataArg)
-	data := d1.Data()
-	for data[len(data)-1] == 0x00 && len(data) > 1 {
-		data = data[:len(data)-1]
-	}
+	data := removeTrailingNullChars(d1.Data())
 	d1_str := string(data)
 	subdirs[d1_str] = true
 

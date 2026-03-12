@@ -202,7 +202,7 @@ func (ctx *context) mapToArrayUint64Uint64(inMap map[uint64]uint64) string {
 func (ctx *context) mapToArrayUint64String(inMap map[uint64]string) string {
 	var outStr string
 	for _, value := range inMap {
-		outStr = fmt.Sprintf("%s,\"%s\"", outStr, value[:len(value)-1])
+		outStr = fmt.Sprintf("%s,\"%s\"", outStr, value)
 	}
 	// remove first commata
 	if len(inMap) > 0 {
