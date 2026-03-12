@@ -37,6 +37,9 @@ var (
 	flagMinCalls    = flag.Int("minCalls", 5, "minimum number of remaining syscalls after minimization")
 	flagTopCalls    = flag.Int("topCalls", 2, "number of most used usyscalls to be used for file name generation")
 
+	flagSysRangeStart = flag.Int("syscallRangeStart", 0, "Start index of syscall range to start extraction from")
+	flagSysRangeEnd   = flag.Int("syscallRangeEnd", int((^uint(0))>>1), "End index of syscall range to start extraction from")
+
 	syscallIDxPerTid = make(map[int64][]int)
 )
 
@@ -158,6 +161,18 @@ func generateAllProgs(p *prog.Prog, threadList []int64) {
 	for idx, tid := range threadList {
 		processedCalls := make([]bool, numCalls)
 		nonStartCalls := make([]bool, numCalls)
+
+		// limit start syscall indices to given range
+		if *flagSysRangeStart > 0 {
+			numTrue := *flagSysRangeStart
+			numFalse := numCalls - numTrue
+			nonStartCalls = append(slices.Repeat([]bool{true}, numTrue), slices.Repeat([]bool{false}, numFalse)...)
+		}
+		if *flagSysRangeEnd < numCalls-1 {
+			numKeep := *flagSysRangeEnd + 1
+			numTrue := numCalls - numKeep
+			nonStartCalls = append(nonStartCalls[:numKeep], slices.Repeat([]bool{true}, numTrue)...)
+		}
 
 		numCallsTid := len(syscallIDxPerTid[tid])
 		fmt.Printf("[%d/%d] Working on TID %d - %d syscalls\n", idx+1, len(threadList), tid, numCallsTid)
