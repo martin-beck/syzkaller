@@ -42,5 +42,12 @@ var (
 		// something interesting with them (e.g. we won't get real robust list in memory).
 		"set_robust_list": true,
 		"set_tid_address": true,
+		// io_ syscalls pass resource via pointers [io_ctx], which is not supported yet
+		"io_setup":      true,
+		"io_getevents":  true,
+		"io_pgetevents": true,
+		"io_destroy":    true,
+		"io_submit":     true,
+		"io_cancel":     true,
 	}
 )
