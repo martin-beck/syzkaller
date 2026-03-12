@@ -293,7 +293,8 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	for fdRes, open := range missedFDResources {
 		if open {
 			// only close file descriptors that are not part if the reg init function
-			if initFDs[fdRes] != true {
+			inInit, err := initFDs[fdRes]
+			if !inInit || err {
 				fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(ctx->r)[%v]);\n", fdRes)
 			}
 		}
@@ -361,6 +362,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 
 	syscalls := syscallsBody
 
+	// Add close calls from leakage detector
 	if ctx.opts.CSB {
 		results = ""
 		syscalls = varsBuf.String() + "\n" + syscalls + "\n" + closeBuf.String()
