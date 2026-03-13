@@ -293,8 +293,8 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	for fdRes, open := range missedFDResources {
 		if open {
 			// only close file descriptors that are not part if the reg init function
-			inInit, err := initFDs[fdRes]
-			if !inInit || err {
+			// TODO: check the potential usage of initFDs below, and in the whole file.
+			if _, ok := listenFDs[fdRes]; !ok {
 				fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(ctx->r)[%v]);\n", fdRes)
 			}
 		}
