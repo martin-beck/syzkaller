@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"math/bits"
 	"os"
+	"reflect"
 	"regexp"
 	"slices"
 	"sort"
@@ -63,6 +64,76 @@ var (
 	listenFDs         = make(map[uint64](bool))
 	initFDs           = make(map[uint64](bool))
 )
+
+// Pair represents a key-value pair from a map
+type Pair struct {
+	Key   interface{}
+	Value interface{}
+}
+
+// MapToPairs converts a map of arbitrary types to a slice of Pairs
+func MapToPairs(m interface{}) ([]Pair, error) {
+	// Check if input is actually a map
+	v := reflect.ValueOf(m)
+	if v.Kind() != reflect.Map {
+		return nil, fmt.Errorf("input is not a map")
+	}
+	// Create slice to hold pairs
+	pairs := make([]Pair, 0, v.Len())
+	// Iterate through map elements
+	for _, key := range v.MapKeys() {
+		value := v.MapIndex(key)
+		pairs = append(pairs, Pair{
+			Key:   key.Interface(),
+			Value: value.Interface(),
+		})
+	}
+	return pairs, nil
+}
+
+// SortPairs sorts a slice of Pairs by their keys if the keys are comparable
+func SortPairs(pairs []Pair) ([]Pair, error) {
+	if len(pairs) <= 1 {
+		return pairs, nil
+	}
+	// Check if all keys are of the same type
+	firstKeyType := reflect.TypeOf(pairs[0].Key)
+	for _, p := range pairs {
+		if reflect.TypeOf(p.Key) != firstKeyType {
+			return nil, fmt.Errorf("keys are of different types: %T and %T", pairs[0].Key, p.Key)
+		}
+	}
+	// Make a copy to avoid modifying the original
+	sorted := make([]Pair, len(pairs))
+	copy(sorted, pairs)
+	// Try to sort based on key type
+	switch firstKeyType.Kind() {
+	case reflect.String:
+		sort.Slice(sorted, func(i, j int) bool {
+			return sorted[i].Key.(string) < sorted[j].Key.(string)
+		})
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		sort.Slice(sorted, func(i, j int) bool {
+			return reflect.ValueOf(sorted[i].Key).Int() < reflect.ValueOf(sorted[j].Key).Int()
+		})
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		sort.Slice(sorted, func(i, j int) bool {
+			return reflect.ValueOf(sorted[i].Key).Uint() < reflect.ValueOf(sorted[j].Key).Uint()
+		})
+	case reflect.Float32, reflect.Float64:
+		sort.Slice(sorted, func(i, j int) bool {
+			return reflect.ValueOf(sorted[i].Key).Float() < reflect.ValueOf(sorted[j].Key).Float()
+		})
+	case reflect.Bool:
+		sort.Slice(sorted, func(i, j int) bool {
+			// false sorts before true
+			return !sorted[i].Key.(bool) && sorted[j].Key.(bool)
+		})
+	default:
+		return nil, fmt.Errorf("keys of type %v are not sortable", firstKeyType)
+	}
+	return sorted, nil
+}
 
 func AddToNetOps(res uint64, op NetOp, size uint64) {
 	netops, ok := NetOpsFDs[res]
