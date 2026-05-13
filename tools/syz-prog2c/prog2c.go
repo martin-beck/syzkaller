@@ -377,6 +377,12 @@ func sanitizeProgram(p *prog.Prog, progName string) (*prog.Prog, map[string](boo
 		}
 	}
 
+	alignment := uint64(4096)
+	maxWriteSizeRemainder := maxWriteSize % alignment
+	if maxWriteSize > 0 && maxWriteSizeRemainder != 0 {
+		maxWriteSize += alignment - maxWriteSizeRemainder
+	}
+
 	// add empty size for files that have no found max size (just create them)
 	for key := range filemap {
 		_, ok := filesizes[key]
