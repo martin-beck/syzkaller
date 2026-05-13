@@ -5,6 +5,7 @@ package prog
 
 import (
 	"bytes"
+	"maps"
 	"fmt"
 	"reflect"
 
@@ -357,14 +358,13 @@ func relatedCallsFullThread(p0 *Prog, callIndex0 int, c *Cache, processedCallsIn
 	keepCalls := make([]bool, len(p0.Calls))
 	keepCalls[callIndex0] = true
 	removeCalls := make([]bool, len(p0.Calls))
-	usedBF := usesBF(p0.Calls[callIndex0], callIndex0, c)
-	used := usesCache(p0.Calls[callIndex0], callIndex0, c)
+	usedBF := usesBF(p0.Calls[callIndex0], callIndex0, c).Copy()
+	used := maps.Clone(usesCache(p0.Calls[callIndex0], callIndex0, c))
 	tid := p0.Calls[callIndex0].StraceTid
 	if retBF(p0.Calls[callIndex0], callIndex0, c).BitSet().None() {
 		removeCalls[callIndex0] = true
 	}
 	numCalls := len(p0.Calls)
-	matchingTIDOrAllowed := true
 
 	for {
 		n := len(used)
@@ -374,11 +374,7 @@ func relatedCallsFullThread(p0 *Prog, callIndex0 int, c *Cache, processedCallsIn
 			}
 
 			call := p0.Calls[i]
-			if call.StraceTid == tid || checkAllowedCalls(call) {
-				matchingTIDOrAllowed = true
-			} else {
-				matchingTIDOrAllowed = false
-			}
+			matchingTIDOrAllowed := (call.StraceTid == tid || checkAllowedCalls(call))
 			var used1 map[any]bool
 			var usedBF1 *bloom.BloomFilter
 			if matchingTIDOrAllowed {

@@ -921,7 +921,21 @@ void UNIQUE_FUNC(loop)(void)
 
 #if CSB
 static inline int
-UNIQUE_FUNC(bm_dispatch_operation)(thread_ctx_t* ctx, size_t op_id)
+UNIQUE_FUNC(bm_target_reg)(thread_ctx_t* ctx)
+{
+	/*{{{SYSCALLS_NET_SRV_REG}}}*/
+	return 0;
+}
+static inline int
+UNIQUE_FUNC(bm_target_dereg)(thread_ctx_t* ctx)
+{
+	/*{{{SYSCALLS_NET_SRV_DEREG}}}*/
+	return 0;
+}
+#endif
+
+#if CSB
+static inline int UNIQUE_FUNC(bm_dispatch_operation)(thread_ctx_t* ctx, size_t op_id)
 #else
 // This is the main function for csource.
 int main(void)

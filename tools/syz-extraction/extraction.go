@@ -4,12 +4,13 @@
 package main
 
 import (
-	"bytes"
+	"cmp"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -21,6 +22,11 @@ import (
 	_ "github.com/google/syzkaller/sys"
 )
 
+type TIDIndices struct {
+	Tid     int64
+	Indices []int
+}
+
 var (
 	flagOS   = flag.String("os", runtime.GOOS, "target os")
 	flagArch = flag.String("arch", runtime.GOARCH, "target arch")
@@ -30,6 +36,8 @@ var (
 	flagDeserialize = flag.String("deserialize", "", "(Optional) directory to store deserialized programs")
 	flagMinCalls    = flag.Int("minCalls", 5, "minimum number of remaining syscalls after minimization")
 	flagTopCalls    = flag.Int("topCalls", 2, "number of most used usyscalls to be used for file name generation")
+
+	syscallIDxPerTid = make(map[int64][]int)
 )
 
 func help() {
@@ -71,59 +79,123 @@ func generateMinimizedProg(p *prog.Prog, callIndex0 int, processedCallsIn []bool
 	return
 }
 
-func generateAllProgs(p *prog.Prog, threadList []int64) (pF *prog.Prog) {
-	numCalls := len(p.Calls)
-	processedCalls := make([]bool, numCalls)
-	processedCalls[numCalls-1] = false
-	keepCalls := make([]bool, numCalls)
-	nonStartCalls := make([]bool, numCalls)
-	outPrefixesIdx := make(map[string]int)
+func isPollLike(syscallName string) bool {
+	pollLikes := []string{
+		"epoll_pwait",
+		"epoll_wait",
+		"poll",
+		"ppoll",
+		"select",
+	}
+	for _, v := range pollLikes {
+		if syscallName == v {
+			return true
+		}
+	}
+	return false
+}
+
+func filterOutPolls(p *prog.Prog) *prog.Prog {
+	notPolls := make([]bool, len(p.Calls))
+	prevPoll := make(map[int64]int)
+	for idx, c := range p.Calls {
+		if isPollLike(c.Meta.Name) {
+			prevPoll[c.StraceTid] = idx
+		} else if oldIdx, ok := prevPoll[c.StraceTid]; ok {
+			notPolls[oldIdx] = true // Keep the last poll in the sequence.
+			delete(prevPoll, c.StraceTid)
+			notPolls[idx] = true
+		} else {
+			notPolls[idx] = true
+		}
+	}
+	px := p.CloneFilter(notPolls)
+	return px
+}
+
+func getOutPrefix() string {
 	prefixLen := 2
+	progBase := filepath.Base(*flagProg)
+	splitBase := strings.Split(progBase, "_")
+	if len(splitBase) > 1 && (splitBase[0] == "thread" || splitBase[0] == "program") {
+		progBase = strings.Join(splitBase[1:], "_")
+		prefixLen = 1
+	}
+	splitBase = strings.Split(progBase, "_")
+	if len(splitBase) < prefixLen {
+		prefixLen = len(splitBase)
+	}
+	outPrefix := strings.Join(splitBase[:prefixLen], "_")
+	return outPrefix
+}
+
+func newCache(numCalls int) *prog.Cache {
 	c := new(prog.Cache)
 	c.Uses = make([]map[any]bool, numCalls)
 	c.Rets = make([]map[any]bool, numCalls)
 	c.UsesBFs = make([]*bloom.BloomFilter, numCalls)
 	c.RetsBFs = make([]*bloom.BloomFilter, numCalls)
-	fmt.Fprintf(os.Stderr, "Number of syscalls before: %d\n", numCalls)
+	return c
+}
+
+func generateAllProgs(p *prog.Prog, threadList []int64) {
+	numCalls := len(p.Calls)
+	outPrefixesIdx := make(map[string]int)
+	outPrefix := getOutPrefix()
+
+	fmt.Fprintf(os.Stderr, "Total number of syscalls: %d\n", numCalls)
+
+	c := newCache(numCalls)
+
+	totalStartSyscalls := 0
+	usedStartSyscalls := 0
+	for _, tid := range threadList {
+		totalStartSyscalls += len(syscallIDxPerTid[tid])
+	}
+	var status string
 
 	// go over all thread IDs in decreasing depth starting with the highest depth
 	for idx, tid := range threadList {
-		fmt.Printf("Working on TID %d (%d/%d)\n", tid, idx+1, len(threadList))
+		processedCalls := make([]bool, numCalls)
+		nonStartCalls := make([]bool, numCalls)
 
-		for i := numCalls - 1; i > 0; {
+		numCallsTid := len(syscallIDxPerTid[tid])
+		fmt.Printf("[%d/%d] Working on TID %d - %d syscalls\n", idx+1, len(threadList), tid, numCallsTid)
+
+		for subIdx, i := range syscallIDxPerTid[tid] {
+			usedStartSyscalls++
 			if !nonStartCalls[i] && p.Calls[i].StraceTid == tid {
-				pF, processedCalls, keepCalls = generateMinimizedProg(p, i, processedCalls, c)
-				nonStartCalls = prog.Sliceor(prog.Sliceor(processedCalls, keepCalls), nonStartCalls)
+				if usedStartSyscalls%100 == 0 {
+					status = fmt.Sprintf("-- Progress TID [%03.1f/100%%] -- Progress overall [%03.1f/100%%] --", (100.0 * float32(subIdx) / float32(numCallsTid)), (100 * float32(usedStartSyscalls) / float32(totalStartSyscalls)))
+					fmt.Fprintf(os.Stderr, "%s\r", status)
+				}
+				pF, pCallsOut, keepCalls := generateMinimizedProg(p, i, processedCalls, c)
+				nonStartCalls = prog.Sliceor(prog.Sliceor(pCallsOut, keepCalls), nonStartCalls)
+				processedCalls = pCallsOut
 
+				pF = filterOutPolls(pF)
 				if len(pF.Calls) >= *flagMinCalls {
-					fmt.Fprintf(os.Stderr, "(%d/%d) Number of syscalls after: %d\n", i, len(p.Calls), len(pF.Calls))
-					prefixLen = 2
-					progBase := filepath.Base(*flagProg)
-					splitBase := strings.Split(progBase, "_")
-					if len(splitBase) > 1 && (splitBase[0] == "thread" || splitBase[0] == "program") {
-						progBase = strings.Join(splitBase[1:], "_")
-						prefixLen = 1
-					}
 
 					scallHist := genSyscallHist(pF)
 					topNames := stat.TopKNames(scallHist, *flagTopCalls)
-					outPrefix := strings.Join(strings.Split(progBase, "_")[:prefixLen], "_") + "_" + strings.Join(topNames, "_")
-					_, ok := outPrefixesIdx[outPrefix]
+					prefix := outPrefix + "_" + strings.Join(topNames, "_")
+
+					_, ok := outPrefixesIdx[prefix]
 					if !ok {
-						outPrefixesIdx[outPrefix] = 0
+						outPrefixesIdx[prefix] = 0
 					} else {
-						outPrefixesIdx[outPrefix]++
+						outPrefixesIdx[prefix]++
 					}
 
-					saveProg2File(pF, outPrefix, outPrefixesIdx[outPrefix])
+					fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
+					fmt.Fprintf(os.Stderr, "    Extracted %d syscalls into %s_%d\n", len(pF.Calls), prefix, outPrefixesIdx[prefix])
+					saveProg2File(pF, prefix, outPrefixesIdx[prefix])
 				}
 			}
 			i--
 		}
-
+		fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 	}
-
-	return
 }
 
 func genSyscallHist(p *prog.Prog) map[string]int {
@@ -146,43 +218,6 @@ func saveProg2File(p *prog.Prog, prefix string, index int) {
 	if err := osutil.WriteFile(outName, p.Serialize()); err != nil {
 		log.Fatalf("failed to output file: %v", err)
 	}
-	log.Logf(0, "Stored program %s", outName)
-}
-
-func extractResources(c *prog.Call) map[any]bool {
-	used := make(map[any]bool)
-
-	prog.ForeachArg(c, func(arg prog.Arg, _ *prog.ArgCtx) {
-		switch typ := arg.Type().(type) {
-		case *prog.ResourceType:
-			a := arg.(*prog.ResultArg)
-			used[a] = true
-			if a.Res != nil {
-				used[a.Res] = true
-			}
-			for use := range prog.GetUses(a) {
-				used[use] = true
-			}
-		case *prog.BufferType:
-			a := arg.(*prog.DataArg)
-			if a.Dir() != prog.DirOut && typ.Kind == prog.BufferFilename {
-				val := string(bytes.TrimRight(a.Data(), "\x00"))
-				used[val] = true
-			}
-		}
-	})
-
-	return used
-}
-
-// subtracts list1 from list, returns true if there are elements in list1, that are not present in list
-func mapsNewInRightAny(list map[any]bool, list1 map[any]bool) bool {
-	for what := range list1 {
-		if !list[what] {
-			return true
-		}
-	}
-	return false
 }
 
 // a map from TID to clone depth
@@ -192,12 +227,20 @@ func buildThreadList(p *prog.Prog) []int64 {
 	tt := make(ThreadSet)
 	tl := make([]int64, 0)
 
-	for _, c := range p.Calls {
+	for idx, c := range p.Calls {
 		tt[c.StraceTid] = true
+		tid := c.StraceTid
+		syscallIDxPerTid[tid] = append(syscallIDxPerTid[tid], idx)
 	}
 	for t := range tt {
 		tl = append(tl, t)
 	}
+
+	slices.SortStableFunc(tl, func(a, b int64) int {
+		return cmp.Compare(a, b)
+	})
+	slices.Reverse(tl)
+
 	return tl
 }
 

@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"flag"
@@ -79,19 +80,26 @@ func sanitizeMaxWriteSize(call *prog.Call, idxBuffer int, idxSize int, maxWriteS
 
 }
 
+func removeTrailingNullChars(b []byte) []byte {
+	return bytes.TrimRight(b, "\x00")
+}
+
 func sanitizePath(path []byte) ([]byte, string) {
 	ret := path
-	f := string(ret[:])
+	f := string(removeTrailingNullChars(ret))
+	if len(f) == 0 {
+		return path, "."
+	}
 	if f[0] == '/' {
 		ret = []byte("." + f)
 	}
-	f = string(ret[:])
+	f = string(removeTrailingNullChars(ret))
 	upDir := "../"
 	numUp := strings.Count(f, upDir)
 	if numUp > 0 {
 		ret = []byte(strings.Repeat("a/", numUp) + f)
 	}
-	f = string(ret[:])
+	f = string(removeTrailingNullChars(ret))
 
 	directory_path := filepath.Dir(f)
 	if f[len(f)-1] == '/' {
@@ -130,10 +138,8 @@ func sanitizeOpenAt(call *prog.Call, subdirs map[string](bool), filemap map[uint
 	a1 := call.Args[1].(*prog.PointerArg)
 	// path argument
 	d1 := a1.Res.(*prog.DataArg)
-	data := d1.Data()
-	for len(data) > 1 && data[len(data)-1] == 0x00 {
-		data = data[:len(data)-1]
-	}
+	data := removeTrailingNullChars(d1.Data())
+
 	d1_str := string(data)
 
 	if len(d1_str) > 0 && byte(d1_str[len(d1_str)-1]) == 0x00 {
@@ -248,10 +254,7 @@ func sanitizeReadlinkat(call *prog.Call, subdirs map[string](bool)) map[string](
 	a1 := call.Args[1].(*prog.PointerArg)
 	// path argument
 	d1 := a1.Res.(*prog.DataArg)
-	data := d1.Data()
-	for data[len(data)-1] == 0x00 && len(data) > 1 {
-		data = data[:len(data)-1]
-	}
+	data := removeTrailingNullChars(d1.Data())
 	d1_str := string(data)
 	subdirs[d1_str] = true
 
@@ -265,38 +268,29 @@ func sanitizeReadlinkat(call *prog.Call, subdirs map[string](bool)) map[string](
 	return subdirs
 }
 
-func sanitizeBindInet(call *prog.Call) {
-	a1 := call.Args[1].(*prog.PointerArg)
-	// path argument
-	d1 := a1.Res.(*prog.UnionArg).Option.(*prog.GroupArg).Inner
+func sanitizeSockaddrInArg(call *prog.Call, argNum int, sockTypeIn uint64) {
+	a1 := call.Args[argNum].(*prog.PointerArg)
+	// sockaddr_in argument
+	var d1 []prog.Arg
+	switch a1.Res.(type) {
+	case *prog.UnionArg:
+		d1 = a1.Res.(*prog.UnionArg).Option.(*prog.GroupArg).Inner
+	case *prog.GroupArg:
+		d1 = a1.Res.(*prog.GroupArg).Inner
+	default:
+		verStr := "IPv4"
+		if sockTypeIn == syscall.AF_INET6 {
+			verStr = "IPv6"
+		}
+		panic(fmt.Sprintf("Bind Inet %s argument 1 unknown format %#v", verStr, a1.Res))
+	}
 	sockType := d1[0].(*prog.ConstArg).Val
 
-	if sockType != syscall.AF_INET {
-		panic("Expected type AF_INET for bind$inet sockaddr")
+	if sockType != sockTypeIn {
+		panic("Expected type AF_INET/AF_INET6 for bind$inet sockaddr")
 	}
 }
 
-func sanitizeBindInet6(call *prog.Call) {
-	a1 := call.Args[1].(*prog.PointerArg)
-	// path argument
-	d1 := a1.Res.(*prog.GroupArg).Inner
-	sockType := d1[0].(*prog.ConstArg).Val
-
-	if sockType != syscall.AF_INET6 {
-		panic("Expected type AF_INET6 for bind$inet sockaddr")
-	}
-}
-
-//	addr: ptr[in, sockaddr_in] {
-//	  sockaddr_in {
-//	    family: const = 0x2 (2 bytes)
-//	    port: int16be = 0xc38 (2 bytes)
-//	    addr: union ipv4_addr {
-//	      rand_addr: int32be = 0x7f000001 (4 bytes)
-//	    }
-//	    pad = 0x0 (8 bytes)
-//	  }
-//	}
 func sanitizeConnect(call *prog.Call) {
 	a1 := call.Args[1].(*prog.PointerArg)
 	// struct sockaddr *addr
@@ -309,9 +303,6 @@ func sanitizeConnect(call *prog.Call) {
 
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint32(b, uint32(addr))
-
-	fmt.Fprintf(os.Stderr, "Connect Port: %d\n", port)
-	fmt.Fprintf(os.Stderr, "Connect Addr: %d.%d.%d.%d\n", b[0], b[1], b[2], b[3])
 
 	b[0] = 127
 	b[1] = 0
@@ -332,7 +323,8 @@ func sanitizeProgram(p *prog.Prog, progName string) (*prog.Prog, map[string](boo
 	filesizes := make(map[uint64](uint64))
 	filemap := make(map[uint64](string))
 	maxWriteSize := uint64(0)
-	for _, call := range p.Calls {
+	for idx, call := range p.Calls {
+		p.AnnotateResources(idx)
 		switch call.Meta.Name {
 		case "openat":
 			subdirs, filemap = sanitizeOpenAt(call, subdirs, filemap)
@@ -371,9 +363,9 @@ func sanitizeProgram(p *prog.Prog, progName string) (*prog.Prog, map[string](boo
 		case "connect$inet":
 			sanitizeConnect(call)
 		case "bind$inet":
-			sanitizeBindInet(call)
+			sanitizeSockaddrInArg(call, 1, syscall.AF_INET)
 		case "bind$inet6":
-			sanitizeBindInet6(call)
+			sanitizeSockaddrInArg(call, 1, syscall.AF_INET6)
 		}
 	}
 
@@ -404,6 +396,41 @@ func sanitizeProgram(p *prog.Prog, progName string) (*prog.Prog, map[string](boo
 	}
 
 	return p, subdirs, filesizes, filemap, maxWriteSize
+}
+
+// generateUniqueFileName generates a filename that does not exist.
+//
+// Parameters:
+//   - fileNameWE: filename including path without extension.
+//   - ext: file extension.
+//
+// Returns:
+//   - filename with a unique index that does not exist.
+func generateUniqueFileName(baseName string, ext string) string {
+	fileIdx := 0
+	fileName := baseName + "_" + strconv.Itoa(fileIdx) + ext
+	// Check if file exists
+	for {
+		_, err := os.Stat(fileName)
+		// Stats will returns an error (ErrNotExist) when
+		// the file does not exist.
+		if err != nil && errors.Is(err, os.ErrNotExist) {
+			// File doesn't exist, safe to return
+			return fileName
+		}
+
+		// File exists, increment index and try again
+		fileIdx++
+		fileName = baseName + "_" + strconv.Itoa(fileIdx) + ext
+	}
+}
+
+func dumpFile(fileName string, data []byte) {
+	if err := osutil.WriteFile(fileName, data); err != nil {
+		log.Fatalf("Failed to generate %s, failed with error: %v", fileName, err)
+	} else {
+		log.Printf("Stored file %s", fileName)
+	}
 }
 
 func main() {
@@ -489,12 +516,11 @@ func main() {
 		MaxWriteSize:  maxWriteSize,
 	}
 
-	src, err := csource.Write(p, opts)
+	src, metaData, err := csource.Write(p, opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to generate C source: %v\n", err)
 		os.Exit(1)
 	}
-
 	if *flagFormat {
 		if formatted, err := csource.Format(src); err != nil {
 			fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -502,19 +528,11 @@ func main() {
 			src = formatted
 		}
 	}
-
-	// store information about the program being minimized or a thread representation in the generated c file
-	/*
-	 * This header represents a complete thread as extracted from the strace log.
-	 */
-	/*
-	 * This header represents a minimized program extracted from one thread of the strace log.
-	 */
-
+	// This header represents a minimized program extracted from one thread of the strace log.
 	if *flagCFile != "" {
 		var outFilePath string
+		var metaFilePath string
 		var fileBaseWithoutExt string
-		var fileIdx int
 		fileExt := filepath.Ext(*flagCFile)
 
 		// generate path without extension
@@ -523,21 +541,21 @@ func main() {
 		} else {
 			fileBaseWithoutExt = *flagCFile
 		}
-
-		fileIdx = 0
-		outFilePath = fileBaseWithoutExt + "_" + strconv.Itoa(fileIdx) + fileExt
-
-		_, err := os.Stat(outFilePath)
-		for !errors.Is(err, os.ErrNotExist) {
-			fileIdx++
-			outFilePath = fileBaseWithoutExt + "_" + strconv.Itoa(fileIdx) + fileExt
-			_, err = os.Stat(outFilePath)
+		outFilePath = generateUniqueFileName(fileBaseWithoutExt, fileExt)
+		// Dump C program to disk
+		dumpFile(outFilePath, src)
+		// Check if there is meta data associated with the C program
+		if metaData != "" {
+			// Meta data file name should be the same as the
+			// C program name, but with extension .meta instead of .h or .c
+			lastIndex := strings.LastIndex(outFilePath, fileExt)
+			if lastIndex == -1 {
+				panic("File extension not found")
+			}
+			metaFilePath = outFilePath[:lastIndex] + ".meta"
+			// Dump meta data file to disk
+			dumpFile(metaFilePath, []byte(metaData))
 		}
-		if err := osutil.WriteFile(outFilePath, src); err != nil {
-			log.Fatalf("failed to output file: %v", err)
-		}
-		log.Printf("Stored program %s", outFilePath)
-
 	} else {
 		os.Stdout.Write(src)
 	}

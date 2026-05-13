@@ -45,12 +45,7 @@ GITREVDATE=$(shell git log -n 1 --format="%cd" --date=format:%Y%m%d-%H%M%S)
 # That's only needed if you use gdb or nm.
 # If you need that, build manually with DEBUG=true env.
 GLFLAGS :=
-GGFLAGS :=
-ifeq ("$(DEBUG)", "true")
-	GGFLAGS := -gcflags="all=-N -l"
-else
-	GLFLAGS := -s -w
-endif
+GGFLAGS := -gcflags="all=-N -l"
 GOFLAGS := -ldflags="$(GLFLAGS) -X github.com/google/syzkaller/prog.GitRevision=$(REV) -X github.com/google/syzkaller/prog.gitRevisionDate=$(GITREVDATE)" $(GGFLAGS)
 ifneq ("$(GOTAGS)", "")
 	GOFLAGS += " -tags=$(GOTAGS)"
@@ -187,6 +182,9 @@ diff: descriptions target
 
 prog2c: descriptions
 	GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GOHOSTFLAGS) -o ./bin/syz-prog2c github.com/google/syzkaller/tools/syz-prog2c
+
+extraction: descriptions
+	GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GOHOSTFLAGS) -o ./bin/syz-extraction github.com/google/syzkaller/tools/syz-extraction
 
 crush: descriptions
 	GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GOHOSTFLAGS) -o ./bin/syz-crush github.com/google/syzkaller/tools/syz-crush
