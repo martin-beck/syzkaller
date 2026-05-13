@@ -374,6 +374,11 @@ func sanitizeProgram(p *prog.Prog, progName string) (*prog.Prog, map[string](boo
 	if maxWriteSize > 0 && maxWriteSizeRemainder != 0 {
 		maxWriteSize += alignment - maxWriteSizeRemainder
 	}
+	maxWriteSizeRemainder = maxWriteSize % alignment
+	if maxWriteSizeRemainder != 0 {
+		log.Fatalf("Failed to generate buffer size %d as multiple of alignment %d.\n", maxWriteSize, alignment)
+		os.Exit(1)
+	}
 
 	// add empty size for files that have no found max size (just create them)
 	for key := range filemap {
