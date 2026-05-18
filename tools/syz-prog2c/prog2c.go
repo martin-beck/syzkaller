@@ -318,7 +318,7 @@ func sanitizeConnect(call *prog.Call) {
 }
 
 // returns (sanitzed program,map with all sub to be accessed directories,map with resultnum/filesize)
-func sanitizeProgram(p *prog.Prog, progName string) (*prog.Prog, map[string](bool), map[uint64](uint64), map[uint64](string), uint64) {
+func sanitizeProgram(p *prog.Prog, progName string) (*prog.Prog, map[string](bool), map[uint64](uint64), map[uint64](string), uint64, uint64) {
 	subdirs := make(map[string](bool))
 	filesizes := make(map[uint64](uint64))
 	filemap := make(map[uint64](string))
@@ -369,6 +369,17 @@ func sanitizeProgram(p *prog.Prog, progName string) (*prog.Prog, map[string](boo
 		}
 	}
 
+	alignment := uint64(4096)
+	maxWriteSizeRemainder := maxWriteSize % alignment
+	if maxWriteSize > 0 && maxWriteSizeRemainder != 0 {
+		maxWriteSize += alignment - maxWriteSizeRemainder
+	}
+	maxWriteSizeRemainder = maxWriteSize % alignment
+	if maxWriteSizeRemainder != 0 {
+		log.Fatalf("Failed to generate buffer size %d as multiple of alignment %d.\n", maxWriteSize, alignment)
+		os.Exit(1)
+	}
+
 	// add empty size for files that have no found max size (just create them)
 	for key := range filemap {
 		_, ok := filesizes[key]
@@ -389,7 +400,7 @@ func sanitizeProgram(p *prog.Prog, progName string) (*prog.Prog, map[string](boo
 		fmt.Fprintf(os.Stderr, "Differing filenames and filesizes length!\n Check %s\n", progName)
 	}
 
-	return p, subdirs, filesizes, filemap, maxWriteSize
+	return p, subdirs, filesizes, filemap, maxWriteSize, alignment
 }
 
 // generateUniqueFileName generates a filename that does not exist.
@@ -471,43 +482,44 @@ func main() {
 	}
 
 	// sanitize program
-	pSan, subDirs, filesize, filemap, maxWriteSize := sanitizeProgram(p, progName)
+	pSan, subDirs, filesize, filemap, maxWriteSize, maxWriteSizeAlignment := sanitizeProgram(p, progName)
 	p = pSan
 
 	opts := csource.Options{
-		Threaded:      *flagThreaded,
-		Repeat:        *flagRepeat != 1,
-		RepeatTimes:   *flagRepeat,
-		Procs:         *flagProcs,
-		Slowdown:      *flagSlowdown,
-		Sandbox:       *flagSandbox,
-		SandboxArg:    *flagSandboxArg,
-		Leak:          *flagLeak,
-		NetInjection:  features["tun"].Enabled,
-		NetDevices:    features["net_dev"].Enabled,
-		NetReset:      features["net_reset"].Enabled,
-		Cgroups:       features["cgroups"].Enabled,
-		BinfmtMisc:    features["binfmt_misc"].Enabled,
-		CloseFDs:      features["close_fds"].Enabled,
-		KCSAN:         features["kcsan"].Enabled,
-		DevlinkPCI:    features["devlink_pci"].Enabled,
-		NicVF:         features["nic_vf"].Enabled,
-		USB:           features["usb"].Enabled,
-		VhciInjection: features["vhci"].Enabled,
-		Wifi:          features["wifi"].Enabled,
-		IEEE802154:    features["ieee802154"].Enabled,
-		Sysctl:        features["sysctl"].Enabled,
-		Swap:          features["swap"].Enabled,
-		UseTmpDir:     *flagUseTmpDir,
-		HandleSegv:    *flagHandleSegv,
-		Trace:         *flagTrace,
-		CSB:           *flagCSB,
-		NumNop:        *flagNumNop,
-		SubDirs:       subDirs,
-		FileSizes:     filesize,
-		FileNames:     filemap,
-		CallComments:  true,
-		MaxWriteSize:  maxWriteSize,
+		Threaded:              *flagThreaded,
+		Repeat:                *flagRepeat != 1,
+		RepeatTimes:           *flagRepeat,
+		Procs:                 *flagProcs,
+		Slowdown:              *flagSlowdown,
+		Sandbox:               *flagSandbox,
+		SandboxArg:            *flagSandboxArg,
+		Leak:                  *flagLeak,
+		NetInjection:          features["tun"].Enabled,
+		NetDevices:            features["net_dev"].Enabled,
+		NetReset:              features["net_reset"].Enabled,
+		Cgroups:               features["cgroups"].Enabled,
+		BinfmtMisc:            features["binfmt_misc"].Enabled,
+		CloseFDs:              features["close_fds"].Enabled,
+		KCSAN:                 features["kcsan"].Enabled,
+		DevlinkPCI:            features["devlink_pci"].Enabled,
+		NicVF:                 features["nic_vf"].Enabled,
+		USB:                   features["usb"].Enabled,
+		VhciInjection:         features["vhci"].Enabled,
+		Wifi:                  features["wifi"].Enabled,
+		IEEE802154:            features["ieee802154"].Enabled,
+		Sysctl:                features["sysctl"].Enabled,
+		Swap:                  features["swap"].Enabled,
+		UseTmpDir:             *flagUseTmpDir,
+		HandleSegv:            *flagHandleSegv,
+		Trace:                 *flagTrace,
+		CSB:                   *flagCSB,
+		NumNop:                *flagNumNop,
+		SubDirs:               subDirs,
+		FileSizes:             filesize,
+		FileNames:             filemap,
+		CallComments:          true,
+		MaxWriteSize:          maxWriteSize,
+		MaxWriteSizeAlignment: maxWriteSizeAlignment,
 	}
 
 	src, metaData, err := csource.Write(p, opts)
