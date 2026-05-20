@@ -101,13 +101,13 @@ func parseTraces(target *prog.Target) []*prog.Prog {
 	deserializeDir := *flagDeserialize
 
 	totalFiles := len(names)
-	log.Logf(0, "parsing %v traces", totalFiles)
+	fmt.Fprintf(os.Stderr, "Parsing %v traces\n", totalFiles)
 	for i, file := range names {
-		log.Logf(1, "parsing file %v/%v: %v", i+1, totalFiles, filepath.Base(names[i]))
+		fmt.Fprintf(os.Stderr, "Parsing file %v/%v: %v\n", i+1, totalFiles, filepath.Base(names[i]))
 		progs, err := proggen.ParseFile(file, target, *flagSplitThreads, *flagArgLength)
 		fmt.Fprintf(os.Stderr, "Generated %d programs\n", len(progs))
 		for idx, p := range progs {
-			fmt.Fprintf(os.Stderr, "Length of program %d: %d\n", idx, len(p.Calls))
+			fmt.Fprintf(os.Stderr, "Length of program %d: %d\n", idx+1, len(p.Calls))
 			progPrefix[p] = filepath.Base(names[i])[:5]
 		}
 		if err != nil {

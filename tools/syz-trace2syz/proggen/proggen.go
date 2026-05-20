@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 
 	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/prog"
@@ -17,6 +18,7 @@ import (
 )
 
 func ParseFile(filename string, target *prog.Target, splitThreads bool, argLength bool) ([]*prog.Prog, error) {
+	fmt.Fprintf(os.Stderr, "Reading file to memory\n")
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("error reading file: %v", err)
@@ -72,6 +74,7 @@ type context struct {
 
 // genProg converts a trace to one of our programs.
 func genProg(trace *parser.Trace, target *prog.Target, argLength bool, randomized bool) *prog.Prog {
+	var status string
 	retCache := newRCache()
 	ctx := &context{
 		builder:     prog.MakeProgGen(target),
@@ -80,7 +83,13 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength bool, randomize
 		returnCache: retCache,
 		randomized:  randomized,
 	}
-	for _, sCall := range trace.Calls {
+	fmt.Fprintf(os.Stderr, "Parsing syscalls into syzlang\n")
+	numCalls := len(trace.Calls)
+	for sIdx, sCall := range trace.Calls {
+		if sIdx%100 == 0 {
+			status = fmt.Sprintf("-- Progress [%03.1f/100%%] --", (100.0 * float32(sIdx) / float32(numCalls)))
+			fmt.Fprintf(os.Stderr, "%s\r", status)
+		}
 		if sCall.Paused {
 			// Probably a case where the call was killed by a signal like the following
 			// 2179  wait4(2180,  <unfinished ...>
@@ -97,9 +106,11 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength bool, randomize
 			continue
 		}
 		if err := ctx.builder.Append(call, argLength); err != nil {
+			fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 			log.Fatalf("%v", err)
 		}
 	}
+	fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 	p, err := ctx.builder.Finalize()
 	if err != nil {
 		log.Fatalf("error validating program: %v", err)
