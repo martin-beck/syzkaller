@@ -29,21 +29,29 @@ func shouldSkip(line string) bool {
 }
 
 // ParseData parses each line of a strace file in a loop.
-func ParseData(data []byte, splitThreads bool) (*TraceTree, *Trace, error) {
+func ParseData(data []byte, splitThreads bool, numLines int) (*TraceTree, *Trace, error) {
+	var status string
 	tree := NewTraceTree()
 	trace := new(Trace)
 	lastCalls := make(map[int64](*Syscall))
 	// Creating the process tree
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(nil, 64<<20)
+	curLine := 0
 	for scanner.Scan() {
+		if curLine%1000 == 0 {
+			status = fmt.Sprintf("-- Progress [%03.1f/100%%] --", (100.0 * float32(curLine) / float32(numLines)))
+			fmt.Fprintf(os.Stderr, "%s\r", status)
+		}
 		line := scanner.Text()
+		curLine++
 		if shouldSkip(line) {
 			continue
 		}
 		log.Logf(4, "scanning call: %s", line)
 		ret, call := parseSyscall(scanner)
 		if call == nil || ret != 0 {
+			fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 			return nil, nil, fmt.Errorf("failed to parse line: %v", line)
 		}
 		if splitThreads {
@@ -54,6 +62,7 @@ func ParseData(data []byte, splitThreads bool) (*TraceTree, *Trace, error) {
 			} else {
 				lastCall := lastCalls[call.Pid]
 				if lastCall == nil {
+					fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 					fmt.Fprintf(os.Stderr, "Problem line: %s\n", line)
 					fmt.Fprintf(os.Stderr, "Problem call: %#v\n", call)
 					panic("Cannot find call to resume!\n")
@@ -69,6 +78,7 @@ func ParseData(data []byte, splitThreads bool) (*TraceTree, *Trace, error) {
 			}
 		}
 	}
+	fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 	if err := scanner.Err(); err != nil {
 		return nil, nil, err
 	}
