@@ -19,6 +19,41 @@ jobs:
           go env -w GOBIN=$HOME/.local/bin
           make ${{ matrix.tool }}
 
+   CSB-Tools:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: [trace2syz, prog2c, extraction]
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Compile ${{ matrix.tool }}
+        run: |
+          go env -w GOBIN=$HOME/.local/bin
+          go test ./tools/${{ matrix.tool }}/...
+
+   Determinism-Traces:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        trace: [traces/apt_search_llvm_strace.log, traces/bash_ls_grep_strace.log, traces/git_fetch_strace.log]
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Determinism ${{matrix.trace}}
+        run: |
+          go env -w GOBIN=$HOME/.local/bin
+          SYZ_TRACE2SYZ_TEST_TRACE="`readlink -e ${{matrix.trace}}`" \
+          go test ./tools/trace2syz/ -run TestTrace2SyzDeterministicOutput -count=1
+
    Test-with-CSB:
      if: github.event_name == 'push'
      runs-on: ubuntu-latest
