@@ -292,8 +292,8 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	for fdRes, open := range missedFDResources {
 		if open {
 			// only close file descriptors that are not part if the reg init function
-			inInit, err := initFDs[fdRes]
-			if !inInit || err {
+			// TODO: check the potential usage of initFDs below, and in the whole file.
+			if _, ok := listenFDs[fdRes]; !ok {
 				fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(ctx->r)[%v]);\n", fdRes)
 			}
 		}
@@ -438,6 +438,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		header += "#define MMAP_OFFSET " + fmt.Sprintf("0x%x", ctx.target.DataOffset) + "ul\n"
 		header += "#define MMAP_LENGTH " + fmt.Sprintf("0x%x", ctx.target.NumPages*ctx.target.PageSize) + "ul\n"
 		header += "const static uint64_t UNIQUE_VAR(maxWriteBufferSize) = " + fmt.Sprintf("%d", ctx.opts.MaxWriteSize) + "ul;\n"
+		header += "const static uint64_t UNIQUE_VAR(maxWriteBufferSizeAlignment) = " + fmt.Sprintf("%d", ctx.opts.MaxWriteSizeAlignment) + "ul;\n"
 
 		// Connect NetOps
 		opsSeq := toStringArray(NetOpsFDsConnect)

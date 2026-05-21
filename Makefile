@@ -45,12 +45,7 @@ GITREVDATE=$(shell git log -n 1 --format="%cd" --date=format:%Y%m%d-%H%M%S)
 # That's only needed if you use gdb or nm.
 # If you need that, build manually with DEBUG=true env.
 GLFLAGS :=
-GGFLAGS :=
-ifeq ("$(DEBUG)", "true")
-	GGFLAGS := -gcflags="all=-N -l"
-else
-	GLFLAGS := -s -w
-endif
+GGFLAGS := -gcflags="all=-N -l"
 GOFLAGS := -ldflags="$(GLFLAGS) -X github.com/google/syzkaller/prog.GitRevision=$(REV) -X github.com/google/syzkaller/prog.gitRevisionDate=$(GITREVDATE)" $(GGFLAGS)
 ifneq ("$(GOTAGS)", "")
 	GOFLAGS += " -tags=$(GOTAGS)"
