@@ -52,7 +52,7 @@ jobs:
         run: |
           go env -w GOBIN=$HOME/.local/bin
           SYZ_TRACE2SYZ_TEST_TRACE="`readlink -e ${{matrix.trace}}`" \
-          go test ./tools/trace2syz/ -run TestTrace2SyzDeterministicOutput -count=1
+          go test ./tools/syz-trace2syz/ -run TestTrace2SyzDeterministicOutput -count=1
 
    Test-with-CSB:
      if: github.event_name == 'push'
