@@ -34,6 +34,7 @@ jobs:
       - name: Compile ${{ matrix.tool }}
         run: |
           go env -w GOBIN=$HOME/.local/bin
+          make ${{ matrix.tool }}
           go test ./tools/syz-${{ matrix.tool }}/...
 
    Determinism-Traces:
@@ -51,6 +52,7 @@ jobs:
       - name: Determinism ${{matrix.trace}}
         run: |
           go env -w GOBIN=$HOME/.local/bin
+          make trace2syz
           SYZ_TRACE2SYZ_TEST_TRACE="`readlink -e ${{matrix.trace}}`" \
           go test ./tools/syz-trace2syz/ -run TestTrace2SyzDeterministicOutput -count=1
 
