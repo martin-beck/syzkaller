@@ -40,7 +40,7 @@ func ParseData(data []byte, target *prog.Target, splitThreads bool, argLength bo
 	if splitThreads {
 		parseTree(tree, tree.RootPid, target, &progs, argLength)
 	} else {
-		progs = append(progs, genProg(trace, target, argLength))
+		progs = append(progs, genProg(trace, target, argLength, false))
 	}
 	return progs, nil
 }
@@ -49,7 +49,7 @@ func ParseData(data []byte, target *prog.Target, splitThreads bool, argLength bo
 // The tree preserves process hierarchy i.e. parent->[]child
 func parseTree(tree *parser.TraceTree, pid int64, target *prog.Target, progs *[]*prog.Prog, argLength bool) {
 	log.Logf(2, "parsing trace pid %v", pid)
-	if p := genProg(tree.TraceMap[pid], target, argLength); p != nil {
+	if p := genProg(tree.TraceMap[pid], target, argLength, false); p != nil {
 		*progs = append(*progs, p)
 	}
 	for _, childPid := range tree.Ptree[pid] {
@@ -67,16 +67,18 @@ type context struct {
 	returnCache       returnCache
 	currentStraceCall *parser.Syscall
 	currentSyzCall    *prog.Call
+	randomized        bool
 }
 
 // genProg converts a trace to one of our programs.
-func genProg(trace *parser.Trace, target *prog.Target, argLength bool) *prog.Prog {
+func genProg(trace *parser.Trace, target *prog.Target, argLength bool, randomized bool) *prog.Prog {
 	retCache := newRCache()
 	ctx := &context{
 		builder:     prog.MakeProgGen(target),
 		target:      target,
 		selectors:   newSelectors(target, retCache),
 		returnCache: retCache,
+		randomized:  randomized,
 	}
 	for _, sCall := range trace.Calls {
 		if sCall.Paused {
@@ -326,12 +328,18 @@ func (ctx *context) genBuffer(syzType *prog.BufferType, dir prog.Dir, traceType 
 		default:
 			switch syzType.Kind {
 			case prog.BufferBlobRand:
-				size := rand.Intn(256)
+				size := 64
+				if ctx.randomized {
+					size = rand.Intn(256)
+				}
 				return prog.MakeOutDataArg(syzType, dir, uint64(size))
 
 			case prog.BufferBlobRange:
-				max := rand.Intn(int(syzType.RangeEnd) - int(syzType.RangeBegin) + 1)
-				size := max + int(syzType.RangeBegin)
+				size := int(syzType.RangeBegin) + ((int(syzType.RangeEnd) - int(syzType.RangeBegin)) / 2)
+				if ctx.randomized {
+					max := rand.Intn(int(syzType.RangeEnd) - int(syzType.RangeBegin) + 1)
+					size = max + int(syzType.RangeBegin)
+				}
 				return prog.MakeOutDataArg(syzType, dir, uint64(size))
 			default:
 				log.Fatalf("unexpected buffer type kind: %v. call %v arg %#v", syzType.Kind, ctx.currentSyzCall, traceType)

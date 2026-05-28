@@ -11,6 +11,15 @@ import (
 	_ "github.com/google/syzkaller/sys"
 )
 
+func parseTestData(t *testing.T, data []byte) *TraceTree {
+	t.Helper()
+	tree, _, err := ParseData(data, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tree
+}
+
 func TestParseLoopBasic(t *testing.T) {
 	tests := []string{
 		`open() = 3
@@ -61,10 +70,7 @@ func TestParseLoopBasic(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		tree, err := ParseData([]byte(test))
-		if err != nil {
-			t.Fatal(err)
-		}
+		tree := parseTestData(t, []byte(test))
 		if tree.RootPid != -1 {
 			t.Fatalf("Incorrect Root Pid: %d", tree.RootPid)
 		}
@@ -99,10 +105,7 @@ func TestEvaluateExpressions(t *testing.T) {
 		{"open(0) = 0", 0},
 	}
 	for i, test := range tests {
-		tree, err := ParseData([]byte(test.line))
-		if err != nil {
-			t.Fatal(err)
-		}
+		tree := parseTestData(t, []byte(test.line))
 		if tree.RootPid != -1 {
 			t.Fatalf("failed test: %d. Incorrect Root Pid: %d", i, tree.RootPid)
 		}
@@ -124,10 +127,7 @@ func TestParseLoopPid(t *testing.T) {
 	data := `1  open() = 3
 			 1  fstat() = 0`
 
-	tree, err := ParseData([]byte(data))
-	if err != nil {
-		t.Fatal(err)
-	}
+	tree := parseTestData(t, []byte(data))
 	if tree.RootPid != 1 {
 		t.Fatalf("Incorrect Root Pid: %d", tree.RootPid)
 	}
@@ -146,10 +146,7 @@ func TestParseLoop1Child(t *testing.T) {
 				   1 clone() = 2
                    2 read() = 16`
 
-	tree, err := ParseData([]byte(data1Child))
-	if err != nil {
-		t.Fatal(err)
-	}
+	tree := parseTestData(t, []byte(data1Child))
 	if len(tree.TraceMap) != 2 {
 		t.Fatalf("Incorrect Root Pid. Expected: 2, Got %d", tree.RootPid)
 	}
@@ -171,10 +168,7 @@ func TestParseLoop2Childs(t *testing.T) {
                     2 read() = 16
                     1 clone() = 3
                     3 open() = 3`
-	tree, err := ParseData([]byte(data2Childs))
-	if err != nil {
-		t.Fatal(err)
-	}
+	tree := parseTestData(t, []byte(data2Childs))
 	if len(tree.TraceMap) != 3 {
 		t.Fatalf("Incorrect Root Pid. Expected: 3, Got %d", tree.RootPid)
 	}
@@ -188,10 +182,7 @@ func TestParseLoop1Grandchild(t *testing.T) {
 						1 clone() = 2
 						2 clone() = 3
 						3 open() = 4`
-	tree, err := ParseData([]byte(data1Grandchild))
-	if err != nil {
-		t.Fatal(err)
-	}
+	tree := parseTestData(t, []byte(data1Grandchild))
 	if len(tree.Ptree[tree.RootPid]) != 1 {
 		t.Fatalf("Expect RootPid to have 1 child. Got %d", tree.RootPid)
 	}
@@ -211,10 +202,7 @@ func TestParseGroupType(t *testing.T) {
 		{`open([1 2 3]) = 0`},
 	}
 	for _, test := range tests {
-		tree, err := ParseData([]byte(test.test))
-		if err != nil {
-			t.Fatal(err)
-		}
+		tree := parseTestData(t, []byte(test.test))
 		call := tree.TraceMap[tree.RootPid].Calls[0]
 		_, ok := call.Args[0].(*GroupType)
 		if !ok {

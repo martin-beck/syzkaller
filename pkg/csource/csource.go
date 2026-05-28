@@ -27,7 +27,6 @@ import (
 	"bytes"
 	"fmt"
 	"math/bits"
-	"os"
 	"regexp"
 	"slices"
 	"sort"
@@ -604,11 +603,10 @@ func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool, ini
 			// data4 := msghdr[4].(*prog.ConstArg).Val
 
 			totalLength := uint64(0)
-			for idx, msg := range data3 {
+			for _, msg := range data3 {
 				iov := msg.(*prog.GroupArg).Inner
 				msglen := iov[1].(*prog.ConstArg).Val
 				totalLength += msglen
-				fmt.Fprintf(os.Stderr, "Message %d (%s) size: %d\n", idx, call.Meta.CallName, msglen)
 			}
 
 			msgSizes[i] = totalLength
