@@ -130,6 +130,7 @@ func Write(p *prog.Prog, opts Options) (program []byte, metaData string, err err
 	if err := opts.Check(p.Target.OS); err != nil {
 		return nil, "", fmt.Errorf("csource: invalid opts: %w", err)
 	}
+	resetGenerationState()
 	ctx := &context{
 		p:         p,
 		opts:      opts,
@@ -138,6 +139,18 @@ func Write(p *prog.Prog, opts Options) (program []byte, metaData string, err err
 		calls:     make(map[string]uint64),
 	}
 	return ctx.generateSource()
+}
+
+func resetGenerationState() {
+	missedFDResources = make(map[uint64]bool)
+	connectFDs = make(map[uint64]bool)
+	acceptFDs = make(map[uint64]bool)
+	readFDSizes = make(map[uint64]uint64)
+	NetOpsFDs = make(map[uint64][]NetOpSize)
+	NetOpsFDsConnect = make(map[uint64][]NetOpSize)
+	NetOpsFDsAccept = make(map[uint64][]NetOpSize)
+	listenFDs = make(map[uint64]bool)
+	initFDs = make(map[uint64]bool)
 }
 
 type context struct {
@@ -173,55 +186,85 @@ func generateSandboxFunctionSignature(sandboxName string, sandboxArg int, ctx *c
 }
 
 func (ctx *context) mapToArrayStringBool(inMap map[string]bool) string {
-	var outStr string
+	keys := make([]string, 0, len(inMap))
 	for key := range inMap {
-		outStr = fmt.Sprintf("%s,\"%s\"", outStr, key)
+		keys = append(keys, key)
 	}
-	// remove first commata
-	if len(inMap) > 0 {
-		outStr = outStr[1:]
-	}
+	sort.Strings(keys)
 
-	return outStr
+	values := make([]string, 0, len(keys))
+	for _, key := range keys {
+		values = append(values, fmt.Sprintf("\"%s\"", key))
+	}
+	return strings.Join(values, ",")
+}
+
+func sortedUint64BoolKeys(inMap map[uint64]bool) []uint64 {
+	keys := make([]uint64, 0, len(inMap))
+	for key := range inMap {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i] < keys[j]
+	})
+	return keys
+}
+
+func sortedUint64Uint64Keys(inMap map[uint64]uint64) []uint64 {
+	keys := make([]uint64, 0, len(inMap))
+	for key := range inMap {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i] < keys[j]
+	})
+	return keys
+}
+
+func sortedUint64StringKeys(inMap map[uint64]string) []uint64 {
+	keys := make([]uint64, 0, len(inMap))
+	for key := range inMap {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i] < keys[j]
+	})
+	return keys
+}
+
+func sortedUint64NetOpSizeKeys(inMap map[uint64][]NetOpSize) []uint64 {
+	keys := make([]uint64, 0, len(inMap))
+	for key := range inMap {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i] < keys[j]
+	})
+	return keys
 }
 
 func (ctx *context) mapToArrayUint64Uint64(inMap map[uint64]uint64) string {
-	var outStr string
-	for _, value := range inMap {
-		outStr = fmt.Sprintf("%s,%d", outStr, value)
+	values := make([]string, 0, len(inMap))
+	for _, key := range sortedUint64Uint64Keys(inMap) {
+		values = append(values, fmt.Sprint(inMap[key]))
 	}
-	// remove first commata
-	if len(inMap) > 0 {
-		outStr = outStr[1:]
-	}
-
-	return outStr
+	return strings.Join(values, ",")
 }
 
 func (ctx *context) mapToArrayUint64String(inMap map[uint64]string) string {
-	var outStr string
-	for _, value := range inMap {
-		outStr = fmt.Sprintf("%s,\"%s\"", outStr, value)
+	values := make([]string, 0, len(inMap))
+	for _, key := range sortedUint64StringKeys(inMap) {
+		values = append(values, fmt.Sprintf("\"%s\"", inMap[key]))
 	}
-	// remove first commata
-	if len(inMap) > 0 {
-		outStr = outStr[1:]
-	}
-
-	return outStr
+	return strings.Join(values, ",")
 }
 
 func toStringArray(opMap map[uint64][]NetOpSize) string {
-	idx := 0
-	opsSeq := ""
-	for res := range opMap {
-		if idx > 0 {
-			opsSeq += ", "
-		}
-		opsSeq += "\"" + NetOpsString(res, opMap) + "\""
-		idx++
+	opsSeq := make([]string, 0, len(opMap))
+	for _, res := range sortedUint64NetOpSizeKeys(opMap) {
+		opsSeq = append(opsSeq, "\""+NetOpsString(res, opMap)+"\"")
 	}
-	return opsSeq
+	return strings.Join(opsSeq, ", ")
 }
 
 func (ctx *context) generateSource() ([]byte, string, error) {
@@ -289,13 +332,14 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 
 	// Leaking file descriptors
 	closeBuf := new(bytes.Buffer)
-	for fdRes, open := range missedFDResources {
-		if open {
-			// only close file descriptors that are not part if the reg init function
-			// TODO: check the potential usage of initFDs below, and in the whole file.
-			if _, ok := listenFDs[fdRes]; !ok {
-				fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(ctx->r)[%v]);\n", fdRes)
-			}
+	for _, fdRes := range sortedUint64BoolKeys(missedFDResources) {
+		if !missedFDResources[fdRes] {
+			continue
+		}
+		// only close file descriptors that are not part if the reg init function
+		// TODO: check the potential usage of initFDs below, and in the whole file.
+		if _, ok := listenFDs[fdRes]; !ok {
+			fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(ctx->r)[%v]);\n", fdRes)
 		}
 	}
 
@@ -353,7 +397,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 
 	// Get number of listen annotations
 	var callsNetSrvDereg []string
-	for rIdx := range listenFDs {
+	for _, rIdx := range sortedUint64BoolKeys(listenFDs) {
 		callsNetSrvDereg = append(callsNetSrvDereg, fmt.Sprintf("\tclose(UNIQUE_VAR(ctx->r)[%d]);", rIdx))
 	}
 	callsNetSrvDereg = append(callsNetSrvDereg, "\tfree(UNIQUE_VAR(ctx->r));")
@@ -747,7 +791,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	NetOpsFDsConnect = tmpOps
 
 	tmpOps = make(map[uint64]([]NetOpSize))
-	for res := range acceptFDs {
+	for _, res := range sortedUint64BoolKeys(acceptFDs) {
 		nop, ok := NetOpsFDs[res]
 		if ok {
 			tmpOps[res] = nop
