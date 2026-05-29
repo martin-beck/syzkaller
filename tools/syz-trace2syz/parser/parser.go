@@ -39,7 +39,7 @@ func ParseData(data []byte, splitThreads bool, numLines int) (*TraceTree, *Trace
 	scanner.Buffer(nil, 64<<20)
 	curLine := 0
 	for scanner.Scan() {
-		if curLine%1000 == 0 {
+		if curLine%1000 == 0 && numLines > 0 {
 			status = fmt.Sprintf("-- Progress [%03.1f/100%%] --", (100.0 * float32(curLine) / float32(numLines)))
 			fmt.Fprintf(os.Stderr, "%s\r", status)
 		}
