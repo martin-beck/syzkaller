@@ -13,7 +13,7 @@ import (
 
 func parseTestData(t *testing.T, data []byte) *TraceTree {
 	t.Helper()
-	tree, _, err := ParseData(data, true)
+	tree, _, err := ParseData(data, true, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
