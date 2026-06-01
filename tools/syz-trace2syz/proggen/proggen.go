@@ -6,26 +6,96 @@
 package proggen
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
+	"strings"
 
 	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/prog"
 	"github.com/google/syzkaller/tools/syz-trace2syz/parser"
 )
 
+func lineCounter(r io.Reader) (int, error) {
+	buf := make([]byte, 32*1024)
+	count := 0
+	lineSep := []byte{'\n'}
+
+	for {
+		c, err := r.Read(buf)
+		count += bytes.Count(buf[:c], lineSep)
+
+		switch {
+		case err == io.EOF:
+			return count, nil
+
+		case err != nil:
+			return count, err
+		}
+	}
+}
+
+func ReadFile(filename string) ([]byte, int, error) {
+	var status string
+	var outBuffer []byte
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Fatal(err)
+		return nil, 0, err
+	}
+	defer file.Close()
+
+	file.Seek(0, 0)
+	numLines, err := lineCounter(file)
+	curLine := 0
+	if err != nil || numLines < 1 {
+		log.Fatal(err)
+		return nil, 0, err
+	}
+
+	file.Seek(0, 0)
+	scanner := bufio.NewScanner(file)
+	// maxCapacity := int(64 << 20)
+	// buf := make([]byte, maxCapacity)
+	// scanner.Buffer(buf, maxCapacity)
+	scanner.Buffer(nil, 64<<20)
+	for scanner.Scan() {
+		if curLine%1000 == 0 {
+			status = fmt.Sprintf("-- Progress [%03.1f/100%%] --", (100.0 * float32(curLine) / float32(numLines)))
+			fmt.Fprintf(os.Stderr, "%s\r", status)
+		}
+		readBytes := scanner.Bytes()
+		outBuffer = append(outBuffer, readBytes...)
+		outBuffer = append(outBuffer, byte('\n'))
+		curLine++
+	}
+	fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
+
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
+		return nil, 0, err
+	}
+
+	return outBuffer, numLines, nil
+}
+
 func ParseFile(filename string, target *prog.Target, splitThreads bool, argLength bool) ([]*prog.Prog, error) {
-	data, err := os.ReadFile(filename)
+	fmt.Fprintf(os.Stderr, "Reading file to memory\n")
+	// data, err := os.ReadFile(filename)
+	data, numLines, err := ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("error reading file: %v", err)
 	}
-	return ParseData(data, target, splitThreads, argLength)
+	return ParseData(data, target, splitThreads, argLength, numLines)
 }
 
-func ParseData(data []byte, target *prog.Target, splitThreads bool, argLength bool) ([]*prog.Prog, error) {
-	tree, trace, err := parser.ParseData(data, splitThreads)
+func ParseData(data []byte, target *prog.Target, splitThreads bool, argLength bool, numLines int) ([]*prog.Prog, error) {
+	fmt.Fprintf(os.Stderr, "Parsing data into syscalls\n")
+	tree, trace, err := parser.ParseData(data, splitThreads, numLines)
 	if err != nil {
 		return nil, err
 	}
@@ -72,6 +142,7 @@ type context struct {
 
 // genProg converts a trace to one of our programs.
 func genProg(trace *parser.Trace, target *prog.Target, argLength bool, randomized bool) *prog.Prog {
+	var status string
 	retCache := newRCache()
 	ctx := &context{
 		builder:     prog.MakeProgGen(target),
@@ -80,7 +151,13 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength bool, randomize
 		returnCache: retCache,
 		randomized:  randomized,
 	}
-	for _, sCall := range trace.Calls {
+	fmt.Fprintf(os.Stderr, "Parsing syscalls into syzlang\n")
+	numCalls := len(trace.Calls)
+	for sIdx, sCall := range trace.Calls {
+		if sIdx%1000 == 0 {
+			status = fmt.Sprintf("-- Progress [%03.1f/100%%] --", (100.0 * float32(sIdx) / float32(numCalls)))
+			fmt.Fprintf(os.Stderr, "%s\r", status)
+		}
 		if sCall.Paused {
 			// Probably a case where the call was killed by a signal like the following
 			// 2179  wait4(2180,  <unfinished ...>
@@ -97,9 +174,11 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength bool, randomize
 			continue
 		}
 		if err := ctx.builder.Append(call, argLength); err != nil {
+			fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 			log.Fatalf("%v", err)
 		}
 	}
+	fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 	p, err := ctx.builder.Finalize()
 	if err != nil {
 		log.Fatalf("error validating program: %v", err)

@@ -272,7 +272,7 @@ ioctl$RTC_WKALM_SET(r0, 0x4028700f, &(0x7f0000000040)={0x0, 0x0, {0x0, 0x0, 0x0,
 	}
 	for _, test := range tests {
 		input := strings.TrimSpace(test.input)
-		tree, _, err := parser.ParseData([]byte(input), true)
+		tree, _, err := parser.ParseData([]byte(input), true, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
