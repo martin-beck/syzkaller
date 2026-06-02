@@ -37,6 +37,22 @@ jobs:
           make ${{ matrix.tool }}
           go test ./tools/syz-${{ matrix.tool }}/...
 
+   CSource:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Run tests pkg/csource
+        run: |
+          go env -w GOBIN=$HOME/.local/bin
+          make prog2c
+          go test ./pkg/csource/...
+
    Determinism-Traces:
     runs-on: ubuntu-latest
     strategy:
