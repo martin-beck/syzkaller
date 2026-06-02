@@ -165,7 +165,7 @@ func testGenerationImpl(t *testing.T, test testData, target *prog.Target) (strin
 	}
 	var actualSyscalls []string
 	for _, execCall := range decoded.Calls {
-		actualSyscalls = append(actualSyscalls, ctx.fmtCallBody(execCall))
+		actualSyscalls = append(actualSyscalls, ctx.fmtCallBody(execCall, false))
 	}
 
 	if len(actualSyscalls) != len(test.calls) || len(actualSyscalls) != len(actualComments) {
