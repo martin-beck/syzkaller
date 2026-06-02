@@ -748,7 +748,7 @@ func (p *parser) parseArgString(t Type, dir Dir) (Arg, error) {
 			data = []byte(typ.Values[0])
 		}
 	}
-	if typ.Kind == BufferFilename && escapingFilename(string(data)) {
+	if typ.Kind == BufferFilename && !p.unsafe && escapingFilename(string(data)) {
 		return nil, fmt.Errorf("escaping filename %q", data)
 	}
 	return MakeDataArg(typ, dir, data), nil
