@@ -4,7 +4,6 @@
 package csource
 
 import (
-	"fmt"
 	"math"
 	"reflect"
 	"testing"
@@ -276,7 +275,7 @@ func enumerateField(OS string, opt Options, field int) []Options {
 			opts = append(opts, opt)
 		}
 	} else {
-		panic(fmt.Sprintf("field '%v' is not boolean", fldName))
+		opts = append(opts, opt)
 	}
 	var checked []Options
 	for _, opt := range opts {
