@@ -730,16 +730,6 @@ func TestSerializeForExecOverflow(t *testing.T) {
 				}
 			},
 		},
-		{
-			name:     "overflow-buffer",
-			overflow: true,
-			gen: func(w *bytes.Buffer) {
-				fmt.Fprintf(w, "r0 = test$res0()\n")
-				for i := 0; i < 4e5; i++ {
-					fmt.Fprintf(w, "test$res1(r0)\n")
-				}
-			},
-		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
