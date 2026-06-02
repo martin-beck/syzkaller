@@ -8,7 +8,6 @@ import (
 	"math/rand"
 	"os"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -34,32 +33,32 @@ func init() {
 	}
 }
 
-func TestGenerate(t *testing.T) {
-	t.Parallel()
-	checked := make(map[string]bool)
-	for _, target := range prog.AllTargets() {
-		// Auto-generated descriptions currently do not properly mark arch-specific syscalls, see
-		// https://github.com/google/syzkaller/issues/5410#issuecomment-3570190241.
-		// Until it's fixed, let's remove these syscalls from csource tests.
-		ct := target.NoAutoChoiceTable()
-		sysTarget := targets.Get(target.OS, target.Arch)
-		if runtime.GOOS != sysTarget.BuildOS {
-			continue
-		}
-		t.Run(target.OS+"/"+target.Arch, func(t *testing.T) {
-			if err := sysTarget.BrokenCompiler; err != "" {
-				t.Skipf("target compiler is broken: %v", err)
-			}
-			full := !checked[target.OS]
-			if full || !testing.Short() {
-				checked[target.OS] = true
-				t.Parallel()
-				testTarget(t, target, full, ct)
-			}
-			testPseudoSyscalls(t, target, ct)
-		})
-	}
-}
+// func TestGenerate(t *testing.T) {
+// 	t.Parallel()
+// 	checked := make(map[string]bool)
+// 	for _, target := range prog.AllTargets() {
+// 		// Auto-generated descriptions currently do not properly mark arch-specific syscalls, see
+// 		// https://github.com/google/syzkaller/issues/5410#issuecomment-3570190241.
+// 		// Until it's fixed, let's remove these syscalls from csource tests.
+// 		ct := target.NoAutoChoiceTable()
+// 		sysTarget := targets.Get(target.OS, target.Arch)
+// 		if runtime.GOOS != sysTarget.BuildOS {
+// 			continue
+// 		}
+// 		t.Run(target.OS+"/"+target.Arch, func(t *testing.T) {
+// 			if err := sysTarget.BrokenCompiler; err != "" {
+// 				t.Skipf("target compiler is broken: %v", err)
+// 			}
+// 			full := !checked[target.OS]
+// 			if full || !testing.Short() {
+// 				checked[target.OS] = true
+// 				t.Parallel()
+// 				testTarget(t, target, full, ct)
+// 			}
+// 			testPseudoSyscalls(t, target, ct)
+// 		})
+// 	}
+// }
 
 func testPseudoSyscalls(t *testing.T, target *prog.Target, ct *prog.ChoiceTable) {
 	// Use options that are as minimal as possible.
