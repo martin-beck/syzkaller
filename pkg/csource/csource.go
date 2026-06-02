@@ -199,7 +199,7 @@ func (ctx *context) mapToArrayStringBool(inMap map[string]bool) string {
 	return strings.Join(values, ",")
 }
 
-func sortedUint64BoolKeys(inMap map[uint64]bool) []uint64 {
+func sortedUint64AnyKeys[V bool | uint64 | string | []NetOpSize](inMap map[uint64]V) []uint64 {
 	keys := make([]uint64, 0, len(inMap))
 	for key := range inMap {
 		keys = append(keys, key)
@@ -210,61 +210,28 @@ func sortedUint64BoolKeys(inMap map[uint64]bool) []uint64 {
 	return keys
 }
 
-func sortedUint64Uint64Keys(inMap map[uint64]uint64) []uint64 {
-	keys := make([]uint64, 0, len(inMap))
-	for key := range inMap {
-		keys = append(keys, key)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		return keys[i] < keys[j]
-	})
-	return keys
-}
-
-func sortedUint64StringKeys(inMap map[uint64]string) []uint64 {
-	keys := make([]uint64, 0, len(inMap))
-	for key := range inMap {
-		keys = append(keys, key)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		return keys[i] < keys[j]
-	})
-	return keys
-}
-
-func sortedUint64NetOpSizeKeys(inMap map[uint64][]NetOpSize) []uint64 {
-	keys := make([]uint64, 0, len(inMap))
-	for key := range inMap {
-		keys = append(keys, key)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		return keys[i] < keys[j]
-	})
-	return keys
-}
-
-func (ctx *context) mapToArrayUint64Uint64(inMap map[uint64]uint64) string {
-	values := make([]string, 0, len(inMap))
-	for _, key := range sortedUint64Uint64Keys(inMap) {
-		values = append(values, fmt.Sprint(inMap[key]))
-	}
-	return strings.Join(values, ",")
-}
-
-func (ctx *context) mapToArrayUint64String(inMap map[uint64]string) string {
-	values := make([]string, 0, len(inMap))
-	for _, key := range sortedUint64StringKeys(inMap) {
-		values = append(values, fmt.Sprintf("\"%s\"", inMap[key]))
-	}
-	return strings.Join(values, ",")
-}
-
-func toStringArray(opMap map[uint64][]NetOpSize) string {
+func toStringArray[V uint64 | string | []NetOpSize](opMap map[uint64]V) (string, error) {
 	opsSeq := make([]string, 0, len(opMap))
-	for _, res := range sortedUint64NetOpSizeKeys(opMap) {
-		opsSeq = append(opsSeq, "\""+NetOpsString(res, opMap)+"\"")
+	for _, res := range sortedUint64AnyKeys(opMap) {
+
+		v_string := ""
+		switch val := any(opMap).(type) {
+		case map[uint64]uint64:
+			v_string = fmt.Sprint(val[res])
+
+		case map[uint64]string:
+			v_string = fmt.Sprintf("\"%s\"", val[res])
+
+		case map[uint64][]NetOpSize:
+			v_string = "\"" + NetOpsString(res, val) + "\""
+
+		default:
+			return "", fmt.Errorf("Unknown type for array to string conversion! %T\n", opMap)
+		}
+
+		opsSeq = append(opsSeq, v_string)
 	}
-	return strings.Join(opsSeq, ", ")
+	return strings.Join(opsSeq, ", "), nil
 }
 
 func (ctx *context) generateSource() ([]byte, string, error) {
@@ -332,7 +299,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 
 	// Leaking file descriptors
 	closeBuf := new(bytes.Buffer)
-	for _, fdRes := range sortedUint64BoolKeys(missedFDResources) {
+	for _, fdRes := range sortedUint64AnyKeys(missedFDResources) {
 		if !missedFDResources[fdRes] {
 			continue
 		}
@@ -347,11 +314,16 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	subdirs := ctx.mapToArrayStringBool(ctx.opts.SubDirs)
 
 	// file sizes for truncation
-	filesizes := ctx.mapToArrayUint64Uint64(ctx.opts.FileSizes)
+	filesizes, err := toStringArray(ctx.opts.FileSizes)
+	if err != nil {
+		return nil, "", err
+	}
 
 	// file names for truncation
-	filenames := ctx.mapToArrayUint64String(ctx.opts.FileNames)
-
+	filenames, err := toStringArray(ctx.opts.FileNames)
+	if err != nil {
+		return nil, "", err
+	}
 	sandboxFunc := generateSandboxFunctionSignature(ctx.opts.Sandbox, ctx.opts.SandboxArg, ctx)
 
 	results := varsBuf.String()
@@ -397,7 +369,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 
 	// Get number of listen annotations
 	var callsNetSrvDereg []string
-	for _, rIdx := range sortedUint64BoolKeys(listenFDs) {
+	for _, rIdx := range sortedUint64AnyKeys(listenFDs) {
 		callsNetSrvDereg = append(callsNetSrvDereg, fmt.Sprintf("\tclose(UNIQUE_VAR(ctx->r)[%d]);", rIdx))
 	}
 	callsNetSrvDereg = append(callsNetSrvDereg, "\tfree(UNIQUE_VAR(ctx->r));")
@@ -485,7 +457,10 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		header += "const static uint64_t UNIQUE_VAR(maxWriteBufferSizeAlignment) = " + fmt.Sprintf("%d", ctx.opts.MaxWriteSizeAlignment) + "ul;\n"
 
 		// Connect NetOps
-		opsSeq := toStringArray(NetOpsFDsConnect)
+		opsSeq, err := toStringArray(NetOpsFDsConnect)
+		if err != nil {
+			return nil, "", err
+		}
 		header += fmt.Sprintf("const char* UNIQUE_VAR(netops_connect)[%d] = {%s};\n", len(NetOpsFDsConnect), opsSeq)
 		// Add to meta data if there is networking sequence
 		if opsSeq != "" {
@@ -493,7 +468,10 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		}
 
 		// Accept NetOps
-		opsSeq = toStringArray(NetOpsFDsAccept)
+		opsSeq, err = toStringArray(NetOpsFDsAccept)
+		if err != nil {
+			return nil, "", err
+		}
 		header += fmt.Sprintf("const char* UNIQUE_VAR(netops_accept)[%d] = {%s};\n", len(NetOpsFDsAccept), opsSeq)
 		// Add to meta data if there is networking sequence
 		if opsSeq != "" {
@@ -791,7 +769,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	NetOpsFDsConnect = tmpOps
 
 	tmpOps = make(map[uint64]([]NetOpSize))
-	for _, res := range sortedUint64BoolKeys(acceptFDs) {
+	for _, res := range sortedUint64AnyKeys(acceptFDs) {
 		nop, ok := NetOpsFDs[res]
 		if ok {
 			tmpOps[res] = nop
