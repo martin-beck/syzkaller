@@ -4,7 +4,6 @@
 package csource
 
 import (
-	"fmt"
 	"math"
 	"reflect"
 	"testing"
@@ -225,12 +224,13 @@ func allOptionsPermutations(OS string) []Options {
 
 func dedup(opts []Options) []Options {
 	pos := 0
-	dedup := make(map[Options]bool)
+	dedup := make(map[string]bool)
 	for _, opt := range opts {
-		if dedup[opt] {
+		key := string(opt.Serialize())
+		if dedup[key] {
 			continue
 		}
-		dedup[opt] = true
+		dedup[key] = true
 		opts[pos] = opt
 		pos++
 	}
@@ -275,7 +275,7 @@ func enumerateField(OS string, opt Options, field int) []Options {
 			opts = append(opts, opt)
 		}
 	} else {
-		panic(fmt.Sprintf("field '%v' is not boolean", fldName))
+		opts = append(opts, opt)
 	}
 	var checked []Options
 	for _, opt := range opts {

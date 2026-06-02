@@ -130,6 +130,7 @@ func Write(p *prog.Prog, opts Options) (program []byte, metaData string, err err
 	if err := opts.Check(p.Target.OS); err != nil {
 		return nil, "", fmt.Errorf("csource: invalid opts: %w", err)
 	}
+	resetGenerationState()
 	ctx := &context{
 		p:         p,
 		opts:      opts,
@@ -138,6 +139,18 @@ func Write(p *prog.Prog, opts Options) (program []byte, metaData string, err err
 		calls:     make(map[string]uint64),
 	}
 	return ctx.generateSource()
+}
+
+func resetGenerationState() {
+	missedFDResources = make(map[uint64]bool)
+	connectFDs = make(map[uint64]bool)
+	acceptFDs = make(map[uint64]bool)
+	readFDSizes = make(map[uint64]uint64)
+	NetOpsFDs = make(map[uint64][]NetOpSize)
+	NetOpsFDsConnect = make(map[uint64][]NetOpSize)
+	NetOpsFDsAccept = make(map[uint64][]NetOpSize)
+	listenFDs = make(map[uint64]bool)
+	initFDs = make(map[uint64]bool)
 }
 
 type context struct {
@@ -173,55 +186,52 @@ func generateSandboxFunctionSignature(sandboxName string, sandboxArg int, ctx *c
 }
 
 func (ctx *context) mapToArrayStringBool(inMap map[string]bool) string {
-	var outStr string
+	keys := make([]string, 0, len(inMap))
 	for key := range inMap {
-		outStr = fmt.Sprintf("%s,\"%s\"", outStr, key)
+		keys = append(keys, key)
 	}
-	// remove first commata
-	if len(inMap) > 0 {
-		outStr = outStr[1:]
-	}
+	sort.Strings(keys)
 
-	return outStr
+	values := make([]string, 0, len(keys))
+	for _, key := range keys {
+		values = append(values, fmt.Sprintf("\"%s\"", key))
+	}
+	return strings.Join(values, ",")
 }
 
-func (ctx *context) mapToArrayUint64Uint64(inMap map[uint64]uint64) string {
-	var outStr string
-	for _, value := range inMap {
-		outStr = fmt.Sprintf("%s,%d", outStr, value)
+func sortedUint64AnyKeys[V bool | uint64 | string | []NetOpSize](inMap map[uint64]V) []uint64 {
+	keys := make([]uint64, 0, len(inMap))
+	for key := range inMap {
+		keys = append(keys, key)
 	}
-	// remove first commata
-	if len(inMap) > 0 {
-		outStr = outStr[1:]
-	}
-
-	return outStr
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i] < keys[j]
+	})
+	return keys
 }
 
-func (ctx *context) mapToArrayUint64String(inMap map[uint64]string) string {
-	var outStr string
-	for _, value := range inMap {
-		outStr = fmt.Sprintf("%s,\"%s\"", outStr, value)
-	}
-	// remove first commata
-	if len(inMap) > 0 {
-		outStr = outStr[1:]
-	}
+func toStringArray[V uint64 | string | []NetOpSize](opMap map[uint64]V) (string, error) {
+	opsSeq := make([]string, 0, len(opMap))
+	for _, res := range sortedUint64AnyKeys(opMap) {
 
-	return outStr
-}
+		v_string := ""
+		switch val := any(opMap).(type) {
+		case map[uint64]uint64:
+			v_string = fmt.Sprint(val[res])
 
-func toStringArray(opMap map[uint64][]NetOpSize) string {
-	idx := 0
-	opsSeq := ""
-	for res := range opMap {
-		if idx > 0 {
-			opsSeq += ", "
+		case map[uint64]string:
+			v_string = fmt.Sprintf("\"%s\"", val[res])
+
+		case map[uint64][]NetOpSize:
+			v_string = "\"" + NetOpsString(res, val) + "\""
+
+		default:
+			return "", fmt.Errorf("Unknown type for array to string conversion! %T\n", opMap)
 		}
-		opsSeq += "\"" + NetOpsString(res, opMap) + "\""
-		idx++
+
+		opsSeq = append(opsSeq, v_string)
 	}
-	return opsSeq
+	return strings.Join(opsSeq, ", "), nil
 }
 
 func (ctx *context) generateSource() ([]byte, string, error) {
@@ -289,13 +299,14 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 
 	// Leaking file descriptors
 	closeBuf := new(bytes.Buffer)
-	for fdRes, open := range missedFDResources {
-		if open {
-			// only close file descriptors that are not part if the reg init function
-			// TODO: check the potential usage of initFDs below, and in the whole file.
-			if _, ok := listenFDs[fdRes]; !ok {
-				fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(ctx->r)[%v]);\n", fdRes)
-			}
+	for _, fdRes := range sortedUint64AnyKeys(missedFDResources) {
+		if !missedFDResources[fdRes] {
+			continue
+		}
+		// only close file descriptors that are not part if the reg init function
+		// TODO: check the potential usage of initFDs below, and in the whole file.
+		if _, ok := listenFDs[fdRes]; !ok {
+			fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(ctx->r)[%v]);\n", fdRes)
 		}
 	}
 
@@ -303,11 +314,16 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	subdirs := ctx.mapToArrayStringBool(ctx.opts.SubDirs)
 
 	// file sizes for truncation
-	filesizes := ctx.mapToArrayUint64Uint64(ctx.opts.FileSizes)
+	filesizes, err := toStringArray(ctx.opts.FileSizes)
+	if err != nil {
+		return nil, "", err
+	}
 
 	// file names for truncation
-	filenames := ctx.mapToArrayUint64String(ctx.opts.FileNames)
-
+	filenames, err := toStringArray(ctx.opts.FileNames)
+	if err != nil {
+		return nil, "", err
+	}
 	sandboxFunc := generateSandboxFunctionSignature(ctx.opts.Sandbox, ctx.opts.SandboxArg, ctx)
 
 	results := varsBuf.String()
@@ -353,7 +369,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 
 	// Get number of listen annotations
 	var callsNetSrvDereg []string
-	for rIdx := range listenFDs {
+	for _, rIdx := range sortedUint64AnyKeys(listenFDs) {
 		callsNetSrvDereg = append(callsNetSrvDereg, fmt.Sprintf("\tclose(UNIQUE_VAR(ctx->r)[%d]);", rIdx))
 	}
 	callsNetSrvDereg = append(callsNetSrvDereg, "\tfree(UNIQUE_VAR(ctx->r));")
@@ -441,7 +457,10 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		header += "const static uint64_t UNIQUE_VAR(maxWriteBufferSizeAlignment) = " + fmt.Sprintf("%d", ctx.opts.MaxWriteSizeAlignment) + "ul;\n"
 
 		// Connect NetOps
-		opsSeq := toStringArray(NetOpsFDsConnect)
+		opsSeq, err := toStringArray(NetOpsFDsConnect)
+		if err != nil {
+			return nil, "", err
+		}
 		header += fmt.Sprintf("const char* UNIQUE_VAR(netops_connect)[%d] = {%s};\n", len(NetOpsFDsConnect), opsSeq)
 		// Add to meta data if there is networking sequence
 		if opsSeq != "" {
@@ -449,7 +468,10 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		}
 
 		// Accept NetOps
-		opsSeq = toStringArray(NetOpsFDsAccept)
+		opsSeq, err = toStringArray(NetOpsFDsAccept)
+		if err != nil {
+			return nil, "", err
+		}
 		header += fmt.Sprintf("const char* UNIQUE_VAR(netops_accept)[%d] = {%s};\n", len(NetOpsFDsAccept), opsSeq)
 		// Add to meta data if there is networking sequence
 		if opsSeq != "" {
@@ -593,20 +615,48 @@ func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool, ini
 	// generate sendmsg, recvmsg sizes
 	for i, call := range p.Calls {
 		if call.Meta.CallName == "recvmsg" || call.Meta.CallName == "sendmsg" {
-			arg1 := call.Args[1]
-			msghdr := arg1.(*prog.PointerArg).Res.(*prog.GroupArg).Inner
+			if len(call.Args) <= 1 {
+				continue
+			}
+			arg1, ok := call.Args[1].(*prog.PointerArg)
+			if !ok {
+				continue
+			}
+			msghdr, ok := arg1.Res.(*prog.GroupArg)
+			if !ok {
+				continue
+			}
+			if len(msghdr.Inner) <= 3 {
+				continue
+			}
 
 			// arg3 is array of iovec *msg_iov
-			data3 := msghdr[3].(*prog.PointerArg).Res.(*prog.GroupArg).Inner
+			iovPtr, ok := msghdr.Inner[3].(*prog.PointerArg)
+			if !ok {
+				continue
+			}
+			iovGroup, ok := iovPtr.Res.(*prog.GroupArg)
+			if !ok {
+				continue
+			}
 
 			// arg4 is number of iovec *msg_iov
 			// data4 := msghdr[4].(*prog.ConstArg).Val
 
 			totalLength := uint64(0)
-			for _, msg := range data3 {
-				iov := msg.(*prog.GroupArg).Inner
-				msglen := iov[1].(*prog.ConstArg).Val
-				totalLength += msglen
+			for _, msg := range iovGroup.Inner {
+				iov, ok := msg.(*prog.GroupArg)
+				if !ok {
+					continue
+				}
+				if len(iov.Inner) <= 1 {
+					continue
+				}
+				msglen, ok := iov.Inner[1].(*prog.ConstArg)
+				if !ok {
+					continue
+				}
+				totalLength += msglen.Val
 			}
 
 			msgSizes[i] = totalLength
@@ -747,7 +797,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	NetOpsFDsConnect = tmpOps
 
 	tmpOps = make(map[uint64]([]NetOpSize))
-	for res := range acceptFDs {
+	for _, res := range sortedUint64AnyKeys(acceptFDs) {
 		nop, ok := NetOpsFDs[res]
 		if ok {
 			tmpOps[res] = nop
@@ -1013,7 +1063,7 @@ func (ctx *context) generateCsumInet(w *bytes.Buffer, addr uint64, arg prog.Exec
 
 func (ctx *context) copyin(w *bytes.Buffer, csumSeq *int, copyin prog.ExecCopyin) {
 	PTR_OFFSET_STR_ADDR := ""
-	if valInMMapRange(ctx, copyin.Addr) {
+	if ctx.opts.CSB && valInMMapRange(ctx, copyin.Addr) {
 		PTR_OFFSET_STR_ADDR = "+PTR_OFFSET"
 	}
 
@@ -1040,12 +1090,16 @@ func (ctx *context) copyin(w *bytes.Buffer, csumSeq *int, copyin prog.ExecCopyin
 	case prog.ExecArgResult:
 		ctx.copyinVal(w, copyin.Addr, arg.Size, ctx.resultArgToStr(arg), arg.Format)
 	case prog.ExecArgData:
+		addr := fmt.Sprintf("0x%x", copyin.Addr)
+		if PTR_OFFSET_STR_ADDR != "" {
+			addr = fmt.Sprintf("(0x%xul%v)", copyin.Addr, PTR_OFFSET_STR_ADDR)
+		}
 		if bytes.Equal(arg.Data, bytes.Repeat(arg.Data[:1], len(arg.Data))) {
-			fmt.Fprintf(w, "\tNONFAILING(memset((void*)(0x%xul%v), %v, %v));\n",
-				copyin.Addr, PTR_OFFSET_STR_ADDR, arg.Data[0], len(arg.Data))
+			fmt.Fprintf(w, "\tNONFAILING(memset((void*)%v, %v, %v));\n",
+				addr, arg.Data[0], len(arg.Data))
 		} else {
-			fmt.Fprintf(w, "\tNONFAILING(memcpy((void*)(0x%xul%v), \"%s\", %v));\n",
-				copyin.Addr, PTR_OFFSET_STR_ADDR, toCString(arg.Data, arg.Readable), len(arg.Data))
+			fmt.Fprintf(w, "\tNONFAILING(memcpy((void*)%v, \"%s\", %v));\n",
+				addr, toCString(arg.Data, arg.Readable), len(arg.Data))
 		}
 	case prog.ExecArgCsum:
 		switch arg.Kind {
@@ -1073,7 +1127,7 @@ func trimLeftChars(s string, n int) string {
 func (ctx *context) copyinVal(w *bytes.Buffer, addr, size uint64, val string, bf prog.BinaryFormat) {
 	PTR_OFFSET_STR_ADDR := ""
 	PTR_OFFSET_STR_VAL := ""
-	if valInMMapRange(ctx, addr) {
+	if ctx.opts.CSB && valInMMapRange(ctx, addr) {
 		PTR_OFFSET_STR_ADDR = "+PTR_OFFSET"
 	}
 
@@ -1081,7 +1135,7 @@ func (ctx *context) copyinVal(w *bytes.Buffer, addr, size uint64, val string, bf
 	if strings.HasPrefix(strVal, "0x") {
 		strVal = strVal[2:]
 		n, err := strconv.ParseUint(strVal, 16, 64)
-		if err == nil && valInMMapRange(ctx, n) {
+		if ctx.opts.CSB && err == nil && valInMMapRange(ctx, n) {
 			PTR_OFFSET_STR_VAL = "+PTR_OFFSET"
 		}
 	}
@@ -1130,14 +1184,15 @@ func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, resCopyout bool
 	fmt.Fprintf(w, "\n")
 	if resCopyout {
 		initFDs[call.Index] = true
-		fmt.Fprintf(w, "\t\tUNIQUE_VAR(ctx->r)[%v] = res;\n", call.Index)
+		fmt.Fprintf(w, "\t\t%v[%v] = res;\n", ctx.resultArrayName(), call.Index)
 	}
 	for _, copyout := range call.Copyout {
 		PTR_OFFSET_STR_ADDR := ""
-		if valInMMapRange(ctx, copyout.Addr) {
+		if ctx.opts.CSB && valInMMapRange(ctx, copyout.Addr) {
 			PTR_OFFSET_STR_ADDR = "+PTR_OFFSET"
 		}
-		fmt.Fprintf(w, "\t\tNONFAILING(UNIQUE_VAR(ctx->r)[%v] = *(uint%v*)(0x%xul%v));\n", copyout.Index, copyout.Size*8, copyout.Addr, PTR_OFFSET_STR_ADDR)
+		fmt.Fprintf(w, "\t\tNONFAILING(%v[%v] = *(uint%v*)(0x%xul%v));\n",
+			ctx.resultArrayName(), copyout.Index, copyout.Size*8, copyout.Addr, PTR_OFFSET_STR_ADDR)
 	}
 	if copyoutMultiple {
 		fmt.Fprintf(w, "\t}\n")
@@ -1257,7 +1312,7 @@ func handleBigEndian(arg prog.ExecArgConst, val string) string {
 }
 
 func (ctx *context) resultArgToStr(arg prog.ExecArgResult) string {
-	res := fmt.Sprintf("UNIQUE_VAR(ctx->r)[%v]", arg.Index)
+	res := fmt.Sprintf("%v[%v]", ctx.resultArrayName(), arg.Index)
 	if arg.DivOp != 0 {
 		res = fmt.Sprintf("%v/%v", res, arg.DivOp)
 	}
@@ -1268,6 +1323,13 @@ func (ctx *context) resultArgToStr(arg prog.ExecArgResult) string {
 		res = fmt.Sprintf("htobe%v(%v)", arg.Size*8, res)
 	}
 	return res
+}
+
+func (ctx *context) resultArrayName() string {
+	if ctx.opts.CSB {
+		return "UNIQUE_VAR(ctx->r)"
+	}
+	return "r"
 }
 
 func (ctx *context) postProcess(result []byte) []byte {

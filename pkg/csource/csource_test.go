@@ -4,6 +4,7 @@
 package csource
 
 import (
+	"flag"
 	"fmt"
 	"math/rand"
 	"os"
@@ -21,6 +22,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+var flagRunGenerateTest = flag.Bool("runGenerate", false, "run TestGenerate")
+
 func init() {
 	// csource tests consume too much memory under race detector (>1GB),
 	// and periodically timeout on Travis. So we skip them.
@@ -35,6 +38,9 @@ func init() {
 }
 
 func TestGenerate(t *testing.T) {
+	if !*flagRunGenerateTest {
+		t.Skip("skipping without -runGenerate")
+	}
 	t.Parallel()
 	checked := make(map[string]bool)
 	for _, target := range prog.AllTargets() {
@@ -181,6 +187,90 @@ func TestExecutorMacros(t *testing.T) {
 	}
 }
 
+func TestSortedUint64AnyKeys(t *testing.T) {
+	t.Parallel()
+
+	expected := []uint64{1, 2, 3}
+	t.Run("bool", func(t *testing.T) {
+		t.Parallel()
+		got := sortedUint64AnyKeys(map[uint64]bool{
+			3: true,
+			1: false,
+			2: true,
+		})
+		assert.Equal(t, expected, got)
+	})
+	t.Run("uint64", func(t *testing.T) {
+		t.Parallel()
+		got := sortedUint64AnyKeys(map[uint64]uint64{
+			3: 30,
+			1: 10,
+			2: 20,
+		})
+		assert.Equal(t, expected, got)
+	})
+	t.Run("string", func(t *testing.T) {
+		t.Parallel()
+		got := sortedUint64AnyKeys(map[uint64]string{
+			3: "three",
+			1: "one",
+			2: "two",
+		})
+		assert.Equal(t, expected, got)
+	})
+	t.Run("net op size", func(t *testing.T) {
+		t.Parallel()
+		got := sortedUint64AnyKeys(map[uint64][]NetOpSize{
+			3: {{Op: NetRead, Num: 3, Size: 30}},
+			1: {{Op: NetWrite, Num: 1, Size: 10}},
+			2: {{Op: NetRead, Num: 2, Size: 20}},
+		})
+		assert.Equal(t, expected, got)
+	})
+}
+
+func TestToStringArray(t *testing.T) {
+	t.Parallel()
+
+	t.Run("uint64", func(t *testing.T) {
+		t.Parallel()
+		got, err := toStringArray(map[uint64]uint64{
+			3: 30,
+			1: 10,
+			2: 20,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, "10, 20, 30", got)
+	})
+	t.Run("string", func(t *testing.T) {
+		t.Parallel()
+		got, err := toStringArray(map[uint64]string{
+			3: "three",
+			1: "one",
+			2: "two",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, `"one", "two", "three"`, got)
+	})
+	t.Run("net op size", func(t *testing.T) {
+		t.Parallel()
+		got, err := toStringArray(map[uint64][]NetOpSize{
+			3: {
+				{Op: NetRead, Num: 3, Size: 30},
+			},
+			1: {
+				{Op: NetWrite, Num: 1, Size: 10},
+				{Op: NetRead, Num: 2, Size: 20},
+			},
+			2: {
+				{Op: NetRead, Num: 2, Size: 40},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, `"1w10-2r20", "2r40", "3r30"`, got)
+	})
+}
+
 func TestSource(t *testing.T) {
 	t.Parallel()
 
@@ -296,7 +386,7 @@ syscall(SYS_csource8, /*num=*/(intptr_t)-1);
 			// Disable comment generation, as it's not the focus of these tests.
 			// This simplifies the expected output. For tests covering comments, see
 			// /pkg/csource/syscall_generation_test.go.
-			calls, _, err := ctx.generateProgCalls(p, false, false)
+			calls, _, err := ctx.generateProgCalls(p, false, false, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -309,7 +399,7 @@ syscall(SYS_csource8, /*num=*/(intptr_t)-1);
 }
 
 func generateSandboxFunctionSignatureTestCase(t *testing.T, sandbox string, sandboxArg int, expected, message string) {
-	actual := generateSandboxFunctionSignature(sandbox, sandboxArg)
+	actual := generateSandboxFunctionSignature(sandbox, sandboxArg, &context{})
 	assert.Equal(t, actual, expected, message)
 }
 
