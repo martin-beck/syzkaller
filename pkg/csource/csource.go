@@ -615,20 +615,48 @@ func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool, ini
 	// generate sendmsg, recvmsg sizes
 	for i, call := range p.Calls {
 		if call.Meta.CallName == "recvmsg" || call.Meta.CallName == "sendmsg" {
-			arg1 := call.Args[1]
-			msghdr := arg1.(*prog.PointerArg).Res.(*prog.GroupArg).Inner
+			if len(call.Args) <= 1 {
+				continue
+			}
+			arg1, ok := call.Args[1].(*prog.PointerArg)
+			if !ok {
+				continue
+			}
+			msghdr, ok := arg1.Res.(*prog.GroupArg)
+			if !ok {
+				continue
+			}
+			if len(msghdr.Inner) <= 3 {
+				continue
+			}
 
 			// arg3 is array of iovec *msg_iov
-			data3 := msghdr[3].(*prog.PointerArg).Res.(*prog.GroupArg).Inner
+			iovPtr, ok := msghdr.Inner[3].(*prog.PointerArg)
+			if !ok {
+				continue
+			}
+			iovGroup, ok := iovPtr.Res.(*prog.GroupArg)
+			if !ok {
+				continue
+			}
 
 			// arg4 is number of iovec *msg_iov
 			// data4 := msghdr[4].(*prog.ConstArg).Val
 
 			totalLength := uint64(0)
-			for _, msg := range data3 {
-				iov := msg.(*prog.GroupArg).Inner
-				msglen := iov[1].(*prog.ConstArg).Val
-				totalLength += msglen
+			for _, msg := range iovGroup.Inner {
+				iov, ok := msg.(*prog.GroupArg)
+				if !ok {
+					continue
+				}
+				if len(iov.Inner) <= 1 {
+					continue
+				}
+				msglen, ok := iov.Inner[1].(*prog.ConstArg)
+				if !ok {
+					continue
+				}
+				totalLength += msglen.Val
 			}
 
 			msgSizes[i] = totalLength
@@ -1035,7 +1063,7 @@ func (ctx *context) generateCsumInet(w *bytes.Buffer, addr uint64, arg prog.Exec
 
 func (ctx *context) copyin(w *bytes.Buffer, csumSeq *int, copyin prog.ExecCopyin) {
 	PTR_OFFSET_STR_ADDR := ""
-	if valInMMapRange(ctx, copyin.Addr) {
+	if ctx.opts.CSB && valInMMapRange(ctx, copyin.Addr) {
 		PTR_OFFSET_STR_ADDR = "+PTR_OFFSET"
 	}
 
@@ -1062,12 +1090,16 @@ func (ctx *context) copyin(w *bytes.Buffer, csumSeq *int, copyin prog.ExecCopyin
 	case prog.ExecArgResult:
 		ctx.copyinVal(w, copyin.Addr, arg.Size, ctx.resultArgToStr(arg), arg.Format)
 	case prog.ExecArgData:
+		addr := fmt.Sprintf("0x%x", copyin.Addr)
+		if PTR_OFFSET_STR_ADDR != "" {
+			addr = fmt.Sprintf("(0x%xul%v)", copyin.Addr, PTR_OFFSET_STR_ADDR)
+		}
 		if bytes.Equal(arg.Data, bytes.Repeat(arg.Data[:1], len(arg.Data))) {
-			fmt.Fprintf(w, "\tNONFAILING(memset((void*)(0x%xul%v), %v, %v));\n",
-				copyin.Addr, PTR_OFFSET_STR_ADDR, arg.Data[0], len(arg.Data))
+			fmt.Fprintf(w, "\tNONFAILING(memset((void*)%v, %v, %v));\n",
+				addr, arg.Data[0], len(arg.Data))
 		} else {
-			fmt.Fprintf(w, "\tNONFAILING(memcpy((void*)(0x%xul%v), \"%s\", %v));\n",
-				copyin.Addr, PTR_OFFSET_STR_ADDR, toCString(arg.Data, arg.Readable), len(arg.Data))
+			fmt.Fprintf(w, "\tNONFAILING(memcpy((void*)%v, \"%s\", %v));\n",
+				addr, toCString(arg.Data, arg.Readable), len(arg.Data))
 		}
 	case prog.ExecArgCsum:
 		switch arg.Kind {
@@ -1095,7 +1127,7 @@ func trimLeftChars(s string, n int) string {
 func (ctx *context) copyinVal(w *bytes.Buffer, addr, size uint64, val string, bf prog.BinaryFormat) {
 	PTR_OFFSET_STR_ADDR := ""
 	PTR_OFFSET_STR_VAL := ""
-	if valInMMapRange(ctx, addr) {
+	if ctx.opts.CSB && valInMMapRange(ctx, addr) {
 		PTR_OFFSET_STR_ADDR = "+PTR_OFFSET"
 	}
 
@@ -1103,7 +1135,7 @@ func (ctx *context) copyinVal(w *bytes.Buffer, addr, size uint64, val string, bf
 	if strings.HasPrefix(strVal, "0x") {
 		strVal = strVal[2:]
 		n, err := strconv.ParseUint(strVal, 16, 64)
-		if err == nil && valInMMapRange(ctx, n) {
+		if ctx.opts.CSB && err == nil && valInMMapRange(ctx, n) {
 			PTR_OFFSET_STR_VAL = "+PTR_OFFSET"
 		}
 	}
@@ -1152,14 +1184,15 @@ func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, resCopyout bool
 	fmt.Fprintf(w, "\n")
 	if resCopyout {
 		initFDs[call.Index] = true
-		fmt.Fprintf(w, "\t\tUNIQUE_VAR(ctx->r)[%v] = res;\n", call.Index)
+		fmt.Fprintf(w, "\t\t%v[%v] = res;\n", ctx.resultArrayName(), call.Index)
 	}
 	for _, copyout := range call.Copyout {
 		PTR_OFFSET_STR_ADDR := ""
-		if valInMMapRange(ctx, copyout.Addr) {
+		if ctx.opts.CSB && valInMMapRange(ctx, copyout.Addr) {
 			PTR_OFFSET_STR_ADDR = "+PTR_OFFSET"
 		}
-		fmt.Fprintf(w, "\t\tNONFAILING(UNIQUE_VAR(ctx->r)[%v] = *(uint%v*)(0x%xul%v));\n", copyout.Index, copyout.Size*8, copyout.Addr, PTR_OFFSET_STR_ADDR)
+		fmt.Fprintf(w, "\t\tNONFAILING(%v[%v] = *(uint%v*)(0x%xul%v));\n",
+			ctx.resultArrayName(), copyout.Index, copyout.Size*8, copyout.Addr, PTR_OFFSET_STR_ADDR)
 	}
 	if copyoutMultiple {
 		fmt.Fprintf(w, "\t}\n")
@@ -1279,7 +1312,7 @@ func handleBigEndian(arg prog.ExecArgConst, val string) string {
 }
 
 func (ctx *context) resultArgToStr(arg prog.ExecArgResult) string {
-	res := fmt.Sprintf("UNIQUE_VAR(ctx->r)[%v]", arg.Index)
+	res := fmt.Sprintf("%v[%v]", ctx.resultArrayName(), arg.Index)
 	if arg.DivOp != 0 {
 		res = fmt.Sprintf("%v/%v", res, arg.DivOp)
 	}
@@ -1290,6 +1323,13 @@ func (ctx *context) resultArgToStr(arg prog.ExecArgResult) string {
 		res = fmt.Sprintf("htobe%v(%v)", arg.Size*8, res)
 	}
 	return res
+}
+
+func (ctx *context) resultArrayName() string {
+	if ctx.opts.CSB {
+		return "UNIQUE_VAR(ctx->r)"
+	}
+	return "r"
 }
 
 func (ctx *context) postProcess(result []byte) []byte {
