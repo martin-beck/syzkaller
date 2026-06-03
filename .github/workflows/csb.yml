@@ -53,6 +53,23 @@ jobs:
           make prog2c
           go test ./pkg/csource/...
 
+   Prog:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Run tests on prog and trace2syz/proggen
+        run: |
+          go env -w GOBIN=$HOME/.local/bin
+          make trace2syz
+          go test ./prog/...
+          go test ./tools/syz-trace2syz/proggen/...
+
    Determinism-Traces:
     runs-on: ubuntu-latest
     strategy:

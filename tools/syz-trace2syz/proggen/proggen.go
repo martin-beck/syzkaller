@@ -207,6 +207,7 @@ func (ctx *context) genCall() *prog.Call {
 	}
 	ctx.genResult(syzCall.Meta.Ret, straceCall.Ret)
 	syzCall.StraceRetVal = straceCall.Ret
+	syzCall.StraceRetValSet = true
 	syzCall.StraceTid = straceCall.Pid
 	return syzCall
 }

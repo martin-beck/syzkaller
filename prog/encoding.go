@@ -132,8 +132,10 @@ func (ctx *serializer) call(c *Call) {
 		ctx.printf(")")
 	}
 
-	// serialize original return value
-	ctx.printf("[%d]", c.StraceRetVal)
+	if c.StraceRetValSet {
+		// Serialize original strace return value.
+		ctx.printf("[%d]", c.StraceRetVal)
+	}
 
 	ctx.printf("\n")
 }
@@ -384,23 +386,14 @@ func (p *parser) parseProg() (*Prog, error) {
 		}
 		p.Parse(')')
 
-		// parse original strace return value
-		if !p.EOF() && p.Char() == '[' {
-			p.Parse('[')
-			val := p.Ident()
-			v, err := strconv.ParseInt(val, 0, 64)
-			if err != nil {
-				panic("Unable to parse original strace return value " + fmt.Sprintf("%s", val) + "\n")
-			}
-			c.StraceRetVal = v
-			p.Parse(']')
-		}
+		p.parseStraceRet(c)
 
 		if !p.EOF() && p.Char() == '(' {
 			p.Parse('(')
 			c.Props = p.parseCallProps()
 			p.Parse(')')
 		}
+		p.parseStraceRet(c)
 
 		if !p.EOF() {
 			if p.Char() != '#' {
@@ -427,6 +420,21 @@ func (p *parser) parseProg() (*Prog, error) {
 		prog.Comments = append(prog.Comments, p.comment)
 	}
 	return prog, nil
+}
+
+func (p *parser) parseStraceRet(c *Call) {
+	if p.EOF() || p.Char() != '[' {
+		return
+	}
+	p.Parse('[')
+	val := p.Ident()
+	v, err := strconv.ParseInt(val, 0, 64)
+	if err != nil {
+		panic("Unable to parse original strace return value " + fmt.Sprintf("%s", val) + "\n")
+	}
+	c.StraceRetVal = v
+	c.StraceRetValSet = true
+	p.Parse(']')
 }
 
 func (p *parser) parseCallProps() CallProps {
@@ -739,6 +747,9 @@ func (p *parser) parseArgString(t Type, dir Dir) (Arg, error) {
 			p.strictFailf("bad string value %q, expect %q", data, typ.Values)
 			data = []byte(typ.Values[0])
 		}
+	}
+	if typ.Kind == BufferFilename && !p.unsafe && escapingFilename(string(data)) {
+		return nil, fmt.Errorf("escaping filename %q", data)
 	}
 	return MakeDataArg(typ, dir, data), nil
 }

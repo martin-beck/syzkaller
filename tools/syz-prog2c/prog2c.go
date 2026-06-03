@@ -471,9 +471,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "failed to read prog file: %v\n", err)
 		os.Exit(1)
 	}
-	mode := prog.NonStrict
+	mode := prog.NonStrictUnsafe
 	if *flagStrict {
-		mode = prog.Strict
+		mode = prog.StrictUnsafe
 	}
 	p, err := target.Deserialize(data, mode)
 	if err != nil {

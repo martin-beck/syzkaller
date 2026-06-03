@@ -21,7 +21,7 @@ func deserializeTestProg(t *testing.T, data string) *prog.Prog {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := target.Deserialize([]byte(data), prog.NonStrict)
+	p, err := target.Deserialize([]byte(data), prog.NonStrictUnsafe)
 	if err != nil {
 		t.Fatal(err)
 	}
