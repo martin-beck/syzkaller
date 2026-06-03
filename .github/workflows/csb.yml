@@ -90,7 +90,6 @@ jobs:
           go test ./tools/syz-trace2syz/ -run TestTrace2SyzDeterministicOutput -count=1
 
    Test-with-CSB:
-     if: github.event_name == 'push'
      runs-on: ubuntu-latest
      steps:
        - uses: actions/checkout@v4
@@ -108,15 +107,29 @@ jobs:
            cd csb
            git submodule update --init
 
+            # Detect PR source repository and branch
+            if [ -n "${{ github.event.pull_request.head.repo.full_name }}" ]; then
+              FORK_REPO="${{ github.event.pull_request.head.repo.full_name }}"
+              FORK_BRANCH="${{ github.event.pull_request.head.ref }}"
+            else
+              # Not a PR (e.g., push to main repo)
+              FORK_REPO="${{ github.repository }}"
+              FORK_BRANCH="${{ github.ref_name }}"
+            fi
+
+            echo "PR source repo: $FORK_REPO"
+            echo "PR source branch: $FORK_BRANCH"
+
            # Extract owner from "owner/repo"
            FORK_OWNER="${REPO_FULL%%/*}"
 
            cd deps/syzkaller/
-           echo "Adding fork remote: https://github.com/${FORK_OWNER}/syzkaller.git"
-           git remote add fork "https://github.com/${FORK_OWNER}/syzkaller.git" || true
+           echo "Adding fork remote: https://github.com/${FORK_REPO}.git"
+           git remote add fork "https://github.com/${FORK_REPO}.git" || true
            git fetch fork
-           echo "Checking out the ${GITHUB_SHA}"
-           git checkout ${GITHUB_SHA}
+
+           echo "Checking out the ${FORK_BRANCH}"
+           git checkout ${FORK_BRANCH}
 
            git log -1
 
