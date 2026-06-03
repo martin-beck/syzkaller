@@ -62,16 +62,65 @@ func readProg() (p *prog.Prog) {
 		fmt.Fprintf(os.Stderr, "failed to read prog file: %v\n", err)
 		os.Exit(1)
 	}
-	mode := prog.NonStrict
+	mode := prog.NonStrictUnsafe
+	safeMode := prog.NonStrict
 	if *flagStrict {
-		mode = prog.Strict
+		mode = prog.StrictUnsafe
+		safeMode = prog.Strict
 	}
 	p, err = target.Deserialize(data, mode)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to deserialize the program: %v\n", err)
 		os.Exit(1)
 	}
+	sanitizeFilenames(p)
+	p, err = target.Deserialize(p.Serialize(), safeMode)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to deserialize sanitized program: %v\n", err)
+		os.Exit(1)
+	}
 	return
+}
+
+func sanitizeFilenames(p *prog.Prog) {
+	for _, call := range p.Calls {
+		prog.ForeachArg(call, func(arg prog.Arg, _ *prog.ArgCtx) {
+			typ, ok := arg.Type().(*prog.BufferType)
+			if !ok || typ.Kind != prog.BufferFilename || arg.Dir() == prog.DirOut {
+				return
+			}
+			data := arg.(*prog.DataArg).Data()
+			sanitized := sanitizeFilename(data)
+			if string(sanitized) != string(data) {
+				arg.(*prog.DataArg).SetData(sanitized)
+			}
+		})
+	}
+}
+
+func sanitizeFilename(data []byte) []byte {
+	pathEnd := len(data)
+	for pathEnd > 0 && data[pathEnd-1] == 0 {
+		pathEnd--
+	}
+	if pathEnd == 0 {
+		return data
+	}
+	path := string(data[:pathEnd])
+	if path[0] == '/' {
+		path = "." + path
+	}
+	for escapingFilename(path) {
+		path = "a/" + path
+	}
+	ret := append([]byte(path), data[pathEnd:]...)
+	return ret
+}
+
+func escapingFilename(file string) bool {
+	file = filepath.Clean(file)
+	return len(file) >= 1 && file[0] == '/' ||
+		len(file) >= 2 && file[0] == '.' && file[1] == '.'
 }
 
 func generateMinimizedProg(p *prog.Prog, callIndex0 int, processedCallsIn []bool, c *prog.Cache) (pOut *prog.Prog, processedCalls []bool, keepCalls []bool) {
