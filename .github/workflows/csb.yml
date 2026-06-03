@@ -90,7 +90,6 @@ jobs:
           go test ./tools/syz-trace2syz/ -run TestTrace2SyzDeterministicOutput -count=1
 
    Test-with-CSB:
-    #  if: github.event_name == 'push'
      runs-on: ubuntu-latest
      steps:
        - uses: actions/checkout@v4
