@@ -197,6 +197,15 @@ func (ctx *context) genCall() *prog.Call {
 	ctx.currentSyzCall = prog.MakeCall(meta, nil)
 	syzCall := ctx.currentSyzCall
 
+	if straceCall.CallName == "madvise" && len(syzCall.Meta.Args) == 3 {
+		ctx.genMadviseArgs(straceCall, syzCall)
+		ctx.genResult(syzCall.Meta.Ret, straceCall.Ret)
+		syzCall.StraceRetVal = straceCall.Ret
+		syzCall.StraceRetValSet = true
+		syzCall.StraceTid = straceCall.Pid
+		return syzCall
+	}
+
 	for i := range syzCall.Meta.Args {
 		var strArg parser.IrType
 		if i < len(straceCall.Args) {
@@ -210,6 +219,75 @@ func (ctx *context) genCall() *prog.Call {
 	syzCall.StraceRetValSet = true
 	syzCall.StraceTid = straceCall.Pid
 	return syzCall
+}
+
+const (
+	madvisePageSize = 4096
+	maxMadviseLen   = 1 << 20
+)
+
+var safeMadviseAdvice = map[uint64]bool{
+	0:  true, // MADV_NORMAL
+	1:  true, // MADV_RANDOM
+	2:  true, // MADV_SEQUENTIAL
+	3:  true, // MADV_WILLNEED
+	4:  true, // MADV_DONTNEED
+	8:  true, // MADV_FREE
+	10: true, // MADV_DONTFORK
+	11: true, // MADV_DOFORK
+	12: true, // MADV_MERGEABLE
+	13: true, // MADV_UNMERGEABLE
+	14: true, // MADV_HUGEPAGE
+	15: true, // MADV_NOHUGEPAGE
+	16: true, // MADV_DONTDUMP
+	17: true, // MADV_DODUMP
+	20: true, // MADV_COLD
+	21: true, // MADV_PAGEOUT
+	22: true, // MADV_POPULATE_READ
+	23: true, // MADV_POPULATE_WRITE
+}
+
+func (ctx *context) genMadviseArgs(straceCall *parser.Syscall, syzCall *prog.Call) {
+	length := uint64(madvisePageSize)
+	if len(straceCall.Args) > 1 {
+		length = constArgValue(straceCall.Args[1], length)
+	}
+	if length == 0 {
+		length = madvisePageSize
+	}
+	if length > maxMadviseLen {
+		length = maxMadviseLen
+	}
+	length = roundUp(length, madvisePageSize)
+	npages := length / madvisePageSize
+
+	addrType := syzCall.Meta.Args[0].Type.(*prog.VmaType)
+	addr := prog.MakeVmaPointerArg(addrType, prog.DirIn, ctx.builder.AllocateVMA(npages), npages)
+	lenArg := prog.MakeConstArg(syzCall.Meta.Args[1].Type, prog.DirIn, length)
+
+	advice := uint64(0)
+	if len(straceCall.Args) > 2 {
+		advice = constArgValue(straceCall.Args[2], advice)
+	}
+	if !safeMadviseAdvice[advice] {
+		advice = 0
+	}
+	adviceArg := prog.MakeConstArg(syzCall.Meta.Args[2].Type, prog.DirIn, advice)
+	syzCall.Args = append(syzCall.Args, addr, lenArg, adviceArg)
+}
+
+func constArgValue(arg parser.IrType, fallback uint64) uint64 {
+	if c, ok := arg.(parser.Constant); ok {
+		return c.Val()
+	}
+	return fallback
+}
+
+func roundUp(v, unit uint64) uint64 {
+	if v > ^uint64(0)-unit+1 {
+		return v
+	}
+	return ((v + unit - 1) / unit) * unit
 }
 
 func (ctx *context) Select(syscall *parser.Syscall) *prog.Syscall {

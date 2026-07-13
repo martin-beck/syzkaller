@@ -24,7 +24,6 @@ var (
 		"msync":    true,
 		"mremap":   true,
 		"mprotect": true,
-		"madvise":  true,
 		"munmap":   true,
 		// Not interesting coverage
 		// "getcwd": true,

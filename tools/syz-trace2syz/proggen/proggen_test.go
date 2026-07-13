@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/syzkaller/pkg/csource"
 	"github.com/google/syzkaller/prog"
 	_ "github.com/google/syzkaller/sys"
 	"github.com/google/syzkaller/sys/targets"
@@ -338,4 +339,57 @@ func TestGenBufferDeterministicOutSize(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMadviseFromTrace(t *testing.T) {
+	p := parseSingleProg(t, `
+madvise(0xffff7fb57000, 8192, 0x4) = 0
+madvise(0xffff7fb57000, 2097152, 0x64) = 0
+`)
+	got := string(bytes.TrimSpace(p.Serialize()))
+	want := strings.TrimSpace(`
+madvise(&(0x7f0000000000/0x2)=nil, 0x2000, 0x4)[0]
+madvise(&(0x7f0000002000/0x100)=nil, 0x100000, 0x0)[0]
+`)
+	if got != want {
+		t.Fatalf("want:\n%v\n\ngot:\n%v", want, got)
+	}
+}
+
+func TestMadviseTraceToCSBHeader(t *testing.T) {
+	p := parseSingleProg(t, `
+madvise(0xffff7fb57000, 4096, 0x8) = 0
+`)
+	src, _, err := csource.Write(p, csource.Options{
+		Slowdown: 1,
+		CSB:      true,
+		Trace:    true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "syscall(__NR_madvise") {
+		t.Fatalf("generated CSB header does not contain madvise syscall:\n%s", src)
+	}
+}
+
+func parseSingleProg(t *testing.T, input string) *prog.Prog {
+	t.Helper()
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.ConstMap = make(map[string]uint64)
+	for _, c := range target.Consts {
+		target.ConstMap[c.Name] = c.Value
+	}
+	tree, _, err := parser.ParseData([]byte(strings.TrimSpace(input)), true, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := genProg(tree.TraceMap[tree.RootPid], target, false, true)
+	if p == nil {
+		t.Fatal("failed to parse trace")
+	}
+	return p
 }
