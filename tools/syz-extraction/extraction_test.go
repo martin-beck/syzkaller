@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/google/syzkaller/pkg/stat"
 	"github.com/google/syzkaller/prog"
 	_ "github.com/google/syzkaller/sys"
 )
@@ -211,4 +212,83 @@ func TestSanitizeFilename(t *testing.T) {
 			t.Fatalf("%s: got %q, want %q", test.name, got, test.want)
 		}
 	}
+}
+
+func TestProcessComponentsMatchesSerialExtraction(t *testing.T) {
+	oldMinCalls, oldJobs := *flagMinCalls, *flagJobs
+	defer func() {
+		*flagMinCalls = oldMinCalls
+		*flagJobs = oldJobs
+	}()
+	*flagMinCalls = 1
+	*flagJobs = 4
+
+	target, err := prog.GetTarget("test", "64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte(""+
+		"<2>r0 = socket(0x111, 0x1000, 0x10000)\n"+
+		"<2>ioctl(r0, 0x333, 0x0)\n"+
+		"<1>listen(r0)\n"+
+		"<1>test$res1(0xffff)\n"+
+		"<1>r1 = mutate5(&(0x7f0000000000)='./same-file\\x00', 0x0)\n"+
+		"<1>mutate9(&(0x7f0000000040)='./same-file\\x00')\n"+
+		"<1>mutate9(&(0x7f0000000100)='./other-file\\x00')\n"+
+		"<1>mutate6(r1, &(0x7f0000000140)=\"abcd\", 0x4)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	callIndices := []int{2, 3, 4, 5, 6, 7}
+	components := prog.RelatedCallComponentsForThread(p, 1, callIndices, newCache(len(p.Calls)))
+	got := processComponents(p, components, 0)
+	want := serialExtractComponents(p, 1, callIndices)
+
+	if len(got) != len(want) {
+		t.Fatalf("got %d results, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i].order != want[i].order {
+			t.Fatalf("result %d order = %d, want %d", i, got[i].order, want[i].order)
+		}
+		if !reflect.DeepEqual(got[i].names, want[i].names) {
+			t.Fatalf("result %d names = %v, want %v", i, got[i].names, want[i].names)
+		}
+		gotProg, wantProg := "", ""
+		if got[i].prog != nil {
+			gotProg = string(got[i].prog.Serialize())
+		}
+		if want[i].prog != nil {
+			wantProg = string(want[i].prog.Serialize())
+		}
+		if gotProg != wantProg {
+			t.Fatalf("result %d program differs\ngot:\n%s\nwant:\n%s", i, gotProg, wantProg)
+		}
+	}
+}
+
+func serialExtractComponents(p *prog.Prog, tid int64, callIndices []int) []extractedComponent {
+	cache := newCache(len(p.Calls))
+	processedCalls := make([]bool, len(p.Calls))
+	nonStartCalls := make([]bool, len(p.Calls))
+	var results []extractedComponent
+
+	for _, callIndex := range callIndices {
+		if nonStartCalls[callIndex] || p.Calls[callIndex].StraceTid != tid {
+			continue
+		}
+		pF, pCallsOut, keepCalls := generateMinimizedProg(p, callIndex, processedCalls, cache)
+		nonStartCalls = prog.Sliceor(prog.Sliceor(pCallsOut, keepCalls), nonStartCalls)
+		processedCalls = pCallsOut
+
+		pF = filterOutPolls(pF)
+		result := extractedComponent{order: len(results)}
+		if len(pF.Calls) >= *flagMinCalls {
+			result.prog = pF
+			result.names = stat.TopKNames(genSyscallHist(pF), *flagTopCalls)
+		}
+		results = append(results, result)
+	}
+	return results
 }

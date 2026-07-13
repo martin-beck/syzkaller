@@ -5,8 +5,8 @@ package prog
 
 import (
 	"bytes"
-	"maps"
 	"fmt"
+	"maps"
 	"reflect"
 
 	"github.com/bits-and-blooms/bloom/v3"
@@ -34,10 +34,24 @@ var (
 )
 
 type Cache struct {
-	Uses    []map[any]bool
-	Rets    []map[any]bool
-	UsesBFs []*bloom.BloomFilter
-	RetsBFs []*bloom.BloomFilter
+	Uses            []map[any]bool
+	Rets            []map[any]bool
+	UsesBFs         []*bloom.BloomFilter
+	RetsBFs         []*bloom.BloomFilter
+	prog            *Prog
+	dependencyIndex *dependencyIndex
+}
+
+type dependencyIndex struct {
+	prog *Prog
+	uses map[any][]int
+	rets map[any][]int
+}
+
+type RelatedCallComponent struct {
+	StartIndex  int
+	KeepCalls   []bool
+	RemoveCalls []bool
 }
 
 type MinimizeMode int
@@ -243,6 +257,79 @@ func removeUnrelatedCallsInfoFast(p0 *Prog, callIndex0 int, processedCallsIn []b
 	return p, processedCalls, keepCalls
 }
 
+func RelatedCallComponentsForThread(p *Prog, tid int64, callIndices []int, c *Cache) []RelatedCallComponent {
+	idx := getDependencyIndex(p, c)
+	processedCalls := make([]bool, len(p.Calls))
+	nonStartCalls := make([]bool, len(p.Calls))
+	var components []RelatedCallComponent
+
+	for _, callIndex := range callIndices {
+		if nonStartCalls[callIndex] || p.Calls[callIndex].StraceTid != tid {
+			continue
+		}
+		keepCalls, removeCalls := relatedCallsFullThreadIndexed(p, callIndex, c, processedCalls, idx)
+		components = append(components, RelatedCallComponent{
+			StartIndex:  callIndex,
+			KeepCalls:   keepCalls,
+			RemoveCalls: removeCalls,
+		})
+		processedCalls = boolSliceOrCopy(processedCalls, removeCalls)
+		nonStartCalls = boolSliceOrCopy(nonStartCalls, processedCalls)
+		nonStartCalls = boolSliceOrCopy(nonStartCalls, keepCalls)
+	}
+
+	return components
+}
+
+func boolSliceOrCopy(dst, src []bool) []bool {
+	out := append([]bool(nil), dst...)
+	for i, v := range src {
+		if v {
+			out[i] = true
+		}
+	}
+	return out
+}
+
+func buildDependencyIndex(p *Prog, c *Cache) *dependencyIndex {
+	idx := &dependencyIndex{
+		prog: p,
+		uses: make(map[any][]int),
+		rets: make(map[any][]int),
+	}
+	for i, call := range p.Calls {
+		for key := range usesCache(call, i, c) {
+			idx.uses[key] = append(idx.uses[key], i)
+		}
+		for key := range retCache(call, i, c) {
+			idx.rets[key] = append(idx.rets[key], i)
+		}
+	}
+	return idx
+}
+
+func prepareDependencyCache(p *Prog, c *Cache) {
+	if c.prog == p && len(c.Uses) == len(p.Calls) && len(c.Rets) == len(p.Calls) &&
+		len(c.UsesBFs) == len(p.Calls) && len(c.RetsBFs) == len(p.Calls) {
+		return
+	}
+	numCalls := len(p.Calls)
+	c.Uses = make([]map[any]bool, numCalls)
+	c.Rets = make([]map[any]bool, numCalls)
+	c.UsesBFs = make([]*bloom.BloomFilter, numCalls)
+	c.RetsBFs = make([]*bloom.BloomFilter, numCalls)
+	c.prog = p
+	c.dependencyIndex = nil
+}
+
+func getDependencyIndex(p *Prog, c *Cache) *dependencyIndex {
+	prepareDependencyCache(p, c)
+	if c.dependencyIndex == nil {
+		c.dependencyIndex = buildDependencyIndex(p, c)
+	}
+	return c.dependencyIndex
+}
+
 // removeUnrelatedCalls tries to remove all "unrelated" calls at once.
 // Unrelated calls are the calls that don't use any resources/files from
 // the transitive closure of the resources/files used by the target call.
@@ -355,6 +442,76 @@ func relatedCallsFullProgram(p0 *Prog, callIndex0 int, c *Cache, processedCallsI
 }
 
 func relatedCallsFullThread(p0 *Prog, callIndex0 int, c *Cache, processedCallsIn []bool) ([]bool, []bool) {
+	return relatedCallsFullThreadIndexed(p0, callIndex0, c, processedCallsIn, getDependencyIndex(p0, c))
+}
+
+func relatedCallsFullThreadIndexed(p0 *Prog, callIndex0 int, c *Cache, processedCallsIn []bool, idx *dependencyIndex) ([]bool, []bool) {
+	keepCalls := make([]bool, len(p0.Calls))
+	keepCalls[callIndex0] = true
+	removeCalls := make([]bool, len(p0.Calls))
+	used := maps.Clone(usesCache(p0.Calls[callIndex0], callIndex0, c))
+	tid := p0.Calls[callIndex0].StraceTid
+	if len(retCache(p0.Calls[callIndex0], callIndex0, c)) == 0 {
+		removeCalls[callIndex0] = true
+	}
+
+	work := make([]any, 0, len(used))
+	for key := range used {
+		work = append(work, key)
+	}
+	seen := make(map[any]bool, len(used))
+
+	keepCall := func(i int) {
+		if keepCalls[i] || processedCallsIn[i] {
+			return
+		}
+		call := p0.Calls[i]
+		keepCalls[i] = true
+		if call.StraceTid == tid && len(retCache(call, i, c)) == 0 && !checkAllowedCalls(call) {
+			removeCalls[i] = true
+		}
+		for key := range usesCache(call, i, c) {
+			if !used[key] {
+				used[key] = true
+				work = append(work, key)
+			}
+		}
+	}
+
+	for len(work) != 0 {
+		key := work[len(work)-1]
+		work = work[:len(work)-1]
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
+		for _, i := range idx.uses[key] {
+			if keepCalls[i] || processedCallsIn[i] {
+				continue
+			}
+			call := p0.Calls[i]
+			matchingTIDOrAllowed := call.StraceTid == tid || checkAllowedCalls(call)
+			if matchingTIDOrAllowed {
+				keepCall(i)
+			}
+		}
+		for _, i := range idx.rets[key] {
+			if keepCalls[i] || processedCallsIn[i] {
+				continue
+			}
+			call := p0.Calls[i]
+			matchingTIDOrAllowed := call.StraceTid == tid || checkAllowedCalls(call)
+			if !matchingTIDOrAllowed {
+				keepCall(i)
+			}
+		}
+	}
+
+	return keepCalls, removeCalls
+}
+
+func relatedCallsFullThreadScan(p0 *Prog, callIndex0 int, c *Cache, processedCallsIn []bool) ([]bool, []bool) {
 	keepCalls := make([]bool, len(p0.Calls))
 	keepCalls[callIndex0] = true
 	removeCalls := make([]bool, len(p0.Calls))
