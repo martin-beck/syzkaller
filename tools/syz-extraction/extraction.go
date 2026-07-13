@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/google/syzkaller/pkg/log"
@@ -36,9 +37,14 @@ var (
 	flagDeserialize = flag.String("deserialize", "", "(Optional) directory to store deserialized programs")
 	flagMinCalls    = flag.Int("minCalls", 5, "minimum number of remaining syscalls after minimization")
 	flagTopCalls    = flag.Int("topCalls", 2, "number of most used usyscalls to be used for file name generation")
+	flagJobs        = flag.Int("jobs", defaultJobs(), "number of connected components to process in parallel")
 
 	syscallIDxPerTid = make(map[int64][]int)
 )
+
+func defaultJobs() int {
+	return min(runtime.NumCPU(), 4)
+}
 
 func help() {
 	flag.Usage = func() {
@@ -128,6 +134,12 @@ func generateMinimizedProg(p *prog.Prog, callIndex0 int, processedCallsIn []bool
 	return
 }
 
+type extractedComponent struct {
+	order int
+	prog  *prog.Prog
+	names []string
+}
+
 func isPollLike(syscallName string) bool {
 	pollLikes := []string{
 		"epoll_pwait",
@@ -201,50 +213,81 @@ func generateAllProgs(p *prog.Prog, threadList []int64) {
 	for _, tid := range threadList {
 		totalStartSyscalls += len(syscallIDxPerTid[tid])
 	}
-	var status string
+	order := 0
 
 	// go over all thread IDs in decreasing depth starting with the highest depth
 	for idx, tid := range threadList {
-		processedCalls := make([]bool, numCalls)
-		nonStartCalls := make([]bool, numCalls)
-
 		numCallsTid := len(syscallIDxPerTid[tid])
 		fmt.Printf("[%d/%d] Working on TID %d - %d syscalls\n", idx+1, len(threadList), tid, numCallsTid)
 
-		for subIdx, i := range syscallIDxPerTid[tid] {
-			usedStartSyscalls++
-			if !nonStartCalls[i] && p.Calls[i].StraceTid == tid {
-				if usedStartSyscalls%100 == 0 {
-					status = fmt.Sprintf("-- Progress TID [%03.1f/100%%] -- Progress overall [%03.1f/100%%] --", (100.0 * float32(subIdx) / float32(numCallsTid)), (100 * float32(usedStartSyscalls) / float32(totalStartSyscalls)))
-					fmt.Fprintf(os.Stderr, "%s\r", status)
-				}
-				pF, pCallsOut, keepCalls := generateMinimizedProg(p, i, processedCalls, c)
-				nonStartCalls = prog.Sliceor(prog.Sliceor(pCallsOut, keepCalls), nonStartCalls)
-				processedCalls = pCallsOut
+		components := prog.RelatedCallComponentsForThread(p, tid, syscallIDxPerTid[tid], c)
+		usedStartSyscalls += numCallsTid
+		status := fmt.Sprintf("-- Progress TID [100.0/100%%] -- Progress overall [%03.1f/100%%] --", (100 * float32(usedStartSyscalls) / float32(totalStartSyscalls)))
+		fmt.Fprintf(os.Stderr, "%s\r", status)
 
-				pF = filterOutPolls(pF)
-				if len(pF.Calls) >= *flagMinCalls {
-
-					scallHist := genSyscallHist(pF)
-					topNames := stat.TopKNames(scallHist, *flagTopCalls)
-					prefix := outPrefix + "_" + strings.Join(topNames, "_")
-
-					_, ok := outPrefixesIdx[prefix]
-					if !ok {
-						outPrefixesIdx[prefix] = 0
-					} else {
-						outPrefixesIdx[prefix]++
-					}
-
-					fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
-					fmt.Fprintf(os.Stderr, "    Extracted %d syscalls into %s_%d\n", len(pF.Calls), prefix, outPrefixesIdx[prefix])
-					saveProg2File(pF, prefix, outPrefixesIdx[prefix])
-				}
+		results := processComponents(p, components, order)
+		order += len(components)
+		for _, result := range results {
+			if result.prog == nil {
+				continue
 			}
-			i--
+			prefix := outPrefix + "_" + strings.Join(result.names, "_")
+
+			_, ok := outPrefixesIdx[prefix]
+			if !ok {
+				outPrefixesIdx[prefix] = 0
+			} else {
+				outPrefixesIdx[prefix]++
+			}
+
+			fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
+			fmt.Fprintf(os.Stderr, "    Extracted %d syscalls into %s_%d\n", len(result.prog.Calls), prefix, outPrefixesIdx[prefix])
+			saveProg2File(result.prog, prefix, outPrefixesIdx[prefix])
 		}
 		fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 	}
+}
+
+func processComponents(p *prog.Prog, components []prog.RelatedCallComponent, orderBase int) []extractedComponent {
+	results := make([]extractedComponent, len(components))
+	jobs := *flagJobs
+	if jobs < 1 {
+		jobs = 1
+	}
+	if jobs > len(components) {
+		jobs = len(components)
+	}
+	if jobs == 0 {
+		return results
+	}
+
+	work := make(chan int)
+	var wg sync.WaitGroup
+	wg.Add(jobs)
+	for worker := 0; worker < jobs; worker++ {
+		go func() {
+			defer wg.Done()
+			for i := range work {
+				component := components[i]
+				pF := p.CloneFilter(component.KeepCalls)
+				pF = filterOutPolls(pF)
+				results[i].order = orderBase + i
+				if len(pF.Calls) < *flagMinCalls {
+					continue
+				}
+				scallHist := genSyscallHist(pF)
+				results[i].prog = pF
+				results[i].names = stat.TopKNames(scallHist, *flagTopCalls)
+			}
+		}()
+	}
+	for i := range components {
+		work <- i
+	}
+	close(work)
+	wg.Wait()
+
+	return results
 }
 
 func genSyscallHist(p *prog.Prog) map[string]int {
