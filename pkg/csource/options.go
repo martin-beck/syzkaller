@@ -51,7 +51,9 @@ type Options struct {
 
 	Trace bool `json:"trace,omitempty"`
 
-	CallComments bool `json:"callcomments,omitempty"`
+	CallComments   bool `json:"callcomments,omitempty"`
+	RuntimeLoops   bool `json:"runtime_loops,omitempty"`
+	RuntimeLoopMin int  `json:"runtime_loop_min,omitempty"`
 
 	CSB                   bool                `json:"csb"`
 	SubDirs               map[string](bool)   `json:"subdirs"`

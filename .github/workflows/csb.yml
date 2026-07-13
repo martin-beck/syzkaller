@@ -7,7 +7,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tool: [trace2syz, prog2c, extraction]
+        tool: [trace2syz, prog2c, extraction, progreduce]
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
@@ -24,18 +24,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tool: [trace2syz, prog2c, extraction]
+        include:
+          - target: trace2syz
+            package: trace2syz
+          - target: prog2c
+            package: prog2c
+          - target: extraction
+            package: extraction
+          - target: progreduce
+            package: prog-reduce
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
-      - name: Run tests ${{ matrix.tool }}
+      - name: Run tests ${{ matrix.target }}
         run: |
           go env -w GOBIN=$HOME/.local/bin
-          make ${{ matrix.tool }}
-          go test ./tools/syz-${{ matrix.tool }}/...
+          make ${{ matrix.target }}
+          go test ./tools/syz-${{ matrix.package }}/...
 
    CSource:
     runs-on: ubuntu-latest

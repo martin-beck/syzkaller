@@ -431,3 +431,20 @@ func TestGenerateSandboxFunctionSignature(t *testing.T) {
 		"do_sandbox_android(-1234);", // expected
 		"Android sandbox function requires an argument")
 }
+
+func TestLoopIdenticalCalls(t *testing.T) {
+	calls := []string{
+		"\tcall_a();\n",
+		"\tcall_a();\n",
+		"\tcall_a();\n",
+		"\tcall_b();\n",
+		"\tcall_b();\n",
+	}
+	got := strings.Join(loopIdenticalCalls(calls, 3), "")
+	if !strings.Contains(got, "csb_runtime_loop < 3") {
+		t.Fatalf("missing loop for run of 3:\n%s", got)
+	}
+	if strings.Contains(got, "csb_runtime_loop < 2") {
+		t.Fatalf("unexpected loop for run below threshold:\n%s", got)
+	}
+}

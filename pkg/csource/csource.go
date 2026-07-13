@@ -806,7 +806,30 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 
 	NetOpsFDsAccept = tmpOps
 
+	if ctx.opts.RuntimeLoops {
+		calls = loopIdenticalCalls(calls, ctx.opts.RuntimeLoopMin)
+	}
 	return calls, p.Vars
+}
+
+func loopIdenticalCalls(calls []string, minRun int) []string {
+	if minRun <= 1 {
+		minRun = 2
+	}
+	var out []string
+	for i := 0; i < len(calls); {
+		j := i + 1
+		for j < len(calls) && calls[j] == calls[i] {
+			j++
+		}
+		if run := j - i; run >= minRun {
+			out = append(out, fmt.Sprintf("\tfor (int csb_runtime_loop = 0; csb_runtime_loop < %d; csb_runtime_loop++) {\n%s\t}\n", run, calls[i]))
+		} else {
+			out = append(out, calls[i:j]...)
+		}
+		i = j
+	}
+	return out
 }
 
 func isNative(sysTarget *targets.Target, callName string) bool {
