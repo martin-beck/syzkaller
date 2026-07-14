@@ -52,6 +52,7 @@ type RelatedCallComponent struct {
 	StartIndex  int
 	KeepCalls   []bool
 	RemoveCalls []bool
+	FilterCalls bool
 }
 
 type MinimizeMode int
@@ -272,6 +273,7 @@ func RelatedCallComponentsForThread(p *Prog, tid int64, callIndices []int, c *Ca
 			StartIndex:  callIndex,
 			KeepCalls:   keepCalls,
 			RemoveCalls: removeCalls,
+			FilterCalls: len(p.Calls)-cardinality(keepCalls) >= 3,
 		})
 		processedCalls = boolSliceOrCopy(processedCalls, removeCalls)
 		nonStartCalls = boolSliceOrCopy(nonStartCalls, processedCalls)

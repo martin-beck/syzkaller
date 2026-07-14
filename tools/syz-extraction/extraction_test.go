@@ -268,6 +268,40 @@ func TestProcessComponentsMatchesSerialExtraction(t *testing.T) {
 	}
 }
 
+func TestProcessComponentsPreservesSmallReduction(t *testing.T) {
+	oldMinCalls, oldJobs := *flagMinCalls, *flagJobs
+	defer func() {
+		*flagMinCalls = oldMinCalls
+		*flagJobs = oldJobs
+	}()
+	*flagMinCalls = 5
+	*flagJobs = 1
+
+	p := makeTestProg(
+		testCall{"call0", 1},
+		testCall{"call1", 1},
+		testCall{"call2", 1},
+		testCall{"call3", 1},
+		testCall{"call4", 1},
+		testCall{"call5", 1},
+	)
+	keep := []bool{true, true, true, true, false, false}
+	results := processComponents(p, []prog.RelatedCallComponent{{KeepCalls: keep}}, 0)
+	if results[0].prog == nil {
+		t.Fatal("small reduction was dropped, want the original 6 calls")
+	}
+	if got := len(results[0].prog.Calls); got != 6 {
+		t.Fatalf("small reduction produced %d calls, want the original 6", got)
+	}
+
+	*flagMinCalls = 1
+	keep = []bool{true, true, true, false, false, false}
+	results = processComponents(p, []prog.RelatedCallComponent{{KeepCalls: keep, FilterCalls: true}}, 0)
+	if got := len(results[0].prog.Calls); got != 3 {
+		t.Fatalf("large reduction produced %d calls, want 3", got)
+	}
+}
+
 func serialExtractComponents(p *prog.Prog, tid int64, callIndices []int) []extractedComponent {
 	cache := newCache(len(p.Calls))
 	processedCalls := make([]bool, len(p.Calls))

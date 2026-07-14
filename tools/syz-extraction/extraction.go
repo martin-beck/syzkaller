@@ -269,7 +269,10 @@ func processComponents(p *prog.Prog, components []prog.RelatedCallComponent, ord
 			defer wg.Done()
 			for i := range work {
 				component := components[i]
-				pF := p.CloneFilter(component.KeepCalls)
+				pF := p
+				if component.FilterCalls {
+					pF = p.CloneFilter(component.KeepCalls)
+				}
 				pF = filterOutPolls(pF)
 				results[i].order = orderBase + i
 				if len(pF.Calls) < *flagMinCalls {
