@@ -188,6 +188,7 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength bool, randomize
 	return p
 }
 
+// genCalls routes sanitized syscalls to bounded generators that may emit setup and replay calls.
 func (ctx *context) genCalls() []*prog.Call {
 	switch ctx.currentStraceCall.CallName {
 	case "mmap":
@@ -484,6 +485,7 @@ func (ctx *context) genSetRobustListCall() *prog.Call {
 	return call
 }
 
+// genDefaultSafeCall preserves trace metadata while replacing unsafe arguments with syzlang defaults.
 func (ctx *context) genDefaultSafeCall(name string) *prog.Call {
 	call := ctx.makeDefaultCall(name)
 	if call == nil {
