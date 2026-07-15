@@ -304,7 +304,7 @@ func (ctx *context) genMadviseArgs(straceCall *parser.Syscall, syzCall *prog.Cal
 	npages := length / madvisePageSize
 
 	addrType := syzCall.Meta.Args[0].Type.(*prog.VmaType)
-	addr := prog.MakeVmaPointerArg(addrType, prog.DirIn, ctx.builder.AllocateVMA(npages), npages)
+	addr := prog.MakeVmaPointerArg(addrType, prog.DirIn, ctx.builder.AllocateVMA(npages), length)
 	lenArg := prog.MakeConstArg(syzCall.Meta.Args[1].Type, prog.DirIn, length)
 
 	advice := uint64(0)
@@ -329,7 +329,7 @@ func (ctx *context) genMmapCall(fixed bool) *prog.Call {
 	if fixed {
 		flags |= mapFixed
 	}
-	ctx.setVmaArg(call, 0, ctx.builder.AllocateVMA(npages), npages)
+	ctx.setVmaArg(call, 0, ctx.builder.AllocateVMA(npages), length)
 	ctx.setConstArg(call, 1, length)
 	ctx.setConstArg(call, 2, sanitizedProt(ctx.currentStraceCall, 2))
 	ctx.setConstArg(call, 3, flags)
@@ -345,7 +345,7 @@ func (ctx *context) genMprotectCall() *prog.Call {
 		return nil
 	}
 	length := sanitizedPageLength(ctx.currentStraceCall, 1)
-	ctx.setVmaArg(call, 0, ctx.builder.AllocateVMA(length/madvisePageSize), length/madvisePageSize)
+	ctx.setVmaArg(call, 0, ctx.builder.AllocateVMA(length/madvisePageSize), length)
 	ctx.setConstArg(call, 1, length)
 	ctx.setConstArg(call, 2, sanitizedProt(ctx.currentStraceCall, 2))
 	ctx.finishCall(call, ctx.currentStraceCall)
@@ -358,7 +358,7 @@ func (ctx *context) genMsyncCall() *prog.Call {
 		return nil
 	}
 	length := sanitizedPageLength(ctx.currentStraceCall, 1)
-	ctx.setVmaArg(call, 0, ctx.builder.AllocateVMA(length/madvisePageSize), length/madvisePageSize)
+	ctx.setVmaArg(call, 0, ctx.builder.AllocateVMA(length/madvisePageSize), length)
 	ctx.setConstArg(call, 1, length)
 	ctx.setConstArg(call, 2, sanitizedMsyncFlags(ctx.currentStraceCall, 2))
 	ctx.finishCall(call, ctx.currentStraceCall)
@@ -374,7 +374,7 @@ func (ctx *context) genMunmapCalls() []*prog.Call {
 	if call == nil {
 		return singleCall(setup)
 	}
-	ctx.setVmaArg(call, 0, addr, npages)
+	ctx.setVmaArg(call, 0, addr, length)
 	ctx.setConstArg(call, 1, length)
 	ctx.finishCall(call, ctx.currentStraceCall)
 	return []*prog.Call{setup, call}
@@ -394,11 +394,11 @@ func (ctx *context) genMremapCalls() []*prog.Call {
 	if call == nil {
 		return singleCall(setup)
 	}
-	ctx.setVmaArg(call, 0, oldAddr, oldPages)
+	ctx.setVmaArg(call, 0, oldAddr, oldLength)
 	ctx.setConstArg(call, 1, oldLength)
 	ctx.setConstArg(call, 2, newLength)
 	ctx.setConstArg(call, 3, mremapMaymove)
-	ctx.setVmaArg(call, 4, ctx.builder.AllocateVMA(newPages), newPages)
+	ctx.setVmaArg(call, 4, ctx.builder.AllocateVMA(newPages), newLength)
 	ctx.finishCall(call, ctx.currentStraceCall)
 	return []*prog.Call{setup, call}
 }
@@ -408,7 +408,7 @@ func (ctx *context) genFixedMmapSetup(addr uint64, npages uint64) *prog.Call {
 	if call == nil {
 		return nil
 	}
-	ctx.setVmaArg(call, 0, addr, npages)
+	ctx.setVmaArg(call, 0, addr, npages*madvisePageSize)
 	ctx.setConstArg(call, 1, npages*madvisePageSize)
 	ctx.setConstArg(call, 2, protRead|protWrite)
 	ctx.setConstArg(call, 3, mapPrivate|mapAnonymous|mapFixed)
@@ -517,9 +517,9 @@ func (ctx *context) finishCall(call *prog.Call, straceCall *parser.Syscall) {
 	call.StraceTid = straceCall.Pid
 }
 
-func (ctx *context) setVmaArg(call *prog.Call, idx int, addr uint64, npages uint64) {
+func (ctx *context) setVmaArg(call *prog.Call, idx int, addr uint64, sizeBytes uint64) {
 	field := call.Meta.Args[idx]
-	call.Args[idx] = prog.MakeVmaPointerArg(field.Type.(*prog.VmaType), field.Dir(prog.DirIn), addr, npages)
+	call.Args[idx] = prog.MakeVmaPointerArg(field.Type.(*prog.VmaType), field.Dir(prog.DirIn), addr, sizeBytes)
 }
 
 func (ctx *context) setConstArg(call *prog.Call, idx int, val uint64) {

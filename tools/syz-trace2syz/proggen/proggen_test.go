@@ -348,8 +348,8 @@ madvise(0xffff7fb57000, 2097152, 0x64) = 0
 `)
 	got := string(bytes.TrimSpace(p.Serialize()))
 	want := strings.TrimSpace(`
-madvise(&(0x7f0000000000/0x2)=nil, 0x2000, 0x4)[0]
-madvise(&(0x7f0000002000/0x100)=nil, 0x100000, 0x0)[0]
+madvise(&(0x7f0000000000/0x2000)=nil, 0x2000, 0x4)[0]
+madvise(&(0x7f0000002000/0x100000)=nil, 0x100000, 0x0)[0]
 `)
 	if got != want {
 		t.Fatalf("want:\n%v\n\ngot:\n%v", want, got)
@@ -410,6 +410,21 @@ wait(NULL) = -1 ECHILD (No child processes)
 	}
 	if got := strings.Count(serialized, "wait4("); got != 2 {
 		t.Fatalf("got %d wait4 calls, want 2 in:\n%s", got, serialized)
+	}
+	for _, call := range p.Calls {
+		switch call.Meta.CallName {
+		case "mmap", "mprotect", "msync", "munmap":
+			if got, want := call.Args[0].(*prog.PointerArg).VmaSize, call.Args[1].(*prog.ConstArg).Val; got != want {
+				t.Fatalf("%s VMA size = %#x, want byte length %#x", call.Meta.CallName, got, want)
+			}
+		case "mremap":
+			for _, pair := range [][2]int{{0, 1}, {4, 2}} {
+				if got, want := call.Args[pair[0]].(*prog.PointerArg).VmaSize,
+					call.Args[pair[1]].(*prog.ConstArg).Val; got != want {
+					t.Fatalf("mremap VMA size = %#x, want byte length %#x", got, want)
+				}
+			}
+		}
 	}
 
 	src, _, err := csource.Write(p, csource.Options{
