@@ -71,8 +71,7 @@ changes with the CSB parent repository.
 - Template or metadata changes should regenerate the smallest affected generated
   set and validate JSON/header name alignment.
 - Do not delete or regenerate generated outputs unless the user asks, or unless
-  regeneration is the explicit validation for the change. Generated artifacts
-  are often untracked in CSB checkouts.
+  regeneration is the explicit validation for the change.
 
 ## Validation
 
