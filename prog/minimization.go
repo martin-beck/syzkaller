@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"slices"
 
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/google/syzkaller/pkg/hash"
@@ -50,8 +51,8 @@ type dependencyIndex struct {
 
 type RelatedCallComponent struct {
 	StartIndex  int
-	KeepCalls   []bool
-	RemoveCalls []bool
+	KeepCalls   []int
+	RemoveCalls []int
 	FilterCalls bool
 }
 
@@ -263,40 +264,37 @@ func RelatedCallComponentsForThread(p *Prog, tid int64, callIndices []int, c *Ca
 	idx := getDependencyIndex(p, c)
 	processedCalls := make([]bool, len(p.Calls))
 	nonStartCalls := make([]bool, len(p.Calls))
+	visitedCalls := make([]uint32, len(p.Calls))
+	var generation uint32
 	var components []RelatedCallComponent
 
 	for _, callIndex := range callIndices {
 		if nonStartCalls[callIndex] || p.Calls[callIndex].StraceTid != tid {
 			continue
 		}
-		keepCalls, removeCalls := relatedCallsFullThreadIndexed(p, callIndex, c, processedCalls, idx)
-		filterCalls := len(p.Calls)-cardinality(keepCalls) >= 3
+		generation++
+		keepCalls, removeCalls := relatedCallsFullThreadSparse(p, callIndex, c, processedCalls,
+			idx, visitedCalls, generation)
+		filterCalls := len(p.Calls)-len(keepCalls) >= 3
 		components = append(components, RelatedCallComponent{
 			StartIndex:  callIndex,
 			KeepCalls:   keepCalls,
 			RemoveCalls: removeCalls,
 			FilterCalls: filterCalls,
 		})
-		// Match RemoveUnrelatedCallsFast: a component that cannot remove at
-		// least three calls keeps the original program and processed state.
+		// Small reductions keep the original program and processed state.
 		if filterCalls {
-			processedCalls = boolSliceOrCopy(processedCalls, removeCalls)
+			for _, i := range removeCalls {
+				processedCalls[i] = true
+				nonStartCalls[i] = true
+			}
 		}
-		nonStartCalls = boolSliceOrCopy(nonStartCalls, processedCalls)
-		nonStartCalls = boolSliceOrCopy(nonStartCalls, keepCalls)
+		for _, i := range keepCalls {
+			nonStartCalls[i] = true
+		}
 	}
 
 	return components
-}
-
-func boolSliceOrCopy(dst, src []bool) []bool {
-	out := append([]bool(nil), dst...)
-	for i, v := range src {
-		if v {
-			out[i] = true
-		}
-	}
-	return out
 }
 
 func buildDependencyIndex(p *Prog, c *Cache) *dependencyIndex {
@@ -336,6 +334,11 @@ func getDependencyIndex(p *Prog, c *Cache) *dependencyIndex {
 		c.dependencyIndex = buildDependencyIndex(p, c)
 	}
 	return c.dependencyIndex
+}
+
+// PrepareDependencyIndex finishes all lazy cache writes before parallel readers start.
+func PrepareDependencyIndex(p *Prog, c *Cache) {
+	getDependencyIndex(p, c)
 }
 
 // removeUnrelatedCalls tries to remove all "unrelated" calls at once.
@@ -387,29 +390,11 @@ func relatedCalls(p0 *Prog, callIndex0 int) map[int]bool {
 }
 
 func checkAllowedCalls(call *Call) bool {
-	allowed := []string{"bind",
-		"connect",
-		"dup",
-		"dup3",
-		"epoll_create1",
-		"epoll_pwait",
-		"eventfd2",
-		"fallocate",
-		"fcntl",
-		"ioctl",
-		"listen",
-		"lseek",
-		"pipe2",
-		"ppoll",
-		"setsockopt",
-		"socket",
-		"umask",
-		"uname",
-	}
-	for _, allowedName := range allowed {
-		if call.Meta.CallName == allowedName {
-			return true
-		}
+	switch call.Meta.CallName {
+	case "bind", "connect", "dup", "dup3", "epoll_create1", "epoll_pwait", "eventfd2",
+		"fallocate", "fcntl", "ioctl", "listen", "lseek", "pipe2", "ppoll", "setsockopt",
+		"socket", "umask", "uname":
+		return true
 	}
 	return false
 }
@@ -519,6 +504,64 @@ func relatedCallsFullThreadIndexed(p0 *Prog, callIndex0 int, c *Cache, processed
 	return keepCalls, removeCalls
 }
 
+func relatedCallsFullThreadSparse(p0 *Prog, callIndex0 int, c *Cache, processed []bool,
+	idx *dependencyIndex, visited []uint32, generation uint32) ([]int, []int) {
+	keepCalls := []int{callIndex0}
+	visited[callIndex0] = generation
+	var removeCalls []int
+	used := maps.Clone(usesCache(p0.Calls[callIndex0], callIndex0, c))
+	tid := p0.Calls[callIndex0].StraceTid
+	if len(retCache(p0.Calls[callIndex0], callIndex0, c)) == 0 {
+		removeCalls = append(removeCalls, callIndex0)
+	}
+
+	work := make([]any, 0, len(used))
+	for key := range used {
+		work = append(work, key)
+	}
+	seen := make(map[any]bool, len(used))
+	keepCall := func(i int) {
+		if visited[i] == generation || processed[i] {
+			return
+		}
+		call := p0.Calls[i]
+		visited[i] = generation
+		keepCalls = append(keepCalls, i)
+		if call.StraceTid == tid && len(retCache(call, i, c)) == 0 && !checkAllowedCalls(call) {
+			removeCalls = append(removeCalls, i)
+		}
+		for key := range usesCache(call, i, c) {
+			if !used[key] {
+				used[key] = true
+				work = append(work, key)
+			}
+		}
+	}
+	for len(work) != 0 {
+		key := work[len(work)-1]
+		work = work[:len(work)-1]
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		for _, i := range idx.uses[key] {
+			call := p0.Calls[i]
+			if call.StraceTid == tid || checkAllowedCalls(call) {
+				keepCall(i)
+			}
+		}
+		for _, i := range idx.rets[key] {
+			call := p0.Calls[i]
+			if call.StraceTid != tid && !checkAllowedCalls(call) {
+				keepCall(i)
+			}
+		}
+	}
+	slices.Sort(keepCalls)
+	slices.Sort(removeCalls)
+	return keepCalls, removeCalls
+}
+
 func relatedCallsFullThreadScan(p0 *Prog, callIndex0 int, c *Cache, processedCallsIn []bool) ([]bool, []bool) {
 	keepCalls := make([]bool, len(p0.Calls))
 	keepCalls[callIndex0] = true
@@ -622,6 +665,9 @@ func usesCache(call *Call, i int, c *Cache) map[any]bool {
 	ret := c.Uses[i]
 	if ret == nil {
 		ret = uses(call)
+		if ret == nil {
+			ret = emptyDependencies
+		}
 		c.Uses[i] = ret
 		return ret
 	}
@@ -632,35 +678,46 @@ func retCache(call *Call, i int, c *Cache) map[any]bool {
 	ret := c.Rets[i]
 	if ret == nil {
 		ret = usesRet(call)
+		if ret == nil {
+			ret = emptyDependencies
+		}
 		c.Rets[i] = ret
 		return ret
 	}
 	return ret
 }
 
+var emptyDependencies = map[any]bool{}
+
 func ptrToBA[T any](p *T) []byte {
 	return []byte(fmt.Sprintf("%p", p))
 }
 
 func usesRet(call *Call) map[any]bool {
-	used := make(map[any]bool)
+	var used map[any]bool
+	add := func(key any) {
+		if used == nil {
+			used = make(map[any]bool)
+		}
+		used[key] = true
+	}
 	ForeachArg(call, func(arg Arg, _ *ArgCtx) {
 		if arg.Dir() != DirIn {
 			switch typ := arg.Type().(type) {
 			case *ResourceType:
 				a := arg.(*ResultArg)
-				used[a] = true
+				add(a)
 				if a.Res != nil {
-					used[a.Res] = true
+					add(a.Res)
 				}
 				for use := range a.uses {
-					used[use] = true
+					add(use)
 				}
 			case *BufferType:
 				a := arg.(*DataArg)
 				if a.Dir() != DirOut && typ.Kind == BufferFilename {
 					val := string(bytes.TrimRight(a.Data(), "\x00"))
-					used[val] = true
+					add(val)
 				}
 			}
 		}
@@ -669,23 +726,29 @@ func usesRet(call *Call) map[any]bool {
 }
 
 func uses(call *Call) map[any]bool {
-	used := make(map[any]bool)
+	var used map[any]bool
+	add := func(key any) {
+		if used == nil {
+			used = make(map[any]bool)
+		}
+		used[key] = true
+	}
 	ForeachArg(call, func(arg Arg, _ *ArgCtx) {
 		switch typ := arg.Type().(type) {
 		case *ResourceType:
 			a := arg.(*ResultArg)
-			used[a] = true
+			add(a)
 			if a.Res != nil {
-				used[a.Res] = true
+				add(a.Res)
 			}
 			for use := range a.uses {
-				used[use] = true
+				add(use)
 			}
 		case *BufferType:
 			a := arg.(*DataArg)
 			if a.Dir() != DirOut && typ.Kind == BufferFilename {
 				val := string(bytes.TrimRight(a.Data(), "\x00"))
-				used[val] = true
+				add(val)
 			}
 		}
 	})

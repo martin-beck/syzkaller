@@ -19,6 +19,21 @@ func (p *Prog) CloneFilter(keepCalls []bool) *Prog {
 	return p.cloneWithMapAndFilter(make(map[*ResultArg]*ResultArg), keepCalls)
 }
 
+// CloneCalls clones the calls at sorted indices without scanning the whole program.
+func (p *Prog) CloneCalls(indices []int) *Prog {
+	if p.isUnsafe {
+		panic("cloning of unsafe programs is not supposed to be done")
+	}
+	newargs := make(map[*ResultArg]*ResultArg)
+	calls := make([]*Call, len(indices))
+	for i, index := range indices {
+		calls[i] = cloneCall(p.Calls[index], newargs)
+	}
+	p1 := &Prog{Target: p.Target, Calls: calls}
+	p1.debugValidate()
+	return p1
+}
+
 func (p *Prog) cloneWithMapAndFilter(newargs map[*ResultArg]*ResultArg, keepCalls []bool) *Prog {
 	if p.isUnsafe {
 		// We could clone it, but since we prohibit mutation

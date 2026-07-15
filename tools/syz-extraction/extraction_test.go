@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/google/syzkaller/pkg/stat"
@@ -157,6 +158,32 @@ func TestReadProgAllowsAbsoluteFilenames(t *testing.T) {
 	if len(p.Calls) != 1 {
 		t.Fatalf("got %d calls, want 1", len(p.Calls))
 	}
+	if got := string(p.Serialize()); !strings.Contains(got, "'./etc/ld.so.cache\\x00'") {
+		t.Fatalf("filename was not sanitized:\n%s", got)
+	}
+}
+
+func TestDiscoverComponentsMatchesSerialTIDs(t *testing.T) {
+	oldJobs := *flagJobs
+	defer func() { *flagJobs = oldJobs }()
+	*flagJobs = 4
+	p := makeTestProg(
+		testCall{name: "socket", tid: 2},
+		testCall{name: "ioctl", tid: 2},
+		testCall{name: "listen", tid: 1},
+		testCall{name: "read", tid: 1},
+	)
+	syscallIDxPerTid = make(map[int64][]int)
+	threads := buildThreadList(p)
+	cache := newCache(len(p.Calls))
+	prog.PrepareDependencyIndex(p, cache)
+	got := discoverComponents(p, threads, cache)
+	for i, tid := range threads {
+		want := prog.RelatedCallComponentsForThread(p, tid, syscallIDxPerTid[tid], cache)
+		if !reflect.DeepEqual(got[i], want) {
+			t.Fatalf("TID %d components differ\nparallel: %#v\nserial: %#v", tid, got[i], want)
+		}
+	}
 }
 
 func TestSanitizeFilename(t *testing.T) {
@@ -255,13 +282,7 @@ func TestProcessComponentsMatchesSerialExtraction(t *testing.T) {
 		if !reflect.DeepEqual(got[i].names, want[i].names) {
 			t.Fatalf("result %d names = %v, want %v", i, got[i].names, want[i].names)
 		}
-		gotProg, wantProg := "", ""
-		if got[i].prog != nil {
-			gotProg = string(got[i].prog.Serialize())
-		}
-		if want[i].prog != nil {
-			wantProg = string(want[i].prog.Serialize())
-		}
+		gotProg, wantProg := string(got[i].data), string(want[i].data)
 		if gotProg != wantProg {
 			t.Fatalf("result %d program differs\ngot:\n%s\nwant:\n%s", i, gotProg, wantProg)
 		}
@@ -285,19 +306,19 @@ func TestProcessComponentsPreservesSmallReduction(t *testing.T) {
 		testCall{"call4", 1},
 		testCall{"call5", 1},
 	)
-	keep := []bool{true, true, true, true, false, false}
+	keep := []int{0, 1, 2, 3}
 	results := processComponents(p, []prog.RelatedCallComponent{{KeepCalls: keep}}, 0)
-	if results[0].prog == nil {
+	if results[0].data == nil {
 		t.Fatal("small reduction was dropped, want the original 6 calls")
 	}
-	if got := len(results[0].prog.Calls); got != 6 {
+	if got := results[0].calls; got != 6 {
 		t.Fatalf("small reduction produced %d calls, want the original 6", got)
 	}
 
 	*flagMinCalls = 1
-	keep = []bool{true, true, true, false, false, false}
+	keep = []int{0, 1, 2}
 	results = processComponents(p, []prog.RelatedCallComponent{{KeepCalls: keep, FilterCalls: true}}, 0)
-	if got := len(results[0].prog.Calls); got != 3 {
+	if got := results[0].calls; got != 3 {
 		t.Fatalf("large reduction produced %d calls, want 3", got)
 	}
 }
@@ -319,7 +340,8 @@ func serialExtractComponents(p *prog.Prog, tid int64, callIndices []int) []extra
 		pF = filterOutPolls(pF)
 		result := extractedComponent{order: len(results)}
 		if len(pF.Calls) >= *flagMinCalls {
-			result.prog = pF
+			result.data = pF.Serialize()
+			result.calls = len(pF.Calls)
 			result.names = stat.TopKNames(genSyscallHist(pF), *flagTopCalls)
 		}
 		results = append(results, result)

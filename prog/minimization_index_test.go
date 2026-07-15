@@ -175,8 +175,8 @@ func TestRelatedCallComponentsForThreadMatchesScanLoop(t *testing.T) {
 			t.Fatalf("component %d filter = %v, want %v", i,
 				indexComponents[i].FilterCalls, scanComponents[i].FilterCalls)
 		}
-		indexProg := p.CloneFilter(indexComponents[i].KeepCalls).Serialize()
-		scanProg := p.CloneFilter(scanComponents[i].KeepCalls).Serialize()
+		indexProg := p.CloneCalls(indexComponents[i].KeepCalls).Serialize()
+		scanProg := p.CloneCalls(scanComponents[i].KeepCalls).Serialize()
 		if string(indexProg) != string(scanProg) {
 			t.Fatalf("component %d filtered programs differ\nindexed:\n%s\nscan:\n%s", i, indexProg, scanProg)
 		}
@@ -197,17 +197,35 @@ func scanLoopComponents(p *Prog, tid int64, callIndices []int) []RelatedCallComp
 		filterCalls := len(p.Calls)-cardinality(keepCalls) >= 3
 		components = append(components, RelatedCallComponent{
 			StartIndex:  callIndex,
-			KeepCalls:   keepCalls,
-			RemoveCalls: removeCalls,
+			KeepCalls:   trueIndices(keepCalls),
+			RemoveCalls: trueIndices(removeCalls),
 			FilterCalls: filterCalls,
 		})
 		if filterCalls {
-			processedCalls = boolSliceOrCopy(processedCalls, removeCalls)
+			for i, remove := range removeCalls {
+				if remove {
+					processedCalls[i] = true
+					nonStartCalls[i] = true
+				}
+			}
 		}
-		nonStartCalls = boolSliceOrCopy(nonStartCalls, processedCalls)
-		nonStartCalls = boolSliceOrCopy(nonStartCalls, keepCalls)
+		for i, keep := range keepCalls {
+			if keep {
+				nonStartCalls[i] = true
+			}
+		}
 	}
 	return components
+}
+
+func trueIndices(mask []bool) []int {
+	var indices []int
+	for i, set := range mask {
+		if set {
+			indices = append(indices, i)
+		}
+	}
+	return indices
 }
 
 func BenchmarkRelatedCallComponents(b *testing.B) {
