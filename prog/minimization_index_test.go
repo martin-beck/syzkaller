@@ -171,6 +171,10 @@ func TestRelatedCallComponentsForThreadMatchesScanLoop(t *testing.T) {
 			t.Fatalf("component %d remove calls differ\nindexed: %v\nscan:    %v",
 				i, indexComponents[i].RemoveCalls, scanComponents[i].RemoveCalls)
 		}
+		if indexComponents[i].FilterCalls != scanComponents[i].FilterCalls {
+			t.Fatalf("component %d filter = %v, want %v", i,
+				indexComponents[i].FilterCalls, scanComponents[i].FilterCalls)
+		}
 		indexProg := p.CloneFilter(indexComponents[i].KeepCalls).Serialize()
 		scanProg := p.CloneFilter(scanComponents[i].KeepCalls).Serialize()
 		if string(indexProg) != string(scanProg) {
@@ -190,12 +194,16 @@ func scanLoopComponents(p *Prog, tid int64, callIndices []int) []RelatedCallComp
 			continue
 		}
 		keepCalls, removeCalls := relatedCallsFullThreadScan(p, callIndex, cache, processedCalls)
+		filterCalls := len(p.Calls)-cardinality(keepCalls) >= 3
 		components = append(components, RelatedCallComponent{
 			StartIndex:  callIndex,
 			KeepCalls:   keepCalls,
 			RemoveCalls: removeCalls,
+			FilterCalls: filterCalls,
 		})
-		processedCalls = boolSliceOrCopy(processedCalls, removeCalls)
+		if filterCalls {
+			processedCalls = boolSliceOrCopy(processedCalls, removeCalls)
+		}
 		nonStartCalls = boolSliceOrCopy(nonStartCalls, processedCalls)
 		nonStartCalls = boolSliceOrCopy(nonStartCalls, keepCalls)
 	}

@@ -269,13 +269,18 @@ func RelatedCallComponentsForThread(p *Prog, tid int64, callIndices []int, c *Ca
 			continue
 		}
 		keepCalls, removeCalls := relatedCallsFullThreadIndexed(p, callIndex, c, processedCalls, idx)
+		filterCalls := len(p.Calls)-cardinality(keepCalls) >= 3
 		components = append(components, RelatedCallComponent{
 			StartIndex:  callIndex,
 			KeepCalls:   keepCalls,
 			RemoveCalls: removeCalls,
-			FilterCalls: len(p.Calls)-cardinality(keepCalls) >= 3,
+			FilterCalls: filterCalls,
 		})
-		processedCalls = boolSliceOrCopy(processedCalls, removeCalls)
+		// Match RemoveUnrelatedCallsFast: a component that cannot remove at
+		// least three calls keeps the original program and processed state.
+		if filterCalls {
+			processedCalls = boolSliceOrCopy(processedCalls, removeCalls)
+		}
 		nonStartCalls = boolSliceOrCopy(nonStartCalls, processedCalls)
 		nonStartCalls = boolSliceOrCopy(nonStartCalls, keepCalls)
 	}
