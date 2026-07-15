@@ -1,7 +1,7 @@
 interface:
   display_name: "Syzkaller Dev"
   short_description: "Develop syzkaller fork internals"
-  default_prompt: "Use $syzkaller-dev to debug or modify syzkaller trace parsing, syz extraction, prog2c, csource, syscall descriptions, Go tooling, or tests."
+  default_prompt: "Use $syzkaller-dev to debug or modify syzkaller parsing the trace file, syz extraction, prog2c, csource, syscall descriptions, Go tooling, or tests."
 policy:
   # Apply repository-specific guidance whenever work touches syzkaller internals.
   allow_implicit_invocation: true
