@@ -92,11 +92,16 @@ jobs:
    Test-with-CSB:
      runs-on: ubuntu-latest
      steps:
+       - name: install pre-requisites
+         run: sudo apt-get install -y build-essential linux-tools-common linux-tools-$(uname -r) cmake libhiredis-dev
        - uses: actions/checkout@v4
 
        - uses: actions/setup-go@v5
          with:
-           go-version: '1.25'
+          go-version: '1.25'
+       - uses: actions/setup-python@v5
+         with:
+          python-version: "3.10"
 
        - name: run bm-generator from CSB
          env:
@@ -138,9 +143,17 @@ jobs:
 
            cd bm-generator
            ./test.sh
-       - name: Upload strace log
+       - name: Fix permissions
+         if: always()
+         run: |
+          sudo chmod -R a+r csb/results
+          sudo chmod -R a+r csb/bench-select
+       - name: Upload Artifacts
          uses: actions/upload-artifact@v4
          if: always()
          with:
-           name: ls_strace
-           path: csb/bm-generator/ls_strace.log
+           name: csb-artifacts
+           path: |
+            csb/bm-generator/ls_strace.log
+            csb/results
+            csb/bench-select
