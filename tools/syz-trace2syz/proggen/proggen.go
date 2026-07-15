@@ -504,9 +504,25 @@ func (ctx *context) makeDefaultCall(name string) *prog.Call {
 	call := prog.MakeCall(meta, nil)
 	for _, field := range meta.Args {
 		dir := field.Dir(prog.DirIn)
-		call.Args = append(call.Args, field.Type.DefaultArg(dir))
+		call.Args = append(call.Args, ctx.builderBackedDefaultArg(field.Type, dir))
 	}
 	return call
+}
+
+func (ctx *context) builderBackedDefaultArg(typ prog.Type, dir prog.Dir) prog.Arg {
+	arg := typ.DefaultArg(dir)
+	prog.ForeachSubArg(arg, func(arg prog.Arg, _ *prog.ArgCtx) {
+		ptr, ok := arg.(*prog.PointerArg)
+		if !ok || ptr.Res == nil {
+			return
+		}
+		size := ptr.Res.Size()
+		if size == 0 {
+			size = 1
+		}
+		ptr.Address = ctx.builder.Allocate(size, ptr.Res.Type().Alignment())
+	})
+	return arg
 }
 
 func (ctx *context) finishCall(call *prog.Call, straceCall *parser.Syscall) {

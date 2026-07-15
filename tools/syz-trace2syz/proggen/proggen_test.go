@@ -413,6 +413,12 @@ wait(NULL) = -1 ECHILD (No child processes)
 	}
 	for _, call := range p.Calls {
 		switch call.Meta.CallName {
+		case "rt_sigtimedwait":
+			these := call.Args[0].(*prog.PointerArg).Address
+			timeout := call.Args[2].(*prog.PointerArg).Address
+			if these == timeout {
+				t.Fatalf("rt_sigtimedwait default pointers alias at %#x", these)
+			}
 		case "mmap", "mprotect", "msync", "munmap":
 			if got, want := call.Args[0].(*prog.PointerArg).VmaSize, call.Args[1].(*prog.ConstArg).Val; got != want {
 				t.Fatalf("%s VMA size = %#x, want byte length %#x", call.Meta.CallName, got, want)
