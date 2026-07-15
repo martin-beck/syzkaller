@@ -47,8 +47,10 @@ GITREVDATE=$(shell git log -n 1 --format="%cd" --date=format:%Y%m%d-%H%M%S)
 GLFLAGS :=
 GGFLAGS := -gcflags="all=-N -l"
 GOFLAGS := -ldflags="$(GLFLAGS) -X github.com/google/syzkaller/prog.GitRevision=$(REV) -X github.com/google/syzkaller/prog.gitRevisionDate=$(GITREVDATE)" $(GGFLAGS)
+GORELEASEFLAGS := -ldflags="$(GLFLAGS) -X github.com/google/syzkaller/prog.GitRevision=$(REV) -X github.com/google/syzkaller/prog.gitRevisionDate=$(GITREVDATE)"
 ifneq ("$(GOTAGS)", "")
-	GOFLAGS += " -tags=$(GOTAGS)"
+	GOFLAGS += -tags=$(GOTAGS)
+	GORELEASEFLAGS += -tags=$(GOTAGS)
 endif
 
 GOHOSTFLAGS ?= $(GOFLAGS)
@@ -184,7 +186,8 @@ prog2c: descriptions
 	GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GOHOSTFLAGS) -o ./bin/syz-prog2c github.com/google/syzkaller/tools/syz-prog2c
 
 extraction: descriptions
-	GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GOHOSTFLAGS) -o ./bin/syz-extraction github.com/google/syzkaller/tools/syz-extraction
+	# Large traces need compiler optimizations; other tools keep their debugging flags.
+	GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GORELEASEFLAGS) -o ./bin/syz-extraction github.com/google/syzkaller/tools/syz-extraction
 
 crush: descriptions
 	GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GOHOSTFLAGS) -o ./bin/syz-crush github.com/google/syzkaller/tools/syz-crush
