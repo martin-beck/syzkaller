@@ -137,6 +137,7 @@ func sanitizeFilename(data []byte) []byte {
 	if path[0] == '/' {
 		path = "." + path
 	}
+	// Each harmless component cancels one leading ".." after path cleaning.
 	for escapingFilename(path) {
 		path = "a/" + path
 	}

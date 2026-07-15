@@ -826,7 +826,7 @@ func loopIdenticalCalls(calls []string, minRun int) []string {
 			j++
 		}
 		if run := j - i; run >= minRun {
-			out = append(out, fmt.Sprintf("\tfor (int csb_runtime_loop = 0; csb_runtime_loop < %d; csb_runtime_loop++) {\n%s\t}\n", run, calls[i]))
+			out = append(out, fmt.Sprintf("\tfor (size_t csb_runtime_loop = 0; csb_runtime_loop < %d; csb_runtime_loop++) {\n%s\t}\n", run, calls[i]))
 		} else {
 			out = append(out, calls[i:j]...)
 		}
