@@ -149,6 +149,7 @@ func escapingFilename(file string) bool {
 		len(file) >= 2 && file[0] == '.' && file[1] == '.'
 }
 
+// reduceProg makes one forward pass so every retained resource use still follows its producer.
 func reduceProg(p *prog.Prog, opts reduceOptions) (*prog.Prog, reduceStats) {
 	stats := reduceStats{InputCalls: len(p.Calls)}
 	motifKeys := make([]string, len(p.Calls))
@@ -208,6 +209,7 @@ func reduceProg(p *prog.Prog, opts reduceOptions) (*prog.Prog, reduceStats) {
 	return reduced, stats
 }
 
+// sampleMotif preserves boundary instances and spreads the remaining samples across the motif.
 func sampleMotif(rank, total int, opts reduceOptions) bool {
 	if opts.MaxMotifInstances <= 0 || total <= opts.MaxMotifInstances {
 		return true
