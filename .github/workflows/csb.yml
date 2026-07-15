@@ -97,6 +97,20 @@ jobs:
           SYZ_TRACE2SYZ_TEST_TRACE="`readlink -e ${{matrix.trace}}`" \
           go test ./tools/syz-trace2syz/ -run TestTrace2SyzDeterministicOutput -count=1
 
+   Bmgen-Pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Run short real-trace integration tests
+        run: |
+          make trace2syz extraction progreduce prog2c
+          go test -run '^$' -tags bmgen_integration ./tools/syz-trace2syz/... ./tools/syz-extraction/... ./tools/syz-prog-reduce/... ./tools/syz-prog2c/...
+          go test ./tools/syz-bmgen-integration -count=1 -timeout=3m
+
    Test-with-CSB:
      runs-on: ubuntu-latest
      steps:
