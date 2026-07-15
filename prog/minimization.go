@@ -5,9 +5,10 @@ package prog
 
 import (
 	"bytes"
-	"maps"
 	"fmt"
+	"maps"
 	"reflect"
+	"slices"
 
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/google/syzkaller/pkg/hash"
@@ -34,10 +35,25 @@ var (
 )
 
 type Cache struct {
-	Uses    []map[any]bool
-	Rets    []map[any]bool
-	UsesBFs []*bloom.BloomFilter
-	RetsBFs []*bloom.BloomFilter
+	Uses            []map[any]bool
+	Rets            []map[any]bool
+	UsesBFs         []*bloom.BloomFilter
+	RetsBFs         []*bloom.BloomFilter
+	prog            *Prog
+	dependencyIndex *dependencyIndex
+}
+
+type dependencyIndex struct {
+	prog *Prog
+	uses map[any][]int
+	rets map[any][]int
+}
+
+type RelatedCallComponent struct {
+	StartIndex  int
+	KeepCalls   []int
+	RemoveCalls []int
+	FilterCalls bool
 }
 
 type MinimizeMode int
@@ -243,6 +259,96 @@ func removeUnrelatedCallsInfoFast(p0 *Prog, callIndex0 int, processedCallsIn []b
 	return p, processedCalls, keepCalls
 }
 
+// ForEachRelatedCallComponentForThread yields dependency-closed call sets in start-call order.
+func ForEachRelatedCallComponentForThread(p *Prog, tid int64, callIndices []int, c *Cache,
+	yield func(RelatedCallComponent)) {
+	idx := getDependencyIndex(p, c)
+	processedCalls := make([]bool, len(p.Calls))
+	nonStartCalls := make([]bool, len(p.Calls))
+	visitedCalls := make([]uint32, len(p.Calls))
+	var generation uint32
+
+	for _, callIndex := range callIndices {
+		if nonStartCalls[callIndex] || p.Calls[callIndex].StraceTid != tid {
+			continue
+		}
+		generation++
+		keepCalls, removeCalls := relatedCallsFullThreadSparse(p, callIndex, c, processedCalls,
+			idx, visitedCalls, generation)
+		filterCalls := len(p.Calls)-len(keepCalls) >= 3
+		component := RelatedCallComponent{
+			StartIndex:  callIndex,
+			KeepCalls:   keepCalls,
+			RemoveCalls: removeCalls,
+			FilterCalls: filterCalls,
+		}
+		// Small reductions keep the original program and processed state.
+		if filterCalls {
+			for _, i := range removeCalls {
+				processedCalls[i] = true
+				nonStartCalls[i] = true
+			}
+		}
+		for _, i := range keepCalls {
+			nonStartCalls[i] = true
+		}
+		yield(component)
+	}
+}
+
+// RelatedCallComponentsForThread collects the streamed form for callers that need a snapshot.
+func RelatedCallComponentsForThread(p *Prog, tid int64, callIndices []int, c *Cache) []RelatedCallComponent {
+	var components []RelatedCallComponent
+	ForEachRelatedCallComponentForThread(p, tid, callIndices, c, func(component RelatedCallComponent) {
+		components = append(components, component)
+	})
+	return components
+}
+
+func buildDependencyIndex(p *Prog, c *Cache) *dependencyIndex {
+	idx := &dependencyIndex{
+		prog: p,
+		uses: make(map[any][]int),
+		rets: make(map[any][]int),
+	}
+	for i, call := range p.Calls {
+		for key := range usesCache(call, i, c) {
+			idx.uses[key] = append(idx.uses[key], i)
+		}
+		for key := range retCache(call, i, c) {
+			idx.rets[key] = append(idx.rets[key], i)
+		}
+	}
+	return idx
+}
+
+func prepareDependencyCache(p *Prog, c *Cache) {
+	if c.prog == p && len(c.Uses) == len(p.Calls) && len(c.Rets) == len(p.Calls) &&
+		len(c.UsesBFs) == len(p.Calls) && len(c.RetsBFs) == len(p.Calls) {
+		return
+	}
+	numCalls := len(p.Calls)
+	c.Uses = make([]map[any]bool, numCalls)
+	c.Rets = make([]map[any]bool, numCalls)
+	c.UsesBFs = make([]*bloom.BloomFilter, numCalls)
+	c.RetsBFs = make([]*bloom.BloomFilter, numCalls)
+	c.prog = p
+	c.dependencyIndex = nil
+}
+
+func getDependencyIndex(p *Prog, c *Cache) *dependencyIndex {
+	prepareDependencyCache(p, c)
+	if c.dependencyIndex == nil {
+		c.dependencyIndex = buildDependencyIndex(p, c)
+	}
+	return c.dependencyIndex
+}
+
+// PrepareDependencyIndex finishes all lazy cache writes before parallel readers start.
+func PrepareDependencyIndex(p *Prog, c *Cache) {
+	getDependencyIndex(p, c)
+}
+
 // removeUnrelatedCalls tries to remove all "unrelated" calls at once.
 // Unrelated calls are the calls that don't use any resources/files from
 // the transitive closure of the resources/files used by the target call.
@@ -292,29 +398,11 @@ func relatedCalls(p0 *Prog, callIndex0 int) map[int]bool {
 }
 
 func checkAllowedCalls(call *Call) bool {
-	allowed := []string{"bind",
-		"connect",
-		"dup",
-		"dup3",
-		"epoll_create1",
-		"epoll_pwait",
-		"eventfd2",
-		"fallocate",
-		"fcntl",
-		"ioctl",
-		"listen",
-		"lseek",
-		"pipe2",
-		"ppoll",
-		"setsockopt",
-		"socket",
-		"umask",
-		"uname",
-	}
-	for _, allowedName := range allowed {
-		if call.Meta.CallName == allowedName {
-			return true
-		}
+	switch call.Meta.CallName {
+	case "bind", "connect", "dup", "dup3", "epoll_create1", "epoll_pwait", "eventfd2",
+		"fallocate", "fcntl", "ioctl", "listen", "lseek", "pipe2", "ppoll", "setsockopt",
+		"socket", "umask", "uname":
+		return true
 	}
 	return false
 }
@@ -355,6 +443,134 @@ func relatedCallsFullProgram(p0 *Prog, callIndex0 int, c *Cache, processedCallsI
 }
 
 func relatedCallsFullThread(p0 *Prog, callIndex0 int, c *Cache, processedCallsIn []bool) ([]bool, []bool) {
+	return relatedCallsFullThreadIndexed(p0, callIndex0, c, processedCallsIn, getDependencyIndex(p0, c))
+}
+
+func relatedCallsFullThreadIndexed(p0 *Prog, callIndex0 int, c *Cache, processedCallsIn []bool, idx *dependencyIndex) ([]bool, []bool) {
+	keepCalls := make([]bool, len(p0.Calls))
+	keepCalls[callIndex0] = true
+	removeCalls := make([]bool, len(p0.Calls))
+	used := maps.Clone(usesCache(p0.Calls[callIndex0], callIndex0, c))
+	tid := p0.Calls[callIndex0].StraceTid
+	if len(retCache(p0.Calls[callIndex0], callIndex0, c)) == 0 {
+		removeCalls[callIndex0] = true
+	}
+
+	work := make([]any, 0, len(used))
+	for key := range used {
+		work = append(work, key)
+	}
+	seen := make(map[any]bool, len(used))
+
+	keepCall := func(i int) {
+		if keepCalls[i] || processedCallsIn[i] {
+			return
+		}
+		call := p0.Calls[i]
+		keepCalls[i] = true
+		if call.StraceTid == tid && len(retCache(call, i, c)) == 0 && !checkAllowedCalls(call) {
+			removeCalls[i] = true
+		}
+		for key := range usesCache(call, i, c) {
+			if !used[key] {
+				used[key] = true
+				work = append(work, key)
+			}
+		}
+	}
+
+	for len(work) != 0 {
+		key := work[len(work)-1]
+		work = work[:len(work)-1]
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
+		for _, i := range idx.uses[key] {
+			if keepCalls[i] || processedCallsIn[i] {
+				continue
+			}
+			call := p0.Calls[i]
+			matchingTIDOrAllowed := call.StraceTid == tid || checkAllowedCalls(call)
+			if matchingTIDOrAllowed {
+				keepCall(i)
+			}
+		}
+		for _, i := range idx.rets[key] {
+			if keepCalls[i] || processedCallsIn[i] {
+				continue
+			}
+			call := p0.Calls[i]
+			matchingTIDOrAllowed := call.StraceTid == tid || checkAllowedCalls(call)
+			if !matchingTIDOrAllowed {
+				keepCall(i)
+			}
+		}
+	}
+
+	return keepCalls, removeCalls
+}
+
+func relatedCallsFullThreadSparse(p0 *Prog, callIndex0 int, c *Cache, processed []bool,
+	idx *dependencyIndex, visited []uint32, generation uint32) ([]int, []int) {
+	keepCalls := []int{callIndex0}
+	visited[callIndex0] = generation
+	var removeCalls []int
+	used := maps.Clone(usesCache(p0.Calls[callIndex0], callIndex0, c))
+	tid := p0.Calls[callIndex0].StraceTid
+	if len(retCache(p0.Calls[callIndex0], callIndex0, c)) == 0 {
+		removeCalls = append(removeCalls, callIndex0)
+	}
+
+	work := make([]any, 0, len(used))
+	for key := range used {
+		work = append(work, key)
+	}
+	seen := make(map[any]bool, len(used))
+	keepCall := func(i int) {
+		if visited[i] == generation || processed[i] {
+			return
+		}
+		call := p0.Calls[i]
+		visited[i] = generation
+		keepCalls = append(keepCalls, i)
+		if call.StraceTid == tid && len(retCache(call, i, c)) == 0 && !checkAllowedCalls(call) {
+			removeCalls = append(removeCalls, i)
+		}
+		for key := range usesCache(call, i, c) {
+			if !used[key] {
+				used[key] = true
+				work = append(work, key)
+			}
+		}
+	}
+	for len(work) != 0 {
+		key := work[len(work)-1]
+		work = work[:len(work)-1]
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		for _, i := range idx.uses[key] {
+			call := p0.Calls[i]
+			if call.StraceTid == tid || checkAllowedCalls(call) {
+				keepCall(i)
+			}
+		}
+		for _, i := range idx.rets[key] {
+			call := p0.Calls[i]
+			if call.StraceTid != tid && !checkAllowedCalls(call) {
+				keepCall(i)
+			}
+		}
+	}
+	slices.Sort(keepCalls)
+	slices.Sort(removeCalls)
+	return keepCalls, removeCalls
+}
+
+func relatedCallsFullThreadScan(p0 *Prog, callIndex0 int, c *Cache, processedCallsIn []bool) ([]bool, []bool) {
 	keepCalls := make([]bool, len(p0.Calls))
 	keepCalls[callIndex0] = true
 	removeCalls := make([]bool, len(p0.Calls))
@@ -457,6 +673,9 @@ func usesCache(call *Call, i int, c *Cache) map[any]bool {
 	ret := c.Uses[i]
 	if ret == nil {
 		ret = uses(call)
+		if ret == nil {
+			ret = emptyDependencies
+		}
 		c.Uses[i] = ret
 		return ret
 	}
@@ -467,35 +686,46 @@ func retCache(call *Call, i int, c *Cache) map[any]bool {
 	ret := c.Rets[i]
 	if ret == nil {
 		ret = usesRet(call)
+		if ret == nil {
+			ret = emptyDependencies
+		}
 		c.Rets[i] = ret
 		return ret
 	}
 	return ret
 }
 
+var emptyDependencies = map[any]bool{}
+
 func ptrToBA[T any](p *T) []byte {
 	return []byte(fmt.Sprintf("%p", p))
 }
 
 func usesRet(call *Call) map[any]bool {
-	used := make(map[any]bool)
+	var used map[any]bool
+	add := func(key any) {
+		if used == nil {
+			used = make(map[any]bool)
+		}
+		used[key] = true
+	}
 	ForeachArg(call, func(arg Arg, _ *ArgCtx) {
 		if arg.Dir() != DirIn {
 			switch typ := arg.Type().(type) {
 			case *ResourceType:
 				a := arg.(*ResultArg)
-				used[a] = true
+				add(a)
 				if a.Res != nil {
-					used[a.Res] = true
+					add(a.Res)
 				}
 				for use := range a.uses {
-					used[use] = true
+					add(use)
 				}
 			case *BufferType:
 				a := arg.(*DataArg)
 				if a.Dir() != DirOut && typ.Kind == BufferFilename {
 					val := string(bytes.TrimRight(a.Data(), "\x00"))
-					used[val] = true
+					add(val)
 				}
 			}
 		}
@@ -504,23 +734,29 @@ func usesRet(call *Call) map[any]bool {
 }
 
 func uses(call *Call) map[any]bool {
-	used := make(map[any]bool)
+	var used map[any]bool
+	add := func(key any) {
+		if used == nil {
+			used = make(map[any]bool)
+		}
+		used[key] = true
+	}
 	ForeachArg(call, func(arg Arg, _ *ArgCtx) {
 		switch typ := arg.Type().(type) {
 		case *ResourceType:
 			a := arg.(*ResultArg)
-			used[a] = true
+			add(a)
 			if a.Res != nil {
-				used[a.Res] = true
+				add(a.Res)
 			}
 			for use := range a.uses {
-				used[use] = true
+				add(use)
 			}
 		case *BufferType:
 			a := arg.(*DataArg)
 			if a.Dir() != DirOut && typ.Kind == BufferFilename {
 				val := string(bytes.TrimRight(a.Data(), "\x00"))
-				used[val] = true
+				add(val)
 			}
 		}
 	})

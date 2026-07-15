@@ -13,8 +13,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
-	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/pkg/osutil"
 	"github.com/google/syzkaller/pkg/stat"
@@ -36,9 +36,14 @@ var (
 	flagDeserialize = flag.String("deserialize", "", "(Optional) directory to store deserialized programs")
 	flagMinCalls    = flag.Int("minCalls", 5, "minimum number of remaining syscalls after minimization")
 	flagTopCalls    = flag.Int("topCalls", 2, "number of most used usyscalls to be used for file name generation")
+	flagJobs        = flag.Int("jobs", defaultJobs(), "number of extracted programs to build in parallel")
 
 	syscallIDxPerTid = make(map[int64][]int)
 )
+
+func defaultJobs() int {
+	return min(runtime.NumCPU(), 4)
+}
 
 func help() {
 	flag.Usage = func() {
@@ -113,8 +118,7 @@ func sanitizeFilename(data []byte) []byte {
 	for escapingFilename(path) {
 		path = "a/" + path
 	}
-	ret := append([]byte(path), data[pathEnd:]...)
-	return ret
+	return append([]byte(path), data[pathEnd:]...)
 }
 
 func escapingFilename(file string) bool {
@@ -126,6 +130,12 @@ func escapingFilename(file string) bool {
 func generateMinimizedProg(p *prog.Prog, callIndex0 int, processedCallsIn []bool, c *prog.Cache) (pOut *prog.Prog, processedCalls []bool, keepCalls []bool) {
 	pOut, processedCalls, keepCalls = prog.RemoveUnrelatedCallsFast(p, callIndex0, processedCallsIn, c)
 	return
+}
+
+type extractedComponent struct {
+	data  []byte
+	calls int
+	names []string
 }
 
 func isPollLike(syscallName string) bool {
@@ -162,6 +172,30 @@ func filterOutPolls(p *prog.Prog) *prog.Prog {
 	return px
 }
 
+func filterOutPollIndices(p *prog.Prog, indices []int) []int {
+	keep := make([]bool, len(indices))
+	prevPoll := make(map[int64]int)
+	for pos, index := range indices {
+		call := p.Calls[index]
+		if isPollLike(call.Meta.Name) {
+			prevPoll[call.StraceTid] = pos
+		} else {
+			if oldPos, ok := prevPoll[call.StraceTid]; ok {
+				keep[oldPos] = true
+				delete(prevPoll, call.StraceTid)
+			}
+			keep[pos] = true
+		}
+	}
+	out := make([]int, 0, len(indices))
+	for pos, index := range indices {
+		if keep[pos] {
+			out = append(out, index)
+		}
+	}
+	return out
+}
+
 func getOutPrefix() string {
 	prefixLen := 2
 	progBase := filepath.Base(*flagProg)
@@ -178,13 +212,8 @@ func getOutPrefix() string {
 	return outPrefix
 }
 
-func newCache(numCalls int) *prog.Cache {
-	c := new(prog.Cache)
-	c.Uses = make([]map[any]bool, numCalls)
-	c.Rets = make([]map[any]bool, numCalls)
-	c.UsesBFs = make([]*bloom.BloomFilter, numCalls)
-	c.RetsBFs = make([]*bloom.BloomFilter, numCalls)
-	return c
+func newCache() *prog.Cache {
+	return new(prog.Cache)
 }
 
 func generateAllProgs(p *prog.Prog, threadList []int64) {
@@ -194,57 +223,114 @@ func generateAllProgs(p *prog.Prog, threadList []int64) {
 
 	fmt.Fprintf(os.Stderr, "Total number of syscalls: %d\n", numCalls)
 
-	c := newCache(numCalls)
+	c := newCache()
+	prog.PrepareDependencyIndex(p, c)
 
 	totalStartSyscalls := 0
 	usedStartSyscalls := 0
 	for _, tid := range threadList {
 		totalStartSyscalls += len(syscallIDxPerTid[tid])
 	}
-	var status string
-
 	// go over all thread IDs in decreasing depth starting with the highest depth
 	for idx, tid := range threadList {
-		processedCalls := make([]bool, numCalls)
-		nonStartCalls := make([]bool, numCalls)
-
 		numCallsTid := len(syscallIDxPerTid[tid])
 		fmt.Printf("[%d/%d] Working on TID %d - %d syscalls\n", idx+1, len(threadList), tid, numCallsTid)
 
-		for subIdx, i := range syscallIDxPerTid[tid] {
-			usedStartSyscalls++
-			if !nonStartCalls[i] && p.Calls[i].StraceTid == tid {
-				if usedStartSyscalls%100 == 0 {
-					status = fmt.Sprintf("-- Progress TID [%03.1f/100%%] -- Progress overall [%03.1f/100%%] --", (100.0 * float32(subIdx) / float32(numCallsTid)), (100 * float32(usedStartSyscalls) / float32(totalStartSyscalls)))
-					fmt.Fprintf(os.Stderr, "%s\r", status)
+		usedStartSyscalls += numCallsTid
+		status := fmt.Sprintf("-- Progress TID [100.0/100%%] -- Progress overall [%03.1f/100%%] --", (100 * float32(usedStartSyscalls) / float32(totalStartSyscalls)))
+		fmt.Fprintf(os.Stderr, "%s\r", status)
+
+		emit := func(results []extractedComponent) {
+			for _, result := range results {
+				if result.data == nil {
+					continue
 				}
-				pF, pCallsOut, keepCalls := generateMinimizedProg(p, i, processedCalls, c)
-				nonStartCalls = prog.Sliceor(prog.Sliceor(pCallsOut, keepCalls), nonStartCalls)
-				processedCalls = pCallsOut
-
-				pF = filterOutPolls(pF)
-				if len(pF.Calls) >= *flagMinCalls {
-
-					scallHist := genSyscallHist(pF)
-					topNames := stat.TopKNames(scallHist, *flagTopCalls)
-					prefix := outPrefix + "_" + strings.Join(topNames, "_")
-
-					_, ok := outPrefixesIdx[prefix]
-					if !ok {
-						outPrefixesIdx[prefix] = 0
-					} else {
-						outPrefixesIdx[prefix]++
-					}
-
-					fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
-					fmt.Fprintf(os.Stderr, "    Extracted %d syscalls into %s_%d\n", len(pF.Calls), prefix, outPrefixesIdx[prefix])
-					saveProg2File(pF, prefix, outPrefixesIdx[prefix])
+				prefix := outPrefix + "_" + strings.Join(result.names, "_")
+				if _, ok := outPrefixesIdx[prefix]; ok {
+					outPrefixesIdx[prefix]++
+				} else {
+					outPrefixesIdx[prefix] = 0
 				}
+				fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
+				fmt.Fprintf(os.Stderr, "    Extracted %d syscalls into %s_%d\n",
+					result.calls, prefix, outPrefixesIdx[prefix])
+				saveProg2File(result.data, prefix, outPrefixesIdx[prefix])
 			}
-			i--
 		}
+		processThreadComponents(p, tid, syscallIDxPerTid[tid], c, emit)
 		fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 	}
+}
+
+func processThreadComponents(p *prog.Prog, tid int64, callIndices []int, c *prog.Cache,
+	emit func([]extractedComponent)) {
+	batchSize := max(*flagJobs, 1)
+	components := make([]prog.RelatedCallComponent, 0, batchSize)
+	flush := func() {
+		if len(components) == 0 {
+			return
+		}
+		emit(processComponents(p, components))
+		components = components[:0]
+	}
+	// Flush bounded batches in discovery order so memory follows -jobs, not trace length.
+	prog.ForEachRelatedCallComponentForThread(p, tid, callIndices, c, func(component prog.RelatedCallComponent) {
+		components = append(components, component)
+		if len(components) == batchSize {
+			flush()
+		}
+	})
+	flush()
+}
+
+// processComponents writes into fixed result slots so worker scheduling cannot change output order.
+func processComponents(p *prog.Prog, components []prog.RelatedCallComponent) []extractedComponent {
+	results := make([]extractedComponent, len(components))
+	jobs := *flagJobs
+	if jobs < 1 {
+		jobs = 1
+	}
+	if jobs > len(components) {
+		jobs = len(components)
+	}
+	if jobs == 0 {
+		return results
+	}
+
+	work := make(chan int)
+	var wg sync.WaitGroup
+	wg.Add(jobs)
+	for range jobs {
+		go func() {
+			defer wg.Done()
+			for i := range work {
+				component := components[i]
+				indices := component.KeepCalls
+				if !component.FilterCalls {
+					indices = make([]int, len(p.Calls))
+					for i := range indices {
+						indices[i] = i
+					}
+				}
+				indices = filterOutPollIndices(p, indices)
+				if len(indices) < *flagMinCalls {
+					continue
+				}
+				pF := p.CloneCalls(indices)
+				results[i].data = pF.Serialize()
+				results[i].calls = len(indices)
+				scallHist := genSyscallHist(pF)
+				results[i].names = stat.TopKNames(scallHist, *flagTopCalls)
+			}
+		}()
+	}
+	for i := range components {
+		work <- i
+	}
+	close(work)
+	wg.Wait()
+
+	return results
 }
 
 func genSyscallHist(p *prog.Prog) map[string]int {
@@ -262,9 +348,9 @@ func genSyscallHist(p *prog.Prog) map[string]int {
 	return hist
 }
 
-func saveProg2File(p *prog.Prog, prefix string, index int) {
+func saveProg2File(data []byte, prefix string, index int) {
 	outName := filepath.Join(*flagDeserialize, "min_"+prefix+"_"+strconv.Itoa(index)+".prog")
-	if err := osutil.WriteFile(outName, p.Serialize()); err != nil {
+	if err := osutil.WriteFile(outName, data); err != nil {
 		log.Fatalf("failed to output file: %v", err)
 	}
 }
