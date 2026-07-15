@@ -25,28 +25,30 @@ import (
 )
 
 var (
-	flagOS         = flag.String("os", runtime.GOOS, "target os")
-	flagArch       = flag.String("arch", runtime.GOARCH, "target arch")
-	flagBuild      = flag.Bool("build", false, "also build the generated program")
-	flagThreaded   = flag.Bool("threaded", false, "create threaded program")
-	flagRepeat     = flag.Int("repeat", 1, "repeat program that many times (<=0 - infinitely)")
-	flagProcs      = flag.Int("procs", 1, "number of parallel processes")
-	flagSlowdown   = flag.Int("slowdown", 1, "execution slowdown caused by emulation/instrumentation")
-	flagSandbox    = flag.String("sandbox", "", "sandbox to use (none, setuid, namespace, android)")
-	flagSandboxArg = flag.Int("sandbox_arg", 0, "argument for executor to customize its behavior")
-	flagProg       = flag.String("prog", "", "file with program to convert (required)")
-	flagHandleSegv = flag.Bool("segv", false, "catch and ignore SIGSEGV")
-	flagUseTmpDir  = flag.Bool("tmpdir", false, "create a temporary dir and execute inside it")
-	flagTrace      = flag.Bool("trace", false, "trace syscall results")
-	flagStrict     = flag.Bool("strict", false, "parse input program in strict mode")
-	flagLeak       = flag.Bool("leak", false, "do leak checking")
-	flagEnable     = flag.String("enable", "none", "enable only listed additional features")
-	flagDisable    = flag.String("disable", "none", "enable all additional features except listed")
-	flagVmlinux    = flag.String("vmlinux", "", "path to vmlinux binary (required for dynamically discovered calls")
-	flagFormat     = flag.Bool("format", true, "use clang-format to format c code")
-	flagCSB        = flag.Bool("csb", false, "generate CSB test header instead of c file")
-	flagNumNop     = flag.Int("num_nop", 0, "number of NOPs per operation")
-	flagCFile      = flag.String("cfile", "", "output c file instead of stdout")
+	flagOS             = flag.String("os", runtime.GOOS, "target os")
+	flagArch           = flag.String("arch", runtime.GOARCH, "target arch")
+	flagBuild          = flag.Bool("build", false, "also build the generated program")
+	flagThreaded       = flag.Bool("threaded", false, "create threaded program")
+	flagRepeat         = flag.Int("repeat", 1, "repeat program that many times (<=0 - infinitely)")
+	flagProcs          = flag.Int("procs", 1, "number of parallel processes")
+	flagSlowdown       = flag.Int("slowdown", 1, "execution slowdown caused by emulation/instrumentation")
+	flagSandbox        = flag.String("sandbox", "", "sandbox to use (none, setuid, namespace, android)")
+	flagSandboxArg     = flag.Int("sandbox_arg", 0, "argument for executor to customize its behavior")
+	flagProg           = flag.String("prog", "", "file with program to convert (required)")
+	flagHandleSegv     = flag.Bool("segv", false, "catch and ignore SIGSEGV")
+	flagUseTmpDir      = flag.Bool("tmpdir", false, "create a temporary dir and execute inside it")
+	flagTrace          = flag.Bool("trace", false, "trace syscall results")
+	flagStrict         = flag.Bool("strict", false, "parse input program in strict mode")
+	flagLeak           = flag.Bool("leak", false, "do leak checking")
+	flagEnable         = flag.String("enable", "none", "enable only listed additional features")
+	flagDisable        = flag.String("disable", "none", "enable all additional features except listed")
+	flagVmlinux        = flag.String("vmlinux", "", "path to vmlinux binary (required for dynamically discovered calls")
+	flagFormat         = flag.Bool("format", true, "use clang-format to format c code")
+	flagCSB            = flag.Bool("csb", false, "generate CSB test header instead of c file")
+	flagNumNop         = flag.Int("num_nop", 0, "number of NOPs per operation")
+	flagCFile          = flag.String("cfile", "", "output c file instead of stdout")
+	flagRuntimeLoops   = flag.Bool("runtime_loops", false, "compress consecutive identical generated call fragments into runtime loops")
+	flagRuntimeLoopMin = flag.Int("runtime_loop_min", 2, "minimum consecutive identical fragments required for -runtime_loops")
 )
 
 type BMConfigApps struct {
@@ -518,6 +520,8 @@ func main() {
 		FileSizes:             filesize,
 		FileNames:             filemap,
 		CallComments:          true,
+		RuntimeLoops:          *flagRuntimeLoops,
+		RuntimeLoopMin:        *flagRuntimeLoopMin,
 		MaxWriteSize:          maxWriteSize,
 		MaxWriteSizeAlignment: maxWriteSizeAlignment,
 	}

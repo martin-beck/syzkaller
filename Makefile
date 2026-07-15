@@ -102,7 +102,7 @@ endif
 
 .PHONY: all clean host target \
 	manager executor kfuzztest ci hub agent \
-	execprog mutate prog2c trace2syz repro upgrade db \
+	execprog mutate prog2c progreduce trace2syz repro upgrade db \
 	usbgen symbolize cover kconf syz-build crush \
 	bin/syz-extract bin/syz-fmt \
 	extract generate generate_go generate_rpc generate_sys \
@@ -188,6 +188,9 @@ prog2c: descriptions
 extraction: descriptions
 	# Large traces need compiler optimizations; other tools keep their debugging flags.
 	GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GORELEASEFLAGS) -o ./bin/syz-extraction github.com/google/syzkaller/tools/syz-extraction
+
+progreduce: descriptions
+	GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GOHOSTFLAGS) -o ./bin/syz-prog-reduce github.com/google/syzkaller/tools/syz-prog-reduce
 
 crush: descriptions
 	GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GOHOSTFLAGS) -o ./bin/syz-crush github.com/google/syzkaller/tools/syz-crush

@@ -431,3 +431,31 @@ func TestGenerateSandboxFunctionSignature(t *testing.T) {
 		"do_sandbox_android(-1234);", // expected
 		"Android sandbox function requires an argument")
 }
+
+func TestLoopIdenticalCalls(t *testing.T) {
+	calls := []string{
+		"\tcall_a();\n",
+		"\tcall_a();\n",
+		"\tcall_a();\n",
+		"\tcall_b();\n",
+		"\tcall_b();\n",
+	}
+	got := strings.Join(loopIdenticalCalls(calls, 3), "")
+	if !strings.Contains(got, "csb_runtime_loop < 3") {
+		t.Fatalf("missing loop for run of 3:\n%s", got)
+	}
+	if strings.Contains(got, "csb_runtime_loop < 2") {
+		t.Fatalf("unexpected loop for run below threshold:\n%s", got)
+	}
+
+	ctx := &context{opts: Options{RuntimeLoops: true, RuntimeLoopMin: 3, Threaded: true}}
+	got = ctx.generateSyscalls(calls, false)
+	if strings.Contains(got, "csb_runtime_loop") {
+		t.Fatalf("threaded generation must retain one fragment per switch case:\n%s", got)
+	}
+	for i := range calls {
+		if !strings.Contains(got, fmt.Sprintf("case %d:", i)) {
+			t.Fatalf("missing case %d after runtime-loop generation:\n%s", i, got)
+		}
+	}
+}
