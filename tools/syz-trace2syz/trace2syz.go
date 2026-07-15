@@ -60,6 +60,7 @@ func initializeTarget(os, arch string) *prog.Target {
 	if err != nil {
 		log.Fatalf("failed to load target: %s", err)
 	}
+	// ConstMap exposes ABI values for the selected trace target, not the host running conversion.
 	target.ConstMap = make(map[string]uint64)
 	for _, c := range target.Consts {
 		target.ConstMap[c.Name] = c.Value
@@ -141,6 +142,7 @@ func parseTraces(target *prog.Target) []*prog.Prog {
 	return ret
 }
 
+// appendProgMetadata records target identity in namespaced comments understood by downstream tools.
 func appendProgMetadata(data []byte, os, arch string) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# csb.trace.os=%s\n", os)
