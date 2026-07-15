@@ -258,6 +258,7 @@ func removeUnrelatedCallsInfoFast(p0 *Prog, callIndex0 int, processedCallsIn []b
 	return p, processedCalls, keepCalls
 }
 
+// RelatedCallComponentsForThread reuses one reverse dependency index for every start call in a trace thread.
 func RelatedCallComponentsForThread(p *Prog, tid int64, callIndices []int, c *Cache) []RelatedCallComponent {
 	idx := getDependencyIndex(p, c)
 	processedCalls := make([]bool, len(p.Calls))

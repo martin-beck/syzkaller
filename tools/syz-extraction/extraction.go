@@ -248,6 +248,7 @@ func generateAllProgs(p *prog.Prog, threadList []int64) {
 	}
 }
 
+// processComponents writes into fixed result slots so worker scheduling cannot change output order.
 func processComponents(p *prog.Prog, components []prog.RelatedCallComponent, orderBase int) []extractedComponent {
 	results := make([]extractedComponent, len(components))
 	jobs := *flagJobs
