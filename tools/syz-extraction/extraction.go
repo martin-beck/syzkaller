@@ -68,6 +68,7 @@ func readProg() (p *prog.Prog) {
 		fmt.Fprintf(os.Stderr, "failed to read prog file: %v\n", err)
 		os.Exit(1)
 	}
+	comments := csbCommentsFromData(data)
 	mode := prog.NonStrictUnsafe
 	safeMode := prog.NonStrict
 	if *flagStrict {
@@ -85,7 +86,23 @@ func readProg() (p *prog.Prog) {
 		fmt.Fprintf(os.Stderr, "failed to deserialize sanitized program: %v\n", err)
 		os.Exit(1)
 	}
+	p.Comments = comments
 	return
+}
+
+func csbCommentsFromData(data []byte) []string {
+	var ret []string
+	seen := make(map[string]bool)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "#")
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "csb.trace.") && !seen[line] {
+			ret = append(ret, line)
+			seen[line] = true
+		}
+	}
+	return ret
 }
 
 func sanitizeFilenames(p *prog.Prog) {
@@ -271,6 +288,7 @@ func processComponents(p *prog.Prog, components []prog.RelatedCallComponent, ord
 				component := components[i]
 				pF := p.CloneFilter(component.KeepCalls)
 				pF = filterOutPolls(pF)
+				pF.Comments = append([]string(nil), p.Comments...)
 				results[i].order = orderBase + i
 				if len(pF.Calls) < *flagMinCalls {
 					continue
@@ -307,9 +325,42 @@ func genSyscallHist(p *prog.Prog) map[string]int {
 
 func saveProg2File(p *prog.Prog, prefix string, index int) {
 	outName := filepath.Join(*flagDeserialize, "min_"+prefix+"_"+strconv.Itoa(index)+".prog")
-	if err := osutil.WriteFile(outName, p.Serialize()); err != nil {
+	data := serializeWithComments(p)
+	if err := osutil.WriteFile(outName, data); err != nil {
 		log.Fatalf("failed to output file: %v", err)
 	}
+}
+
+func serializeWithComments(p *prog.Prog) []byte {
+	data := p.Serialize()
+	comments := csbComments(p)
+	if len(comments) == 0 {
+		return data
+	}
+	var b strings.Builder
+	for _, comment := range comments {
+		fmt.Fprintf(&b, "# %s\n", comment)
+	}
+	b.Write(data)
+	return []byte(b.String())
+}
+
+func csbComments(p *prog.Prog) []string {
+	var ret []string
+	seen := make(map[string]bool)
+	add := func(comment string) {
+		if strings.HasPrefix(comment, "csb.trace.") && !seen[comment] {
+			ret = append(ret, comment)
+			seen[comment] = true
+		}
+	}
+	for _, comment := range p.Comments {
+		add(comment)
+	}
+	for _, call := range p.Calls {
+		add(call.Comment)
+	}
+	return ret
 }
 
 // a map from TID to clone depth
