@@ -41,16 +41,13 @@ var (
 	flagArgLength    = flag.Bool("argLength", false, "trim the length syscall arguments to the actual data size")
 	flagMadviseSetup = flag.Bool("madviseSetup", false,
 		"map a dedicated VMA before destructive madvise calls instead of using MADV_NORMAL")
-)
-
-const (
-	goos = targets.Linux // Target OS
-	arch = targets.AMD64 // Target architecture
+	flagOS   = flag.String("os", targets.Linux, "target OS")
+	flagArch = flag.String("arch", targets.ARM64, "target architecture")
 )
 
 func main() {
 	flag.Parse()
-	target := initializeTarget(goos, arch)
+	target := initializeTarget(*flagOS, *flagArch)
 	progs := parseTraces(target)
 	if !*flagSkipCorpus {
 		log.Logf(0, "successfully converted traces; generating corpus.db")
@@ -134,13 +131,22 @@ func parseTraces(target *prog.Target) []*prog.Prog {
 			outPrefixesIdx[outPrefix]++
 		}
 		progName := filepath.Join(deserializeDir, outDescr+"_"+outPrefix+"_"+strconv.Itoa(outPrefixesIdx[outPrefix])+".prog")
-		if err := osutil.WriteFile(progName, p.Serialize()); err != nil {
+		data := appendProgMetadata(p.Serialize(), target.OS, target.Arch)
+		if err := osutil.WriteFile(progName, data); err != nil {
 			log.Fatalf("failed to output file: %v", err)
 		}
 		log.Logf(0, "Stored program %s", progName)
 		i++
 	}
 	return ret
+}
+
+func appendProgMetadata(data []byte, os, arch string) []byte {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# csb.trace.os=%s\n", os)
+	fmt.Fprintf(&b, "# csb.trace.arch=%s\n", arch)
+	b.Write(data)
+	return []byte(b.String())
 }
 
 func getTraceFiles(dir string) []string {
