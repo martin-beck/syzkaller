@@ -245,7 +245,8 @@ func usedResources(call *prog.Call) []*prog.ResultArg {
 	var resources []*prog.ResultArg
 	prog.ForeachArg(call, func(arg prog.Arg, _ *prog.ArgCtx) {
 		res, ok := arg.(*prog.ResultArg)
-		if ok && res.Dir() == prog.DirIn {
+		// Inout resources consume their prior value before producing an updated one.
+		if ok && res.Dir() != prog.DirOut {
 			resources = append(resources, res)
 		}
 	})

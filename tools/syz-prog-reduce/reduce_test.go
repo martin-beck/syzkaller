@@ -69,6 +69,22 @@ func TestReduceProgKeepsOnlyDependencyValidCalls(t *testing.T) {
 	}
 }
 
+func TestUsedResourcesIncludesInOutDependencies(t *testing.T) {
+	p := testProg(t, "r0 = test$res2()\nmutate6(r0, &(0x7f0000000040)=\"abcd\", 0x4)\n")
+	producer := p.Calls[0].Ret
+	consumer := prog.MakeResultArg(p.Calls[1].Args[0].Type(), prog.DirInOut, producer, 0)
+	call := p.Calls[1]
+	call.Args[0] = consumer
+
+	resources := usedResources(call)
+	if len(resources) != 1 || resources[0].Res != producer {
+		t.Fatalf("inout dependency not tracked: %#v", resources)
+	}
+	if dependenciesAvailable(call, map[*prog.ResultArg]bool{}) {
+		t.Fatal("call with unavailable inout dependency was accepted")
+	}
+}
+
 func TestReduceProgHonorsLiveResourceCap(t *testing.T) {
 	p := testProg(t, ""+
 		"r0 = test$res2()\n"+
