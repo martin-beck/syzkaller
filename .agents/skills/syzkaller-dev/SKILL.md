@@ -12,20 +12,10 @@ the project docs instead of repeating them here.
 
 ## Compose With
 
-- Project docs first:
-  - Syzkaller root `GEMINI.md` for repository layout, `syz-env`, build/test
-    conventions, formatting, and commit style.
-  - `sys/GEMINI.md` for syzlang syscall description changes.
-  - `syz-cluster/GEMINI.md` for `syz-cluster` work.
-  - In the CSB parent checkout, `../../doc/bm-generator.md` for CSB fork areas,
-    tool build commands, focused Go tests, selection, and excluded syscalls.
-  - In the CSB parent checkout, `../../doc/development.md` for repository
-    discipline and CSB-side generator change patterns.
-- CSB skills such as `csb`, `csb-analysis`, `csb-refine`, and `csb-remote` for
-  benchmark runtime validation, result analysis, monitor setup, and remote
-  execution.
-- A CSB generator/pipeline skill, when available, for operating generation or
-  refreshing generated headers/configs without changing syzkaller internals.
+- Syzkaller root `GEMINI.md` for repository layout, `syz-env`, build/test
+  conventions, formatting, and commit style.
+- `sys/GEMINI.md` for syzlang syscall description changes.
+- `syz-cluster/GEMINI.md` for `syz-cluster` work.
 
 ## First Checks
 
