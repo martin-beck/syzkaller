@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/syzkaller/pkg/csource"
 	"github.com/google/syzkaller/prog"
 	_ "github.com/google/syzkaller/sys"
 	"github.com/google/syzkaller/sys/targets"
@@ -338,4 +339,124 @@ func TestGenBufferDeterministicOutSize(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMadviseFromTrace(t *testing.T) {
+	p := parseSingleProg(t, `
+madvise(0xffff7fb57000, 8192, 0x4) = 0
+madvise(0xffff7fb57000, 2097152, 0x64) = 0
+`)
+	got := string(bytes.TrimSpace(p.Serialize()))
+	want := strings.TrimSpace(`
+madvise(&(0x7f0000000000/0x2)=nil, 0x2000, 0x4)[0]
+madvise(&(0x7f0000002000/0x100)=nil, 0x100000, 0x0)[0]
+`)
+	if got != want {
+		t.Fatalf("want:\n%v\n\ngot:\n%v", want, got)
+	}
+}
+
+func TestMadviseTraceToCSBHeader(t *testing.T) {
+	p := parseSingleProg(t, `
+madvise(0xffff7fb57000, 4096, 0x8) = 0
+`)
+	src, _, err := csource.Write(p, csource.Options{
+		Slowdown: 1,
+		CSB:      true,
+		Trace:    true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "syscall(__NR_madvise") {
+		t.Fatalf("generated CSB header does not contain madvise syscall:\n%s", src)
+	}
+}
+
+func TestSafeReplayDroppedSyscallsFromTrace(t *testing.T) {
+	p := parseSingleProg(t, `
+futex(0x1234, 0x81, 2147483647) = 0
+mmap(NULL, 8192, 0x3, 0x22, -1, 0) = 0x70000000
+mprotect(0x70000000, 8192, 0x1) = 0
+msync(0x70000000, 8192, 0x4) = 0
+munmap(0x70000000, 8192) = 0
+mremap(0x70000000, 4096, 8192, 1) = 0x70002000
+rt_sigprocmask(0, [], NULL, 8) = 0
+rt_sigtimedwait([], NULL, {tv_sec=0, tv_nsec=0}, 8) = -1 EAGAIN (Resource temporarily unavailable)
+set_robust_list(0x1234, 24) = 0
+set_tid_address(0x1234) = 1234
+wait4(-1, NULL, 1, NULL) = -1 ECHILD (No child processes)
+wait(NULL) = -1 ECHILD (No child processes)
+`)
+	serialized := string(p.Serialize())
+	for _, want := range []string{
+		"futex(",
+		"mprotect(",
+		"msync(",
+		"munmap(",
+		"mremap(",
+		"rt_sigprocmask(",
+		"rt_sigtimedwait(",
+		"set_robust_list(",
+		"set_tid_address(",
+		"wait4(",
+	} {
+		if !strings.Contains(serialized, want) {
+			t.Fatalf("generated program missing %q:\n%s", want, serialized)
+		}
+	}
+	if got := strings.Count(serialized, "mmap("); got != 3 {
+		t.Fatalf("got %d mmap calls, want 3 in:\n%s", got, serialized)
+	}
+	if got := strings.Count(serialized, "wait4("); got != 2 {
+		t.Fatalf("got %d wait4 calls, want 2 in:\n%s", got, serialized)
+	}
+
+	src, _, err := csource.Write(p, csource.Options{
+		Slowdown: 1,
+		CSB:      true,
+		Trace:    true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	header := string(src)
+	for _, want := range []string{
+		"__NR_futex",
+		"__NR_mmap",
+		"__NR_mprotect",
+		"__NR_msync",
+		"__NR_munmap",
+		"__NR_mremap",
+		"__NR_rt_sigprocmask",
+		"__NR_rt_sigtimedwait",
+		"__NR_set_robust_list",
+		"__NR_set_tid_address",
+		"__NR_wait4",
+	} {
+		if !strings.Contains(header, want) {
+			t.Fatalf("generated CSB header missing %q:\n%s", want, header)
+		}
+	}
+}
+
+func parseSingleProg(t *testing.T, input string) *prog.Prog {
+	t.Helper()
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.ConstMap = make(map[string]uint64)
+	for _, c := range target.Consts {
+		target.ConstMap[c.Name] = c.Value
+	}
+	tree, _, err := parser.ParseData([]byte(strings.TrimSpace(input)), true, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := genProg(tree.TraceMap[tree.RootPid], target, false, true)
+	if p == nil {
+		t.Fatal("failed to parse trace")
+	}
+	return p
 }
