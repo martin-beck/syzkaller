@@ -50,12 +50,14 @@ func runTrace2Syz(t *testing.T, tracePath string) map[string][]byte {
 	oldSkipCorpus := *flagSkipCorpus
 	oldSplitThreads := *flagSplitThreads
 	oldArgLength := *flagArgLength
+	oldMadviseSetup := *flagMadviseSetup
 	*flagFile = tracePath
 	*flagDir = ""
 	*flagDeserialize = outDir
 	*flagSkipCorpus = true
 	*flagSplitThreads = false
 	*flagArgLength = false
+	*flagMadviseSetup = false
 	t.Cleanup(func() {
 		*flagFile = oldFile
 		*flagDir = oldDir
@@ -63,6 +65,7 @@ func runTrace2Syz(t *testing.T, tracePath string) map[string][]byte {
 		*flagSkipCorpus = oldSkipCorpus
 		*flagSplitThreads = oldSplitThreads
 		*flagArgLength = oldArgLength
+		*flagMadviseSetup = oldMadviseSetup
 	})
 
 	parseTraces(initializeTarget(goos, arch))

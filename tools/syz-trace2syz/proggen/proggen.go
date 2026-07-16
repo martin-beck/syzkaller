@@ -83,17 +83,18 @@ func ReadFile(filename string) ([]byte, int, error) {
 	return outBuffer, numLines, nil
 }
 
-func ParseFile(filename string, target *prog.Target, splitThreads bool, argLength bool) ([]*prog.Prog, error) {
+func ParseFile(filename string, target *prog.Target, splitThreads bool, argLength, madviseSetup bool) ([]*prog.Prog, error) {
 	fmt.Fprintf(os.Stderr, "Reading file to memory\n")
 	// data, err := os.ReadFile(filename)
 	data, numLines, err := ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("error reading file: %v", err)
 	}
-	return ParseData(data, target, splitThreads, argLength, numLines)
+	return ParseData(data, target, splitThreads, argLength, madviseSetup, numLines)
 }
 
-func ParseData(data []byte, target *prog.Target, splitThreads bool, argLength bool, numLines int) ([]*prog.Prog, error) {
+func ParseData(data []byte, target *prog.Target, splitThreads, argLength, madviseSetup bool,
+	numLines int) ([]*prog.Prog, error) {
 	fmt.Fprintf(os.Stderr, "Parsing data into syscalls\n")
 	tree, trace, err := parser.ParseData(data, splitThreads, numLines)
 	if err != nil {
@@ -108,23 +109,24 @@ func ParseData(data []byte, target *prog.Target, splitThreads bool, argLength bo
 	}
 	var progs []*prog.Prog
 	if splitThreads {
-		parseTree(tree, tree.RootPid, target, &progs, argLength)
+		parseTree(tree, tree.RootPid, target, &progs, argLength, madviseSetup)
 	} else {
-		progs = append(progs, genProg(trace, target, argLength, false))
+		progs = append(progs, genProg(trace, target, argLength, false, madviseSetup))
 	}
 	return progs, nil
 }
 
 // parseTree groups system calls in the trace by process id.
 // The tree preserves process hierarchy i.e. parent->[]child
-func parseTree(tree *parser.TraceTree, pid int64, target *prog.Target, progs *[]*prog.Prog, argLength bool) {
+func parseTree(tree *parser.TraceTree, pid int64, target *prog.Target, progs *[]*prog.Prog,
+	argLength, madviseSetup bool) {
 	log.Logf(2, "parsing trace pid %v", pid)
-	if p := genProg(tree.TraceMap[pid], target, argLength, false); p != nil {
+	if p := genProg(tree.TraceMap[pid], target, argLength, false, madviseSetup); p != nil {
 		*progs = append(*progs, p)
 	}
 	for _, childPid := range tree.Ptree[pid] {
 		if tree.TraceMap[childPid] != nil {
-			parseTree(tree, childPid, target, progs, argLength)
+			parseTree(tree, childPid, target, progs, argLength, madviseSetup)
 		}
 	}
 }
@@ -138,18 +140,20 @@ type context struct {
 	currentStraceCall *parser.Syscall
 	currentSyzCall    *prog.Call
 	randomized        bool
+	madviseSetup      bool
 }
 
 // genProg converts a trace to one of our programs.
-func genProg(trace *parser.Trace, target *prog.Target, argLength bool, randomized bool) *prog.Prog {
+func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, madviseSetup bool) *prog.Prog {
 	var status string
 	retCache := newRCache()
 	ctx := &context{
-		builder:     prog.MakeProgGen(target),
-		target:      target,
-		selectors:   newSelectors(target, retCache),
-		returnCache: retCache,
-		randomized:  randomized,
+		builder:      prog.MakeProgGen(target),
+		target:       target,
+		selectors:    newSelectors(target, retCache),
+		returnCache:  retCache,
+		randomized:   randomized,
+		madviseSetup: madviseSetup,
 	}
 	fmt.Fprintf(os.Stderr, "Parsing syscalls into syzlang\n")
 	numCalls := len(trace.Calls)
@@ -191,6 +195,8 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength bool, randomize
 // genCalls routes sanitized syscalls to bounded generators that may emit setup and replay calls.
 func (ctx *context) genCalls() []*prog.Call {
 	switch ctx.currentStraceCall.CallName {
+	case "madvise":
+		return ctx.genMadviseCalls()
 	case "mmap":
 		return singleCall(ctx.genMmapCall())
 	case "mprotect":
@@ -235,15 +241,6 @@ func (ctx *context) genCall() *prog.Call {
 	}
 	ctx.currentSyzCall = prog.MakeCall(meta, nil)
 	syzCall := ctx.currentSyzCall
-
-	if straceCall.CallName == "madvise" && len(syzCall.Meta.Args) == 3 {
-		ctx.genMadviseArgs(straceCall, syzCall)
-		ctx.genResult(syzCall.Meta.Ret, straceCall.Ret)
-		syzCall.StraceRetVal = straceCall.Ret
-		syzCall.StraceRetValSet = true
-		syzCall.StraceTid = straceCall.Pid
-		return syzCall
-	}
 
 	for i := range syzCall.Meta.Args {
 		var strArg parser.IrType
@@ -299,21 +296,44 @@ var safeMadviseAdvice = map[uint64]bool{
 	23: true, // MADV_POPULATE_WRITE
 }
 
-func (ctx *context) genMadviseArgs(straceCall *parser.Syscall, syzCall *prog.Call) {
+var isolatedMadviseAdvice = map[uint64]bool{
+	4:  true, // MADV_DONTNEED
+	8:  true, // MADV_FREE
+	20: true, // MADV_COLD
+	21: true, // MADV_PAGEOUT
+}
+
+func (ctx *context) genMadviseCalls() []*prog.Call {
+	straceCall := ctx.currentStraceCall
+	meta := ctx.Select(straceCall)
+	if meta == nil || len(meta.Args) != 3 {
+		return nil
+	}
 	length := sanitizedPageLength(straceCall.Args[1])
 	npages := length / madvisePageSize
-
-	// Isolate destructive advice, such as MADV_DONTNEED, from other arguments.
-	addrType := syzCall.Meta.Args[0].Type.(*prog.VmaType)
-	addr := prog.MakeVmaPointerArg(addrType, prog.DirIn, ctx.builder.AllocateVMA(npages), length)
-	lenArg := prog.MakeConstArg(syzCall.Meta.Args[1].Type, prog.DirIn, length)
-
 	advice := constArgValue(straceCall.Args[2], 0)
 	if !safeMadviseAdvice[advice] {
 		advice = 0
 	}
-	adviceArg := prog.MakeConstArg(syzCall.Meta.Args[2].Type, prog.DirIn, advice)
-	syzCall.Args = append(syzCall.Args, addr, lenArg, adviceArg)
+	isolated := isolatedMadviseAdvice[advice]
+	if isolated && !ctx.madviseSetup {
+		advice = 0
+	}
+
+	addr := ctx.builder.AllocateVMA(npages)
+	call := ctx.makeDefaultCallForMeta(meta)
+	ctx.setVmaArg(call, 0, addr, length)
+	ctx.setConstArg(call, 1, length)
+	ctx.setConstArg(call, 2, advice)
+	ctx.finishCall(call, straceCall)
+	if !isolated || !ctx.madviseSetup {
+		return singleCall(call)
+	}
+	setup := ctx.genFixedMmapSetup(addr, npages)
+	if setup == nil {
+		return nil
+	}
+	return []*prog.Call{setup, call}
 }
 
 func (ctx *context) genMmapCall() *prog.Call {
@@ -492,6 +512,10 @@ func (ctx *context) makeDefaultCall(name string) *prog.Call {
 		log.Logf(2, "skipping call: %s which has no matching safe description", name)
 		return nil
 	}
+	return ctx.makeDefaultCallForMeta(meta)
+}
+
+func (ctx *context) makeDefaultCallForMeta(meta *prog.Syscall) *prog.Call {
 	call := prog.MakeCall(meta, nil)
 	for _, field := range meta.Args {
 		dir := field.Dir(prog.DirIn)

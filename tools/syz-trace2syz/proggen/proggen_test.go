@@ -277,7 +277,7 @@ ioctl$RTC_WKALM_SET(r0, 0x4028700f, &(0x7f0000000040)={0x0, 0x0, {0x0, 0x0, 0x0,
 		if err != nil {
 			t.Fatal(err)
 		}
-		p := genProg(tree.TraceMap[tree.RootPid], target, false, true)
+		p := genProg(tree.TraceMap[tree.RootPid], target, false, true, false)
 		if p == nil {
 			t.Fatalf("failed to parse trace")
 		}
@@ -344,12 +344,18 @@ func TestGenBufferDeterministicOutSize(t *testing.T) {
 func TestMadviseFromTrace(t *testing.T) {
 	p := parseSingleProg(t, `
 madvise(0xffff7fb57000, 8192, 0x4) = 0
+madvise(0xffff7fb57000, 4096, 0x8) = 0
+madvise(0xffff7fb57000, 4096, 0x14) = 0
+madvise(0xffff7fb57000, 4096, 0x15) = 0
 madvise(0xffff7fb57000, 2097152, 0x64) = 0
 `)
 	got := string(bytes.TrimSpace(p.Serialize()))
 	want := strings.TrimSpace(`
-madvise(&(0x7f0000000000/0x2000)=nil, 0x2000, 0x4)[0]
-madvise(&(0x7f0000002000/0x100000)=nil, 0x100000, 0x0)[0]
+madvise(&(0x7f0000000000/0x2000)=nil, 0x2000, 0x0)[0]
+madvise(&(0x7f0000002000/0x1000)=nil, 0x1000, 0x0)[0]
+madvise(&(0x7f0000003000/0x1000)=nil, 0x1000, 0x0)[0]
+madvise(&(0x7f0000004000/0x1000)=nil, 0x1000, 0x0)[0]
+madvise(&(0x7f0000005000/0x100000)=nil, 0x100000, 0x0)[0]
 `)
 	if got != want {
 		t.Fatalf("want:\n%v\n\ngot:\n%v", want, got)
@@ -370,6 +376,34 @@ madvise(0xffff7fb57000, 4096, 0x8) = 0
 	}
 	if !strings.Contains(string(src), "syscall(__NR_madvise") {
 		t.Fatalf("generated CSB header does not contain madvise syscall:\n%s", src)
+	}
+}
+
+func TestDestructiveMadviseSetup(t *testing.T) {
+	p := parseSingleProgWithMadviseSetup(t, `
+madvise(0xffff7fb57000, 4096, 0x4) = 0
+madvise(0xffff7fb56000, 4096, 0x8) = 0
+madvise(0xffff7fb55000, 4096, 0x14) = 0
+madvise(0xffff7fb54000, 4096, 0x15) = 0
+madvise(0xffff7fb53000, 4096, 0xf) = 0
+`)
+	serialized := string(p.Serialize())
+	if got := strings.Count(serialized, "mmap("); got != 4 {
+		t.Fatalf("got %d setup calls, want 4:\n%s", got, serialized)
+	}
+	for _, advice := range []string{"0x4", "0x8", "0x14", "0x15", "0xf"} {
+		if !strings.Contains(serialized, advice+")[0]") {
+			t.Fatalf("generated program missing madvise advice %s:\n%s", advice, serialized)
+		}
+	}
+	for i, call := range p.Calls {
+		if call.Meta.CallName != "madvise" || isolatedMadviseAdvice[call.Args[2].(*prog.ConstArg).Val] == false {
+			continue
+		}
+		if i == 0 || p.Calls[i-1].Meta.CallName != "mmap" ||
+			p.Calls[i-1].Args[0].(*prog.PointerArg).Address != call.Args[0].(*prog.PointerArg).Address {
+			t.Fatalf("madvise call does not follow its dedicated mapping:\n%s", serialized)
+		}
 	}
 }
 
@@ -463,20 +497,22 @@ wait(NULL) = -1 ECHILD (No child processes)
 
 func TestMappingSetupIsAtomic(t *testing.T) {
 	tests := []struct {
-		name    string
-		trace   string
-		missing string
+		name         string
+		trace        string
+		missing      string
+		madviseSetup bool
 	}{
-		{"munmap missing", "munmap(0x70000000, 8192) = 0", "munmap"},
-		{"mremap missing", "mremap(0x70000000, 4096, 8192, 1) = 0x70002000", "mremap"},
-		{"munmap setup missing", "munmap(0x70000000, 8192) = 0", "mmap"},
-		{"mremap setup missing", "mremap(0x70000000, 4096, 8192, 1) = 0x70002000", "mmap"},
+		{"munmap missing", "munmap(0x70000000, 8192) = 0", "munmap", false},
+		{"mremap missing", "mremap(0x70000000, 4096, 8192, 1) = 0x70002000", "mremap", false},
+		{"munmap setup missing", "munmap(0x70000000, 8192) = 0", "mmap", false},
+		{"mremap setup missing", "mremap(0x70000000, 4096, 8192, 1) = 0x70002000", "mmap", false},
+		{"madvise setup missing", "madvise(0x70000000, 8192, 0x4) = 0", "mmap", true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			target := testTarget(t)
 			delete(target.SyscallMap, test.missing)
-			p := parseSingleProgForTarget(t, test.trace, target)
+			p := parseSingleProgForTarget(t, test.trace, target, test.madviseSetup)
 			if len(p.Calls) != 0 {
 				t.Fatalf("setup and replay must be dropped together:\n%s", p.Serialize())
 			}
@@ -486,7 +522,12 @@ func TestMappingSetupIsAtomic(t *testing.T) {
 
 func parseSingleProg(t *testing.T, input string) *prog.Prog {
 	t.Helper()
-	return parseSingleProgForTarget(t, input, testTarget(t))
+	return parseSingleProgForTarget(t, input, testTarget(t), false)
+}
+
+func parseSingleProgWithMadviseSetup(t *testing.T, input string) *prog.Prog {
+	t.Helper()
+	return parseSingleProgForTarget(t, input, testTarget(t), true)
 }
 
 func testTarget(t *testing.T) *prog.Target {
@@ -508,13 +549,13 @@ func testTarget(t *testing.T) *prog.Target {
 	return target
 }
 
-func parseSingleProgForTarget(t *testing.T, input string, target *prog.Target) *prog.Prog {
+func parseSingleProgForTarget(t *testing.T, input string, target *prog.Target, madviseSetup bool) *prog.Prog {
 	t.Helper()
 	tree, _, err := parser.ParseData([]byte(strings.TrimSpace(input)), true, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := genProg(tree.TraceMap[tree.RootPid], target, false, true)
+	p := genProg(tree.TraceMap[tree.RootPid], target, false, true, madviseSetup)
 	if p == nil {
 		t.Fatal("failed to parse trace")
 	}
