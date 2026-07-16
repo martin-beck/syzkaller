@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/syzkaller/pkg/csource"
 	"github.com/google/syzkaller/prog"
 	_ "github.com/google/syzkaller/sys"
 	"github.com/google/syzkaller/sys/targets"
@@ -276,7 +277,7 @@ ioctl$RTC_WKALM_SET(r0, 0x4028700f, &(0x7f0000000040)={0x0, 0x0, {0x0, 0x0, 0x0,
 		if err != nil {
 			t.Fatal(err)
 		}
-		p := genProg(tree.TraceMap[tree.RootPid], target, false, true)
+		p := genProg(tree.TraceMap[tree.RootPid], target, false, true, false)
 		if p == nil {
 			t.Fatalf("failed to parse trace")
 		}
@@ -338,4 +339,241 @@ func TestGenBufferDeterministicOutSize(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMadviseFromTrace(t *testing.T) {
+	p := parseSingleProg(t, `
+madvise(0xffff7fb57000, 8192, 0x4) = 0
+madvise(0xffff7fb57000, 4096, 0x8) = 0
+madvise(0xffff7fb57000, 4096, 0x14) = 0
+madvise(0xffff7fb57000, 4096, 0x15) = 0
+madvise(0xffff7fb57000, 2097152, 0x64) = 0
+`)
+	got := string(bytes.TrimSpace(p.Serialize()))
+	want := strings.TrimSpace(`
+madvise(&(0x7f0000000000/0x2000)=nil, 0x2000, 0x0)[0]
+madvise(&(0x7f0000002000/0x1000)=nil, 0x1000, 0x0)[0]
+madvise(&(0x7f0000003000/0x1000)=nil, 0x1000, 0x0)[0]
+madvise(&(0x7f0000004000/0x1000)=nil, 0x1000, 0x0)[0]
+madvise(&(0x7f0000005000/0x100000)=nil, 0x100000, 0x0)[0]
+`)
+	if got != want {
+		t.Fatalf("want:\n%v\n\ngot:\n%v", want, got)
+	}
+}
+
+func TestMadviseTraceToCSBHeader(t *testing.T) {
+	p := parseSingleProg(t, `
+madvise(0xffff7fb57000, 4096, 0x8) = 0
+`)
+	src, _, err := csource.Write(p, csource.Options{
+		Slowdown: 1,
+		CSB:      true,
+		Trace:    true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "syscall(__NR_madvise") {
+		t.Fatalf("generated CSB header does not contain madvise syscall:\n%s", src)
+	}
+}
+
+func TestDestructiveMadviseSetup(t *testing.T) {
+	p := parseSingleProgWithMadviseSetup(t, `
+madvise(0xffff7fb57000, 4096, 0x4) = 0
+madvise(0xffff7fb56000, 4096, 0x8) = 0
+madvise(0xffff7fb55000, 4096, 0x14) = 0
+madvise(0xffff7fb54000, 4096, 0x15) = 0
+madvise(0xffff7fb53000, 4096, 0xf) = 0
+`)
+	serialized := string(p.Serialize())
+	if got := strings.Count(serialized, "mmap("); got != 4 {
+		t.Fatalf("got %d setup calls, want 4:\n%s", got, serialized)
+	}
+	for _, advice := range []string{"0x4", "0x8", "0x14", "0x15", "0xf"} {
+		if !strings.Contains(serialized, advice+")[0]") {
+			t.Fatalf("generated program missing madvise advice %s:\n%s", advice, serialized)
+		}
+	}
+	for i, call := range p.Calls {
+		if call.Meta.CallName != "madvise" || isolatedMadviseAdvice[call.Args[2].(*prog.ConstArg).Val] == false {
+			continue
+		}
+		if i == 0 || p.Calls[i-1].Meta.CallName != "mmap" ||
+			p.Calls[i-1].Args[0].(*prog.PointerArg).Address != call.Args[0].(*prog.PointerArg).Address {
+			t.Fatalf("madvise call does not follow its dedicated mapping:\n%s", serialized)
+		}
+	}
+}
+
+func TestSafeReplayDroppedSyscallsFromTrace(t *testing.T) {
+	p := parseSingleProg(t, `
+futex(0x1234, 0x81, 2147483647) = 0
+mmap(NULL, 8192, 0x3, 0x22, -1, 0) = 0x70000000
+mprotect(0x70000000, 8192, 0x1) = 0
+msync(0x70000000, 8192, 0x4) = 0
+munmap(0x70000000, 8192) = 0
+mremap(0x70000000, 4096, 8192, 1) = 0x70002000
+rt_sigprocmask(0, [], NULL, 8) = 0
+rt_sigtimedwait([], NULL, {tv_sec=0, tv_nsec=0}, 8) = -1 EAGAIN (Resource temporarily unavailable)
+set_robust_list(0x1234, 24) = 0
+set_tid_address(0x1234) = 1234
+wait4(-1, NULL, 1, NULL) = -1 ECHILD (No child processes)
+wait(NULL) = -1 ECHILD (No child processes)
+`)
+	serialized := string(p.Serialize())
+	for _, want := range []string{
+		"futex(",
+		"mprotect(",
+		"msync(",
+		"munmap(",
+		"mremap(",
+		"rt_sigprocmask(",
+		"rt_sigtimedwait(",
+		"set_robust_list(",
+		"set_tid_address(",
+		"wait4(",
+	} {
+		if !strings.Contains(serialized, want) {
+			t.Fatalf("generated program missing %q:\n%s", want, serialized)
+		}
+	}
+	if got := strings.Count(serialized, "mmap("); got != 3 {
+		t.Fatalf("got %d mmap calls, want 3 in:\n%s", got, serialized)
+	}
+	if got := strings.Count(serialized, "wait4("); got != 2 {
+		t.Fatalf("got %d wait4 calls, want 2 in:\n%s", got, serialized)
+	}
+	for _, call := range p.Calls {
+		switch call.Meta.CallName {
+		case "rt_sigtimedwait":
+			these := call.Args[0].(*prog.PointerArg).Address
+			timeout := call.Args[2].(*prog.PointerArg).Address
+			if these == timeout {
+				t.Fatalf("rt_sigtimedwait default pointers alias at %#x", these)
+			}
+		case "mmap", "mprotect", "msync", "munmap":
+			if got, want := call.Args[0].(*prog.PointerArg).VmaSize, call.Args[1].(*prog.ConstArg).Val; got != want {
+				t.Fatalf("%s VMA size = %#x, want byte length %#x", call.Meta.CallName, got, want)
+			}
+		case "mremap":
+			for _, pair := range [][2]int{{0, 1}, {4, 2}} {
+				if got, want := call.Args[pair[0]].(*prog.PointerArg).VmaSize,
+					call.Args[pair[1]].(*prog.ConstArg).Val; got != want {
+					t.Fatalf("mremap VMA size = %#x, want byte length %#x", got, want)
+				}
+			}
+		}
+	}
+
+	src, _, err := csource.Write(p, csource.Options{
+		Slowdown: 1,
+		CSB:      true,
+		Trace:    true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	header := string(src)
+	for _, want := range []string{
+		"__NR_futex",
+		"__NR_mmap",
+		"__NR_mprotect",
+		"__NR_msync",
+		"__NR_munmap",
+		"__NR_mremap",
+		"__NR_rt_sigprocmask",
+		"__NR_rt_sigtimedwait",
+		"__NR_set_robust_list",
+		"__NR_set_tid_address",
+		"__NR_wait4",
+	} {
+		if !strings.Contains(header, want) {
+			t.Fatalf("generated CSB header missing %q:\n%s", want, header)
+		}
+	}
+}
+
+func TestMappingSetupIsAtomic(t *testing.T) {
+	tests := []struct {
+		name         string
+		trace        string
+		missing      string
+		madviseSetup bool
+	}{
+		{"munmap missing", "munmap(0x70000000, 8192) = 0", "munmap", false},
+		{"mremap missing", "mremap(0x70000000, 4096, 8192, 1) = 0x70002000", "mremap", false},
+		{"munmap setup missing", "munmap(0x70000000, 8192) = 0", "mmap", false},
+		{"mremap setup missing", "mremap(0x70000000, 4096, 8192, 1) = 0x70002000", "mmap", false},
+		{"madvise setup missing", "madvise(0x70000000, 8192, 0x4) = 0", "mmap", true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target := testTarget(t)
+			delete(target.SyscallMap, test.missing)
+			p := parseSingleProgForTarget(t, test.trace, target, test.madviseSetup)
+			if len(p.Calls) != 0 {
+				t.Fatalf("setup and replay must be dropped together:\n%s", p.Serialize())
+			}
+		})
+	}
+}
+
+func TestShortSafeCallsAreDropped(t *testing.T) {
+	p := parseSingleProg(t, `
+madvise() = 0
+mmap(NULL) = 0
+mprotect(0x70000000, 4096) = 0
+msync(0x70000000, 4096) = 0
+munmap(0x70000000) = 0
+mremap(0x70000000, 4096) = 0
+futex(0x70000000) = 0
+rt_sigprocmask() = 0
+`)
+	if len(p.Calls) != 0 {
+		t.Fatalf("short safe calls must be dropped:\n%s", p.Serialize())
+	}
+}
+
+func parseSingleProg(t *testing.T, input string) *prog.Prog {
+	t.Helper()
+	return parseSingleProgForTarget(t, input, testTarget(t), false)
+}
+
+func parseSingleProgWithMadviseSetup(t *testing.T, input string) *prog.Prog {
+	t.Helper()
+	return parseSingleProgForTarget(t, input, testTarget(t), true)
+}
+
+func testTarget(t *testing.T) *prog.Target {
+	t.Helper()
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy := *target
+	copy.SyscallMap = make(map[string]*prog.Syscall, len(target.SyscallMap))
+	for name, call := range target.SyscallMap {
+		copy.SyscallMap[name] = call
+	}
+	target = &copy
+	target.ConstMap = make(map[string]uint64)
+	for _, c := range target.Consts {
+		target.ConstMap[c.Name] = c.Value
+	}
+	return target
+}
+
+func parseSingleProgForTarget(t *testing.T, input string, target *prog.Target, madviseSetup bool) *prog.Prog {
+	t.Helper()
+	tree, _, err := parser.ParseData([]byte(strings.TrimSpace(input)), true, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := genProg(tree.TraceMap[tree.RootPid], target, false, true, madviseSetup)
+	if p == nil {
+		t.Fatal("failed to parse trace")
+	}
+	return p
 }

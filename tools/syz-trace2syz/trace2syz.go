@@ -39,6 +39,8 @@ var (
 	flagTopCalls     = flag.Int("topCalls", 2, "number of most used usyscalls to be used for file name generation")
 	flagSplitThreads = flag.Bool("splitThreads", false, "stores one program program per thread")
 	flagArgLength    = flag.Bool("argLength", false, "trim the length syscall arguments to the actual data size")
+	flagMadviseSetup = flag.Bool("madviseSetup", false,
+		"map a dedicated VMA before destructive madvise calls instead of using MADV_NORMAL")
 )
 
 const (
@@ -104,7 +106,7 @@ func parseTraces(target *prog.Target) []*prog.Prog {
 	fmt.Fprintf(os.Stderr, "Parsing %v traces\n", totalFiles)
 	for i, file := range names {
 		fmt.Fprintf(os.Stderr, "Parsing file %v/%v: %v\n", i+1, totalFiles, filepath.Base(names[i]))
-		progs, err := proggen.ParseFile(file, target, *flagSplitThreads, *flagArgLength)
+		progs, err := proggen.ParseFile(file, target, *flagSplitThreads, *flagArgLength, *flagMadviseSetup)
 		fmt.Fprintf(os.Stderr, "Generated %d programs\n", len(progs))
 		for idx, p := range progs {
 			fmt.Fprintf(os.Stderr, "Length of program %d: %d\n", idx+1, len(p.Calls))
