@@ -461,16 +461,55 @@ wait(NULL) = -1 ECHILD (No child processes)
 	}
 }
 
+func TestMappingSetupIsAtomic(t *testing.T) {
+	tests := []struct {
+		name    string
+		trace   string
+		missing string
+	}{
+		{"munmap missing", "munmap(0x70000000, 8192) = 0", "munmap"},
+		{"mremap missing", "mremap(0x70000000, 4096, 8192, 1) = 0x70002000", "mremap"},
+		{"munmap setup missing", "munmap(0x70000000, 8192) = 0", "mmap"},
+		{"mremap setup missing", "mremap(0x70000000, 4096, 8192, 1) = 0x70002000", "mmap"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target := testTarget(t)
+			delete(target.SyscallMap, test.missing)
+			p := parseSingleProgForTarget(t, test.trace, target)
+			if len(p.Calls) != 0 {
+				t.Fatalf("setup and replay must be dropped together:\n%s", p.Serialize())
+			}
+		})
+	}
+}
+
 func parseSingleProg(t *testing.T, input string) *prog.Prog {
+	t.Helper()
+	return parseSingleProgForTarget(t, input, testTarget(t))
+}
+
+func testTarget(t *testing.T) *prog.Target {
 	t.Helper()
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {
 		t.Fatal(err)
 	}
+	copy := *target
+	copy.SyscallMap = make(map[string]*prog.Syscall, len(target.SyscallMap))
+	for name, call := range target.SyscallMap {
+		copy.SyscallMap[name] = call
+	}
+	target = &copy
 	target.ConstMap = make(map[string]uint64)
 	for _, c := range target.Consts {
 		target.ConstMap[c.Name] = c.Value
 	}
+	return target
+}
+
+func parseSingleProgForTarget(t *testing.T, input string, target *prog.Target) *prog.Prog {
+	t.Helper()
 	tree, _, err := parser.ParseData([]byte(strings.TrimSpace(input)), true, -1)
 	if err != nil {
 		t.Fatal(err)

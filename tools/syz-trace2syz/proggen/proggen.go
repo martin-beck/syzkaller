@@ -192,7 +192,7 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength bool, randomize
 func (ctx *context) genCalls() []*prog.Call {
 	switch ctx.currentStraceCall.CallName {
 	case "mmap":
-		return singleCall(ctx.genMmapCall(false))
+		return singleCall(ctx.genMmapCall())
 	case "mprotect":
 		return singleCall(ctx.genMprotectCall())
 	case "msync":
@@ -300,17 +300,15 @@ var safeMadviseAdvice = map[uint64]bool{
 }
 
 func (ctx *context) genMadviseArgs(straceCall *parser.Syscall, syzCall *prog.Call) {
-	length := sanitizedPageLength(straceCall, 1)
+	length := sanitizedPageLength(straceCall.Args[1])
 	npages := length / madvisePageSize
 
+	// Isolate destructive advice, such as MADV_DONTNEED, from other arguments.
 	addrType := syzCall.Meta.Args[0].Type.(*prog.VmaType)
 	addr := prog.MakeVmaPointerArg(addrType, prog.DirIn, ctx.builder.AllocateVMA(npages), length)
 	lenArg := prog.MakeConstArg(syzCall.Meta.Args[1].Type, prog.DirIn, length)
 
-	advice := uint64(0)
-	if len(straceCall.Args) > 2 {
-		advice = constArgValue(straceCall.Args[2], advice)
-	}
+	advice := constArgValue(straceCall.Args[2], 0)
 	if !safeMadviseAdvice[advice] {
 		advice = 0
 	}
@@ -318,21 +316,17 @@ func (ctx *context) genMadviseArgs(straceCall *parser.Syscall, syzCall *prog.Cal
 	syzCall.Args = append(syzCall.Args, addr, lenArg, adviceArg)
 }
 
-func (ctx *context) genMmapCall(fixed bool) *prog.Call {
+func (ctx *context) genMmapCall() *prog.Call {
 	call := ctx.makeDefaultCall("mmap")
 	if call == nil {
 		return nil
 	}
-	length := sanitizedPageLength(ctx.currentStraceCall, 1)
+	length := sanitizedPageLength(ctx.currentStraceCall.Args[1])
 	npages := length / madvisePageSize
-	flags := uint64(mapPrivate | mapAnonymous)
-	if fixed {
-		flags |= mapFixed
-	}
 	ctx.setVmaArg(call, 0, ctx.builder.AllocateVMA(npages), length)
 	ctx.setConstArg(call, 1, length)
-	ctx.setConstArg(call, 2, sanitizedProt(ctx.currentStraceCall, 2))
-	ctx.setConstArg(call, 3, flags)
+	ctx.setConstArg(call, 2, sanitizedProt(ctx.currentStraceCall.Args[2]))
+	ctx.setConstArg(call, 3, mapPrivate|mapAnonymous)
 	ctx.setResourceArg(call, 4, ^uint64(0))
 	ctx.setConstArg(call, 5, 0)
 	ctx.finishCall(call, ctx.currentStraceCall)
@@ -344,10 +338,10 @@ func (ctx *context) genMprotectCall() *prog.Call {
 	if call == nil {
 		return nil
 	}
-	length := sanitizedPageLength(ctx.currentStraceCall, 1)
+	length := sanitizedPageLength(ctx.currentStraceCall.Args[1])
 	ctx.setVmaArg(call, 0, ctx.builder.AllocateVMA(length/madvisePageSize), length)
 	ctx.setConstArg(call, 1, length)
-	ctx.setConstArg(call, 2, sanitizedProt(ctx.currentStraceCall, 2))
+	ctx.setConstArg(call, 2, sanitizedProt(ctx.currentStraceCall.Args[2]))
 	ctx.finishCall(call, ctx.currentStraceCall)
 	return call
 }
@@ -357,22 +351,25 @@ func (ctx *context) genMsyncCall() *prog.Call {
 	if call == nil {
 		return nil
 	}
-	length := sanitizedPageLength(ctx.currentStraceCall, 1)
+	length := sanitizedPageLength(ctx.currentStraceCall.Args[1])
 	ctx.setVmaArg(call, 0, ctx.builder.AllocateVMA(length/madvisePageSize), length)
 	ctx.setConstArg(call, 1, length)
-	ctx.setConstArg(call, 2, sanitizedMsyncFlags(ctx.currentStraceCall, 2))
+	ctx.setConstArg(call, 2, sanitizedMsyncFlags(ctx.currentStraceCall.Args[2]))
 	ctx.finishCall(call, ctx.currentStraceCall)
 	return call
 }
 
 func (ctx *context) genMunmapCalls() []*prog.Call {
-	length := sanitizedPageLength(ctx.currentStraceCall, 1)
+	call := ctx.makeDefaultCall("munmap")
+	if call == nil {
+		return nil
+	}
+	length := sanitizedPageLength(ctx.currentStraceCall.Args[1])
 	npages := length / madvisePageSize
 	addr := ctx.builder.AllocateVMA(npages)
 	setup := ctx.genFixedMmapSetup(addr, npages)
-	call := ctx.makeDefaultCall("munmap")
-	if call == nil {
-		return singleCall(setup)
+	if setup == nil {
+		return nil
 	}
 	ctx.setVmaArg(call, 0, addr, length)
 	ctx.setConstArg(call, 1, length)
@@ -381,18 +378,18 @@ func (ctx *context) genMunmapCalls() []*prog.Call {
 }
 
 func (ctx *context) genMremapCalls() []*prog.Call {
-	oldLength := sanitizedPageLength(ctx.currentStraceCall, 1)
-	newLength := oldLength
-	if len(ctx.currentStraceCall.Args) > 2 {
-		newLength = sanitizedLengthValue(constArgValue(ctx.currentStraceCall.Args[2], oldLength))
+	call := ctx.makeDefaultCall("mremap")
+	if call == nil {
+		return nil
 	}
+	oldLength := sanitizedPageLength(ctx.currentStraceCall.Args[1])
+	newLength := sanitizedLengthValue(constArgValue(ctx.currentStraceCall.Args[2], oldLength))
 	oldPages := oldLength / madvisePageSize
 	newPages := newLength / madvisePageSize
 	oldAddr := ctx.builder.AllocateVMA(oldPages)
 	setup := ctx.genFixedMmapSetup(oldAddr, oldPages)
-	call := ctx.makeDefaultCall("mremap")
-	if call == nil {
-		return singleCall(setup)
+	if setup == nil {
+		return nil
 	}
 	ctx.setVmaArg(call, 0, oldAddr, oldLength)
 	ctx.setConstArg(call, 1, oldLength)
@@ -423,10 +420,7 @@ func (ctx *context) genFutexCall() *prog.Call {
 	if call == nil {
 		return nil
 	}
-	op := uint64(futexWake)
-	if len(ctx.currentStraceCall.Args) > 1 {
-		op |= constArgValue(ctx.currentStraceCall.Args[1], 0) & futexPrivateFlag
-	}
+	op := uint64(futexWake) | constArgValue(ctx.currentStraceCall.Args[1], 0)&futexPrivateFlag
 	ctx.setConstArg(call, 1, op)
 	ctx.setConstArg(call, 2, 1)
 	ctx.setNullPtrArg(call, 3)
@@ -441,10 +435,7 @@ func (ctx *context) genRtSigprocmaskCall() *prog.Call {
 	if call == nil {
 		return nil
 	}
-	how := uint64(0)
-	if len(ctx.currentStraceCall.Args) > 0 {
-		how = constArgValue(ctx.currentStraceCall.Args[0], how)
-	}
+	how := constArgValue(ctx.currentStraceCall.Args[0], 0)
 	if how > 2 {
 		how = 0
 	}
@@ -553,12 +544,8 @@ func (ctx *context) setNullPtrArg(call *prog.Call, idx int) {
 	call.Args[idx] = prog.MakeSpecialPointerArg(field.Type.(*prog.PtrType), field.Dir(prog.DirIn), 0)
 }
 
-func sanitizedPageLength(straceCall *parser.Syscall, idx int) uint64 {
-	length := uint64(madvisePageSize)
-	if len(straceCall.Args) > idx {
-		length = constArgValue(straceCall.Args[idx], length)
-	}
-	return sanitizedLengthValue(length)
+func sanitizedPageLength(arg parser.IrType) uint64 {
+	return sanitizedLengthValue(constArgValue(arg, madvisePageSize))
 }
 
 func sanitizedLengthValue(length uint64) uint64 {
@@ -571,11 +558,8 @@ func sanitizedLengthValue(length uint64) uint64 {
 	return roundUp(length, madvisePageSize)
 }
 
-func sanitizedProt(straceCall *parser.Syscall, idx int) uint64 {
-	prot := uint64(protRead | protWrite)
-	if len(straceCall.Args) > idx {
-		prot = constArgValue(straceCall.Args[idx], prot)
-	}
+func sanitizedProt(arg parser.IrType) uint64 {
+	prot := constArgValue(arg, protRead|protWrite)
 	prot &= protRead | protWrite | protExec
 	if prot == 0 {
 		return protRead | protWrite
@@ -583,11 +567,8 @@ func sanitizedProt(straceCall *parser.Syscall, idx int) uint64 {
 	return prot
 }
 
-func sanitizedMsyncFlags(straceCall *parser.Syscall, idx int) uint64 {
-	flags := uint64(4) // MS_SYNC
-	if len(straceCall.Args) > idx {
-		flags = constArgValue(straceCall.Args[idx], flags)
-	}
+func sanitizedMsyncFlags(arg parser.IrType) uint64 {
+	flags := constArgValue(arg, 4) // MS_SYNC
 	flags &= 0x7
 	if flags == 0 {
 		return 4
