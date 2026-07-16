@@ -520,6 +520,22 @@ func TestMappingSetupIsAtomic(t *testing.T) {
 	}
 }
 
+func TestShortSafeCallsAreDropped(t *testing.T) {
+	p := parseSingleProg(t, `
+madvise() = 0
+mmap(NULL) = 0
+mprotect(0x70000000, 4096) = 0
+msync(0x70000000, 4096) = 0
+munmap(0x70000000) = 0
+mremap(0x70000000, 4096) = 0
+futex(0x70000000) = 0
+rt_sigprocmask() = 0
+`)
+	if len(p.Calls) != 0 {
+		t.Fatalf("short safe calls must be dropped:\n%s", p.Serialize())
+	}
+}
+
 func parseSingleProg(t *testing.T, input string) *prog.Prog {
 	t.Helper()
 	return parseSingleProgForTarget(t, input, testTarget(t), false)

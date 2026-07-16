@@ -194,6 +194,9 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 
 // genCalls routes sanitized syscalls to bounded generators that may emit setup and replay calls.
 func (ctx *context) genCalls() []*prog.Call {
+	if minArgs := sanitizedCallMinArgs[ctx.currentStraceCall.CallName]; len(ctx.currentStraceCall.Args) < minArgs {
+		return nil
+	}
 	switch ctx.currentStraceCall.CallName {
 	case "madvise":
 		return ctx.genMadviseCalls()
@@ -222,6 +225,17 @@ func (ctx *context) genCalls() []*prog.Call {
 	default:
 		return singleCall(ctx.genCall())
 	}
+}
+
+var sanitizedCallMinArgs = map[string]int{
+	"futex":          2,
+	"madvise":        3,
+	"mmap":           3,
+	"mprotect":       3,
+	"mremap":         3,
+	"msync":          3,
+	"munmap":         2,
+	"rt_sigprocmask": 1,
 }
 
 func singleCall(call *prog.Call) []*prog.Call {
