@@ -6,8 +6,6 @@ package proggen
 import (
 	"testing"
 
-	"github.com/google/syzkaller/prog"
-	"github.com/google/syzkaller/sys/targets"
 	"github.com/google/syzkaller/tools/syz-trace2syz/parser"
 )
 
@@ -48,13 +46,15 @@ func TestMatchFilename(t *testing.T) {
 }
 
 func TestResourceDependentSelectionBypassesCache(t *testing.T) {
-	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
-	if err != nil {
-		t.Fatal(err)
-	}
+	target := testTarget(t)
 	selector := newSelectors(target, newRCache())[0].(*defaultCallSelector)
-	for name, want := range map[string]bool{"ioctl": false, "accept": false, "sendmsg": false, "socket": true} {
-		if got := selector.canCache(name, discriminatorArgs[name]); got != want {
+	resourceDependent := map[string]bool{
+		"ioctl": true, "accept": true, "accept4": true, "bind": true, "connect": true,
+		"recvfrom": true, "sendto": true, "sendmsg": true, "getsockname": true,
+		"openat": true,
+	}
+	for name, discriminators := range discriminatorArgs {
+		if got, want := selector.canCache(name, discriminators), !resourceDependent[name]; got != want {
 			t.Errorf("canCache(%q)=%v, want %v", name, got, want)
 		}
 	}
@@ -69,5 +69,60 @@ func TestResourceDependentSelectionBypassesCache(t *testing.T) {
 	selector.cache[key] = wrong
 	if got := selector.Select(call); got == wrong {
 		t.Fatal("resource-dependent selection used a stale cache entry")
+	}
+}
+
+func TestDefaultSelectorCacheMatchesUncached(t *testing.T) {
+	target := testTarget(t)
+	cached := newSelectors(target, newRCache())[0].(*defaultCallSelector)
+	uncached := newSelectors(target, newRCache())[0].(*defaultCallSelector)
+	calls := []*parser.Syscall{
+		parser.NewSyscall(1, "socket", []parser.IrType{
+			parser.Constant(target.ConstMap["AF_INET"]),
+			parser.Constant(target.ConstMap["SOCK_STREAM"]),
+			parser.Constant(0),
+		}, 0, false, false),
+		parser.NewSyscall(1, "socket", []parser.IrType{
+			parser.Constant(target.ConstMap["AF_INET6"]),
+			parser.Constant(target.ConstMap["SOCK_DGRAM"]),
+			parser.Constant(0),
+		}, 0, false, false),
+		parser.NewSyscall(1, "bpf", []parser.IrType{
+			parser.Constant(target.ConstMap["BPF_MAP_CREATE"]),
+		}, 0, false, false),
+		// Unmatched selections are cached too and must remain identical to the original path.
+		parser.NewSyscall(1, "socket", []parser.IrType{
+			parser.Constant(^uint64(0)), parser.Constant(^uint64(0)), parser.Constant(^uint64(0)),
+		}, 0, false, false),
+	}
+	for _, call := range calls {
+		// Force the reference selector down the original uncached path.
+		uncached.cacheable[call.CallName] = false
+		want := uncached.Select(call)
+		if got := cached.Select(call); got != want {
+			t.Errorf("first Select(%q)=%v, want %v", call.CallName, got, want)
+		}
+		if got := cached.Select(call); got != want {
+			t.Errorf("cached Select(%q)=%v, want %v", call.CallName, got, want)
+		}
+	}
+	if got, want := len(cached.cache), len(calls); got != want {
+		t.Fatalf("cache contains %d entries, want %d distinct argument tuples", got, want)
+	}
+}
+
+func TestDefaultSelectorDeclinesUnsafeCacheKeys(t *testing.T) {
+	selector := newSelectors(testTarget(t), newRCache())[0].(*defaultCallSelector)
+	calls := []*parser.Syscall{
+		parser.NewSyscall(1, "socket", nil, 0, false, false),
+		parser.NewSyscall(1, "socket", []parser.IrType{
+			&parser.GroupType{}, parser.Constant(1), parser.Constant(0),
+		}, 0, false, false),
+	}
+	for _, call := range calls {
+		selector.Select(call)
+	}
+	if len(selector.cache) != 0 {
+		t.Fatalf("unsafe argument shapes created %d cache entries", len(selector.cache))
 	}
 }
