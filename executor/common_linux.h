@@ -5872,6 +5872,7 @@ static long syz_clone3(volatile long a0, volatile long a1)
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_thread_create_join || __NR_syz_csb_fork_wait || __NR_syz_csb_vfork_wait
+#include <errno.h>
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>

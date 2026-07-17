@@ -7,6 +7,7 @@ package proggen
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 
@@ -536,8 +537,8 @@ func TestTaskCreationLifecycleFromTrace(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			p := parseSingleProg(t, test.trace)
-			if got := strings.TrimSpace(string(p.Serialize())); got != test.want+"[2]" {
-				t.Fatalf("got %q, want %q", got, test.want+"[2]")
+			if got := strings.TrimSpace(string(p.Serialize())); got != test.want+"[0]" {
+				t.Fatalf("got %q, want %q", got, test.want+"[0]")
 			}
 			src, _, err := csource.Write(p, csource.Options{Slowdown: 1, CSB: true, Trace: true})
 			if err != nil {
@@ -548,6 +549,35 @@ func TestTaskCreationLifecycleFromTrace(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFailedTaskCreationIsDropped(t *testing.T) {
+	p := parseSingleProg(t, `
+clone(child_stack=NULL, flags=0x7c021000|17) = -1 EPERM (Operation not permitted)
+clone3(NULL, 0) = -1 EFAULT (Bad address)
+fork() = -1 EAGAIN (Resource temporarily unavailable)
+vfork() = -1 ENOMEM (Cannot allocate memory)
+`)
+	if len(p.Calls) != 0 {
+		t.Fatalf("failed task creation must be dropped:\n%s", p.Serialize())
+	}
+}
+
+func TestTaskCreationLifecycleCompiles(t *testing.T) {
+	p := parseSingleProg(t, `
+clone(child_stack=0x1234, flags=0x10100) = 2
+fork() = 3
+vfork() = 4
+`)
+	src, _, err := csource.Write(p, csource.Options{Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin, err := csource.Build(p.Target, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(bin)
 }
 
 func TestShortSafeCallsAreDropped(t *testing.T) {

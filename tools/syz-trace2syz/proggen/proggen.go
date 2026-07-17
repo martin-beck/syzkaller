@@ -225,9 +225,9 @@ func (ctx *context) genCalls() []*prog.Call {
 	case "clone", "clone3":
 		return singleCall(ctx.genCloneLifecycleCall())
 	case "fork":
-		return singleCall(ctx.genDefaultSafeCall("syz_csb_fork_wait"))
+		return singleCall(ctx.genTaskLifecycleCall("syz_csb_fork_wait"))
 	case "vfork":
-		return singleCall(ctx.genDefaultSafeCall("syz_csb_vfork_wait"))
+		return singleCall(ctx.genTaskLifecycleCall("syz_csb_vfork_wait"))
 	default:
 		return singleCall(ctx.genCall())
 	}
@@ -252,7 +252,20 @@ func (ctx *context) genCloneLifecycleCall() *prog.Call {
 	} else if cloneUsesVfork(ctx.currentStraceCall) {
 		name = "syz_csb_vfork_wait"
 	}
-	return ctx.genDefaultSafeCall(name)
+	return ctx.genTaskLifecycleCall(name)
+}
+
+func (ctx *context) genTaskLifecycleCall(name string) *prog.Call {
+	// A bounded helper cannot safely reproduce the original failure mode.
+	if ctx.currentStraceCall.Ret < 0 {
+		return nil
+	}
+	call := ctx.genDefaultSafeCall(name)
+	if call != nil {
+		// Synthetic lifecycle helpers return zero rather than a child PID.
+		call.StraceRetVal = 0
+	}
+	return call
 }
 
 func cloneCreatesThread(call *parser.Syscall) bool {
