@@ -80,6 +80,82 @@ func TestMemAlloc(t *testing.T) {
 	}
 }
 
+// allocWithoutCursor is the allocation search used before memAlloc.next was added.
+func allocWithoutCursor(ma *memAlloc, size0, alignment0 uint64) uint64 {
+	if size0 == 0 {
+		size0 = 1
+	}
+	if alignment0 == 0 {
+		alignment0 = 1
+	}
+	size := (size0 + memAllocGranule - 1) / memAllocGranule
+	alignment := (alignment0 + memAllocGranule - 1) / memAllocGranule
+	for start, end := uint64(0), ma.size-size; start <= end; start += alignment {
+		empty := true
+		for i := uint64(0); i < size; i++ {
+			if ma.get(start + i) {
+				empty = false
+				break
+			}
+		}
+		if empty {
+			addr := start * memAllocGranule
+			ma.noteAlloc(addr, size0)
+			return addr
+		}
+	}
+	ma.bankruptcy()
+	return allocWithoutCursor(ma, size0, alignment0)
+}
+
+func TestMemAllocCursorMatchesOriginalSearch(t *testing.T) {
+	const memorySize = memAllocL0Mem * 2
+	withCursor := newMemAlloc(memorySize)
+	withoutCursor := newMemAlloc(memorySize)
+	seed := uint64(1)
+	for i := 0; i < 10000; i++ {
+		// Mix observed allocations with varied sizes and alignments deterministically.
+		seed = seed*6364136223846793005 + 1
+		if seed%4 == 0 {
+			addr := seed % (memorySize - 4*memAllocGranule)
+			size := seed%257 + 1
+			withCursor.noteAlloc(addr, size)
+			withoutCursor.noteAlloc(addr, size)
+			continue
+		}
+		size := seed%257 + 1
+		alignments := [...]uint64{0, 1, 63, 64, 65, 128, 512}
+		alignment := alignments[seed%uint64(len(alignments))]
+		got := withCursor.alloc(nil, size, alignment)
+		want := allocWithoutCursor(withoutCursor, size, alignment)
+		if got != want {
+			t.Fatalf("operation %d: alloc(%d, %d)=%d, original search returned %d (cursor=%d)",
+				i, size, alignment, got, want, withCursor.next*memAllocGranule)
+		}
+	}
+}
+
+func TestMemAllocCursorBehavior(t *testing.T) {
+	ma := newMemAlloc(memAllocL0Mem)
+	ma.noteAlloc(1, memAllocGranule)
+	if want := uint64(2 * memAllocGranule); ma.next != want/memAllocGranule {
+		t.Fatalf("cursor=%d, want %d", ma.next*memAllocGranule, want)
+	}
+
+	// An aligned allocation can leave the cursor at the earlier free granule.
+	if got := ma.alloc(nil, 1, 512); got != 512 {
+		t.Fatalf("aligned allocation=%d, want 512", got)
+	}
+	if want := uint64(2 * memAllocGranule); ma.next != want/memAllocGranule {
+		t.Fatalf("cursor skipped free memory: got %d, want %d", ma.next*memAllocGranule, want)
+	}
+
+	ma.bankruptcy()
+	if ma.next != 0 {
+		t.Fatalf("cursor after bankruptcy=%d, want 0", ma.next)
+	}
+}
+
 func TestVmaAlloc(t *testing.T) {
 	t.Parallel()
 	target, err := GetTarget("test", "64")
