@@ -5901,8 +5901,8 @@ static long syz_csb_thread_create_join(void)
 
 static long csb_wait_child(long pid)
 {
-	int status;
-	long ret;
+	int status = 0;
+	long ret = 0;
 	do {
 		ret = syscall(__NR_wait4, pid, &status, 0, 0);
 	} while (ret == -1 && errno == EINTR);
