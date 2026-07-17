@@ -5,10 +5,12 @@ package proggen
 
 import (
 	"bytes"
+	"strconv"
+	"strings"
+	"unicode"
+
 	"github.com/google/syzkaller/prog"
 	"github.com/google/syzkaller/tools/syz-trace2syz/parser"
-	"strconv"
-	"unicode"
 )
 
 var discriminatorArgs = map[string][]int{
@@ -44,7 +46,11 @@ type callSelector interface {
 func newSelectors(target *prog.Target, returnCache returnCache) []callSelector {
 	sc := newSelectorCommon(target, returnCache)
 	return []callSelector{
-		&defaultCallSelector{sc},
+		&defaultCallSelector{
+			selectorCommon: sc,
+			cache:          make(map[string]*prog.Syscall),
+			cacheable:      make(map[string]bool),
+		},
 		&openCallSelector{sc},
 	}
 }
@@ -163,6 +169,8 @@ func (cs *openCallSelector) matchOpen(meta *prog.Syscall, call *parser.Syscall) 
 
 type defaultCallSelector struct {
 	*selectorCommon
+	cache     map[string]*prog.Syscall
+	cacheable map[string]bool
 }
 
 // Select returns the best matching descrimination for this syscall.
@@ -172,6 +180,16 @@ func (cs *defaultCallSelector) Select(call *parser.Syscall) *prog.Syscall {
 	if len(discriminators) == 0 {
 		return nil
 	}
+	if cs.canCache(call.CallName, discriminators) {
+		if key, ok := cs.cacheKey(call, discriminators); ok {
+			if cached, ok := cs.cache[key]; ok {
+				return cached
+			}
+			defer func() {
+				cs.cache[key] = match
+			}()
+		}
+	}
 	score := 0
 	for _, meta := range cs.callSet(call.CallName) {
 		if score1 := cs.matchCall(meta, call, discriminators); score1 > score {
@@ -179,6 +197,52 @@ func (cs *defaultCallSelector) Select(call *parser.Syscall) *prog.Syscall {
 		}
 	}
 	return match
+}
+
+// Resource matches depend on the mutable return cache, so only stable selections are cached.
+func (cs *defaultCallSelector) canCache(name string, discriminators []int) bool {
+	if cacheable, ok := cs.cacheable[name]; ok {
+		return cacheable
+	}
+	cacheable := true
+	for _, meta := range cs.callSet(name) {
+		for _, i := range discriminators {
+			if i < len(meta.Args) {
+				if _, ok := meta.Args[i].Type.(*prog.ResourceType); ok {
+					cacheable = false
+				}
+			}
+		}
+	}
+	cs.cacheable[name] = cacheable
+	return cacheable
+}
+
+// cacheKey uses only variant-discriminating values and declines arguments it cannot encode safely.
+func (cs *defaultCallSelector) cacheKey(call *parser.Syscall, discriminators []int) (string, bool) {
+	var key strings.Builder
+	key.WriteString(call.CallName)
+	for _, i := range discriminators {
+		if i >= len(call.Args) {
+			return "", false
+		}
+		// Encode field type and buffer length so argument boundaries are structural, not delimiter-based.
+		key.WriteByte('|')
+		key.WriteString(strconv.Itoa(i))
+		switch arg := call.Args[i].(type) {
+		case parser.Constant:
+			key.WriteString(":c:")
+			key.WriteString(strconv.FormatUint(arg.Val(), 16))
+		case *parser.BufferType:
+			key.WriteString(":b:")
+			key.WriteString(strconv.Itoa(len(arg.Val)))
+			key.WriteByte(':')
+			key.WriteString(arg.Val)
+		default:
+			return "", false
+		}
+	}
+	return key.String(), true
 }
 
 // matchCall returns match score between meta and call.
