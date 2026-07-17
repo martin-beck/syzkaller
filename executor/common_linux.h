@@ -5900,7 +5900,7 @@ static long syz_csb_thread_create_join(void)
 	return 0;
 }
 
-static long csb_wait_child(long pid)
+static long csb_wait_child(pid_t pid)
 {
 	int status = 0;
 	long ret = 0;
