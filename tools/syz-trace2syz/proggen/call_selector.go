@@ -49,6 +49,7 @@ func newSelectors(target *prog.Target, returnCache returnCache) []callSelector {
 		&defaultCallSelector{
 			selectorCommon: sc,
 			cache:          make(map[string]*prog.Syscall),
+			cacheable:      make(map[string]bool),
 		},
 		&openCallSelector{sc},
 	}
@@ -168,7 +169,8 @@ func (cs *openCallSelector) matchOpen(meta *prog.Syscall, call *parser.Syscall) 
 
 type defaultCallSelector struct {
 	*selectorCommon
-	cache map[string]*prog.Syscall
+	cache     map[string]*prog.Syscall
+	cacheable map[string]bool
 }
 
 // Select returns the best matching descrimination for this syscall.
@@ -178,13 +180,15 @@ func (cs *defaultCallSelector) Select(call *parser.Syscall) *prog.Syscall {
 	if len(discriminators) == 0 {
 		return nil
 	}
-	if key, ok := cs.cacheKey(call, discriminators); ok {
-		if cached, ok := cs.cache[key]; ok {
-			return cached
+	if cs.canCache(call.CallName, discriminators) {
+		if key, ok := cs.cacheKey(call, discriminators); ok {
+			if cached, ok := cs.cache[key]; ok {
+				return cached
+			}
+			defer func() {
+				cs.cache[key] = match
+			}()
 		}
-		defer func() {
-			cs.cache[key] = match
-		}()
 	}
 	score := 0
 	for _, meta := range cs.callSet(call.CallName) {
@@ -193,6 +197,25 @@ func (cs *defaultCallSelector) Select(call *parser.Syscall) *prog.Syscall {
 		}
 	}
 	return match
+}
+
+// Resource matches depend on the mutable return cache, so only stable selections are cached.
+func (cs *defaultCallSelector) canCache(name string, discriminators []int) bool {
+	if cacheable, ok := cs.cacheable[name]; ok {
+		return cacheable
+	}
+	cacheable := true
+	for _, meta := range cs.callSet(name) {
+		for _, i := range discriminators {
+			if i < len(meta.Args) {
+				if _, ok := meta.Args[i].Type.(*prog.ResourceType); ok {
+					cacheable = false
+				}
+			}
+		}
+	}
+	cs.cacheable[name] = cacheable
+	return cacheable
 }
 
 // cacheKey uses only variant-discriminating values and declines arguments it cannot encode safely.
