@@ -126,3 +126,24 @@ func TestDefaultSelectorDeclinesUnsafeCacheKeys(t *testing.T) {
 		t.Fatalf("unsafe argument shapes created %d cache entries", len(selector.cache))
 	}
 }
+
+func TestDefaultSelectorCacheKeyIsUnambiguous(t *testing.T) {
+	selector := newSelectors(testTarget(t), newRCache())[0].(*defaultCallSelector)
+	key := func(args ...parser.IrType) string {
+		call := parser.NewSyscall(1, "test", args, 0, false, false)
+		key, ok := selector.cacheKey(call, []int{0, 1})
+		if !ok {
+			t.Fatal("failed to build cache key")
+		}
+		return key
+	}
+	// These tuples collide with delimiter-only encoding but not with length-prefixed fields.
+	if a, b := key(&parser.BufferType{Val: "x|1=y"}, &parser.BufferType{Val: "z"}),
+		key(&parser.BufferType{Val: "x"}, &parser.BufferType{Val: "y|1=z"}); a == b {
+		t.Fatalf("different buffer tuples share key %q", a)
+	}
+	if a, b := key(parser.Constant(0xa), parser.Constant(0)),
+		key(&parser.BufferType{Val: "a"}, parser.Constant(0)); a == b {
+		t.Fatalf("constant and buffer arguments share key %q", a)
+	}
+}

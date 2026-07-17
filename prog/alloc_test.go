@@ -135,6 +135,39 @@ func TestMemAllocCursorMatchesOriginalSearch(t *testing.T) {
 	}
 }
 
+func TestMemAllocCursorExhaustive(t *testing.T) {
+	const window = 8
+	sizes := [...]uint64{0, 1, 63, 64, 65, 127, 128, 129, window * memAllocGranule}
+	alignments := [...]uint64{0, 1, 63, 64, 65, 128, 192, 512}
+	for mask := 0; mask < 1<<window; mask++ {
+		base := newMemAlloc(memAllocL0Mem)
+		// Enumerate every occupancy pattern in the window; reserve the tail to bound the model.
+		for bit := uint64(0); bit < window; bit++ {
+			if mask&(1<<bit) != 0 {
+				base.noteAlloc(bit*memAllocGranule, 1)
+			}
+		}
+		base.noteAlloc(window*memAllocGranule, memAllocL0Mem-window*memAllocGranule)
+		for _, size := range sizes {
+			for _, alignment := range alignments {
+				withCursor, withoutCursor := cloneMemAlloc(base), cloneMemAlloc(base)
+				got := withCursor.alloc(nil, size, alignment)
+				want := allocWithoutCursor(withoutCursor, size, alignment)
+				if got != want || withCursor.next != withoutCursor.next || withCursor.buf != withoutCursor.buf {
+					t.Fatalf("mask=%08b size=%d alignment=%d: cursor=%d original=%d", mask, size, alignment, got, want)
+				}
+			}
+		}
+	}
+}
+
+func cloneMemAlloc(src *memAlloc) *memAlloc {
+	dst := *src
+	// The first-level bitmap points into the embedded buffer and must follow the copy.
+	dst.mem[0] = &dst.buf
+	return &dst
+}
+
 func TestMemAllocCursorBehavior(t *testing.T) {
 	ma := newMemAlloc(memAllocL0Mem)
 	ma.noteAlloc(1, memAllocGranule)

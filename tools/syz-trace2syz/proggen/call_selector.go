@@ -226,16 +226,17 @@ func (cs *defaultCallSelector) cacheKey(call *parser.Syscall, discriminators []i
 		if i >= len(call.Args) {
 			return "", false
 		}
+		// Encode field type and buffer length so argument boundaries are structural, not delimiter-based.
+		key.WriteByte('|')
+		key.WriteString(strconv.Itoa(i))
 		switch arg := call.Args[i].(type) {
 		case parser.Constant:
-			key.WriteByte('|')
-			key.WriteString(strconv.Itoa(i))
-			key.WriteByte('=')
+			key.WriteString(":c:")
 			key.WriteString(strconv.FormatUint(arg.Val(), 16))
 		case *parser.BufferType:
-			key.WriteByte('|')
-			key.WriteString(strconv.Itoa(i))
-			key.WriteByte('=')
+			key.WriteString(":b:")
+			key.WriteString(strconv.Itoa(len(arg.Val)))
+			key.WriteByte(':')
 			key.WriteString(arg.Val)
 		default:
 			return "", false
