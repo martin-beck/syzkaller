@@ -38,6 +38,8 @@ type ExecCopyout struct {
 type ExecArg any // one of ExecArg*
 
 type ExecArgConst struct {
+	// IsPointer records the address encoding; Value alone cannot distinguish a pointer from an equal scalar.
+	IsPointer      bool
 	Size           uint64
 	Format         BinaryFormat
 	Value          uint64
@@ -193,8 +195,9 @@ func (dec *execDecoder) readArg() ExecArg {
 			size = 8
 		}
 		return ExecArgConst{
-			Value: dec.read("arg/addr") + dec.target.DataOffset,
-			Size:  uint64(size),
+			Value:     dec.read("arg/addr") + dec.target.DataOffset,
+			Size:      uint64(size),
+			IsPointer: true,
 		}
 	case execArgResult:
 		meta := dec.read("arg/result/meta")
