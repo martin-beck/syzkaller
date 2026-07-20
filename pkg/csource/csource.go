@@ -918,8 +918,6 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool) string {
 	}
 
 	for i, arg := range call.Args {
-		metaArg := &call.Meta.Args[i].Type
-
 		if ctx.opts.CSB {
 			switch i {
 			// argument index 0
@@ -1007,40 +1005,8 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool) string {
 
 			PTR_OFFSET_STR := ""
 
-			if ctx.opts.CSB {
-				switch (*metaArg).(type) {
-				case *prog.PtrType:
-					if valInMMapRange(ctx, arg.Value) {
-						PTR_OFFSET_STR = "+PTR_OFFSET"
-					}
-				case *prog.ArrayType:
-					if valInMMapRange(ctx, arg.Value) {
-						PTR_OFFSET_STR = "+PTR_OFFSET"
-					}
-				case *prog.StructType:
-					if valInMMapRange(ctx, arg.Value) {
-						PTR_OFFSET_STR = "+PTR_OFFSET"
-					}
-				case *prog.UnionType:
-					if valInMMapRange(ctx, arg.Value) {
-						PTR_OFFSET_STR = "+PTR_OFFSET"
-					}
-				case *prog.ResourceType, *prog.BufferType, *prog.VmaType:
-					if valInMMapRange(ctx, arg.Value) {
-						PTR_OFFSET_STR = "+PTR_OFFSET"
-					}
-				case *prog.LenType, *prog.FlagsType,
-					*prog.ConstType, *prog.IntType, *prog.ProcType, *prog.CsumType:
-					// PTR_OFFSET_STR = "+PTR_OFFSET"
-					// no offset
-				case prog.Ref:
-					if valInMMapRange(ctx, arg.Value) {
-						PTR_OFFSET_STR = "+PTR_OFFSET"
-					}
-					// This is only needed for pkg/compiler.
-				default:
-					panic("unknown type")
-				}
+			if ctx.opts.CSB && arg.IsPointer && valInMMapRange(ctx, arg.Value) {
+				PTR_OFFSET_STR = "+PTR_OFFSET"
 			}
 
 			argsStrs = append(argsStrs, com+handleBigEndian(arg, ctx.constArgToStr(arg, native))+PTR_OFFSET_STR)
@@ -1106,7 +1072,8 @@ func (ctx *context) copyin(w *bytes.Buffer, csumSeq *int, copyin prog.ExecCopyin
 	switch arg := copyin.Arg.(type) {
 	case prog.ExecArgConst:
 		if arg.BitfieldOffset == 0 && arg.BitfieldLength == 0 {
-			ctx.copyinVal(w, copyin.Addr, arg.Size, handleBigEndian(arg, ctx.constArgToStr(arg, false)), arg.Format)
+			ctx.copyinVal(w, copyin.Addr, arg.Size, handleBigEndian(arg, ctx.constArgToStr(arg, false)), arg.Format,
+				arg.IsPointer && valInMMapRange(ctx, arg.Value))
 		} else {
 			if arg.Format != prog.FormatNative && arg.Format != prog.FormatBigEndian {
 				panic("bitfield+string format")
@@ -1124,7 +1091,7 @@ func (ctx *context) copyin(w *bytes.Buffer, csumSeq *int, copyin prog.ExecCopyin
 				bitfieldOffset, arg.BitfieldLength)
 		}
 	case prog.ExecArgResult:
-		ctx.copyinVal(w, copyin.Addr, arg.Size, ctx.resultArgToStr(arg), arg.Format)
+		ctx.copyinVal(w, copyin.Addr, arg.Size, ctx.resultArgToStr(arg), arg.Format, false)
 	case prog.ExecArgData:
 		addr := fmt.Sprintf("0x%x", copyin.Addr)
 		if PTR_OFFSET_STR_ADDR != "" {
@@ -1150,30 +1117,16 @@ func (ctx *context) copyin(w *bytes.Buffer, csumSeq *int, copyin prog.ExecCopyin
 	}
 }
 
-func trimLeftChars(s string, n int) string {
-	m := 0
-	for i := range s {
-		if m >= n {
-			return s[i:]
-		}
-		m++
-	}
-	return s[:0]
-}
-func (ctx *context) copyinVal(w *bytes.Buffer, addr, size uint64, val string, bf prog.BinaryFormat) {
+func (ctx *context) copyinVal(w *bytes.Buffer, addr, size uint64, val string, bf prog.BinaryFormat,
+	relocateValue bool) {
 	PTR_OFFSET_STR_ADDR := ""
 	PTR_OFFSET_STR_VAL := ""
 	if ctx.opts.CSB && valInMMapRange(ctx, addr) {
 		PTR_OFFSET_STR_ADDR = "+PTR_OFFSET"
 	}
 
-	strVal := val
-	if strings.HasPrefix(strVal, "0x") {
-		strVal = strVal[2:]
-		n, err := strconv.ParseUint(strVal, 16, 64)
-		if ctx.opts.CSB && err == nil && valInMMapRange(ctx, n) {
-			PTR_OFFSET_STR_VAL = "+PTR_OFFSET"
-		}
+	if ctx.opts.CSB && relocateValue {
+		PTR_OFFSET_STR_VAL = "+PTR_OFFSET"
 	}
 
 	switch bf {
