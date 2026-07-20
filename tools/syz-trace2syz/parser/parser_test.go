@@ -6,6 +6,7 @@
 package parser
 
 import (
+	"reflect"
 	"testing"
 
 	_ "github.com/google/syzkaller/sys"
@@ -159,6 +160,19 @@ func TestParseLoop1Child(t *testing.T) {
 		if len(tree.TraceMap[2].Calls) != 1 {
 			t.Fatalf("Child trace should have only 1 call. Got %d", len(tree.TraceMap[2].Calls))
 		}
+	}
+}
+
+func TestParseForkChildren(t *testing.T) {
+	data := `1 fork() = 2
+2 read() = 1
+1 vfork() = 3
+3 write() = 1
+1 fork() = -1`
+	tree := parseTestData(t, []byte(data))
+	children := tree.Ptree[tree.RootPid]
+	if !reflect.DeepEqual(children, []int64{2, 3}) {
+		t.Fatalf("got children %v, want [2 3]", children)
 	}
 }
 

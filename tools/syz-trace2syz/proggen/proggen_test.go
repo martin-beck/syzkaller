@@ -564,20 +564,22 @@ vfork() = -1 ENOMEM (Cannot allocate memory)
 }
 
 func TestTaskCreationLifecycleCompiles(t *testing.T) {
-	p := parseSingleProg(t, `
-clone(child_stack=0x1234, flags=0x10100) = 2
-fork() = 3
-vfork() = 4
-`)
-	src, _, err := csource.Write(p, csource.Options{Slowdown: 1})
-	if err != nil {
-		t.Fatal(err)
+	for _, trace := range []string{
+		`clone(child_stack=0x1234, flags=0x10100) = 2`,
+		`fork() = 3`,
+		`vfork() = 4`,
+	} {
+		p := parseSingleProg(t, trace)
+		src, _, err := csource.Write(p, csource.Options{Slowdown: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		bin, err := csource.Build(p.Target, src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.Remove(bin)
 	}
-	bin, err := csource.Build(p.Target, src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Remove(bin)
 }
 
 func TestShortSafeCallsAreDropped(t *testing.T) {

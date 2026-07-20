@@ -5873,10 +5873,10 @@ static long syz_clone3(volatile long a0, volatile long a1)
 
 #if SYZ_EXECUTOR || __NR_syz_csb_thread_create_join || __NR_syz_csb_fork_wait || __NR_syz_csb_vfork_wait
 #include <errno.h>
+#endif
+
+#if SYZ_EXECUTOR || __NR_syz_csb_thread_create_join
 #include <pthread.h>
-#include <sched.h>
-#include <signal.h>
-#include <sys/wait.h>
 
 // Exercise task creation and teardown without replaying the traced child workload.
 static void* csb_thread_exit(void* arg)
@@ -5899,7 +5899,9 @@ static long syz_csb_thread_create_join(void)
 	}
 	return 0;
 }
+#endif
 
+#if SYZ_EXECUTOR || __NR_syz_csb_fork_wait || __NR_syz_csb_vfork_wait
 static long csb_wait_child(pid_t pid)
 {
 	int status = 0;
@@ -5909,7 +5911,10 @@ static long csb_wait_child(pid_t pid)
 	} while (ret == -1 && errno == EINTR);
 	return ret == pid ? 0 : -1;
 }
+#endif
 
+#if SYZ_EXECUTOR || __NR_syz_csb_fork_wait
+#include <signal.h>
 static long syz_csb_fork_wait(void)
 {
 #if defined(__NR_fork)
@@ -5924,7 +5929,9 @@ static long syz_csb_fork_wait(void)
 	}
 	return pid < 0 ? -1 : csb_wait_child(pid);
 }
+#endif
 
+#if SYZ_EXECUTOR || __NR_syz_csb_vfork_wait
 static long syz_csb_vfork_wait(void)
 {
 	long pid = vfork();
