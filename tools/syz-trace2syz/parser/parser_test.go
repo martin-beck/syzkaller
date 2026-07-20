@@ -124,6 +124,15 @@ func TestEvaluateExpressions(t *testing.T) {
 	}
 }
 
+func TestParseEmptyStatxFlags(t *testing.T) {
+	tree := parseTestData(t, []byte(`1 statx(3, ".", , 0x1101, {}) = 0`))
+	call := tree.TraceMap[tree.RootPid].Calls[0]
+	arg, ok := call.Args[2].(Constant)
+	if !ok || arg.Val() != 0 {
+		t.Fatalf("empty statx flags parsed as %#v, want constant zero", call.Args[2])
+	}
+}
+
 func TestParseLoopPid(t *testing.T) {
 	data := `1  open() = 3
 			 1  fstat() = 0`

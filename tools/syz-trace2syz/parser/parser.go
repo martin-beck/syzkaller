@@ -15,10 +15,20 @@ import (
 	"github.com/google/syzkaller/pkg/log"
 )
 
-func parseSyscall(scanner *bufio.Scanner) (int, *Syscall) {
-	lex := newStraceLexer(scanner.Bytes())
+func parseSyscall(data []byte) (int, *Syscall) {
+	lex := newStraceLexer(data)
 	ret := StraceParse(lex)
 	return ret, lex.result
+}
+
+func normalizeStraceLine(line string) string {
+	// strace 6.8 can render a zero statx flags argument as an empty field.
+	// Normalize only that known form so malformed arguments in other calls
+	// continue to fail parsing instead of being silently rewritten.
+	if strings.Contains(line, " statx(") || strings.HasPrefix(line, "statx(") {
+		return strings.Replace(line, ", ,", ", 0,", 1)
+	}
+	return line
 }
 
 func shouldSkip(line string) bool {
@@ -49,7 +59,7 @@ func ParseData(data []byte, splitThreads bool, numLines int) (*TraceTree, *Trace
 			continue
 		}
 		log.Logf(4, "scanning call: %s", line)
-		ret, call := parseSyscall(scanner)
+		ret, call := parseSyscall([]byte(normalizeStraceLine(line)))
 		if call == nil || ret != 0 {
 			fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 			return nil, nil, fmt.Errorf("failed to parse line: %v", line)
