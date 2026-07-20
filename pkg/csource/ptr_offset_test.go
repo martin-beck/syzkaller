@@ -31,3 +31,24 @@ func TestPtrOffsetChecksumAddresses(t *testing.T) {
 		t.Fatalf("got %d offsets, want 2:\n%s", got, out.String())
 	}
 }
+
+func TestValInMMapRange(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := &context{target: target, sysTarget: targets.Get(target.OS, target.Arch)}
+	min := target.DataOffset
+	max := min + target.NumPages*target.PageSize
+	tests := []struct {
+		value uint64
+		want  bool
+	}{
+		{min - 1, false}, {min, true}, {max - 1, true}, {max, false}, {max + 0x1000, false},
+	}
+	for _, test := range tests {
+		if got := valInMMapRange(ctx, test.value); got != test.want {
+			t.Errorf("valInMMapRange(%#x)=%v, want %v", test.value, got, test.want)
+		}
+	}
+}
