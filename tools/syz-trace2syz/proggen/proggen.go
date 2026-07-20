@@ -160,6 +160,10 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 	numCalls := len(trace.Calls)
 	// Skip only the root bootstrap; a later successful exec ends that TID's original workload.
 	bootstrapExecSkipped := false
+	var rootPID int64
+	if len(trace.Calls) != 0 {
+		rootPID = trace.Calls[0].Pid
+	}
 	terminatedTIDs := make(map[int64]bool)
 	for sIdx, sCall := range trace.Calls {
 		if sIdx%1000 == 0 {
@@ -176,8 +180,7 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 		if terminatedTIDs[sCall.Pid] {
 			continue
 		}
-		if skipBootstrapExec && !bootstrapExecSkipped && sCall.Ret == 0 &&
-			(sCall.CallName == "execve" || sCall.CallName == "execveat") {
+		if skipBootstrapExec && !bootstrapExecSkipped && sCall.Pid == rootPID && isSuccessfulExec(sCall) {
 			bootstrapExecSkipped = true
 			continue
 		}
@@ -196,7 +199,7 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 			}
 		}
 		// Later calls from this TID belong to the replacement image.
-		if sCall.Ret == 0 && (sCall.CallName == "execve" || sCall.CallName == "execveat") {
+		if isSuccessfulExec(sCall) {
 			terminatedTIDs[sCall.Pid] = true
 		}
 	}
@@ -211,6 +214,9 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 // genCalls routes sanitized syscalls to bounded generators that may emit setup and replay calls.
 func (ctx *context) genCalls() []*prog.Call {
 	if minArgs := sanitizedCallMinArgs[ctx.currentStraceCall.CallName]; len(ctx.currentStraceCall.Args) < minArgs {
+		return nil
+	}
+	if isExec(ctx.currentStraceCall) && ctx.currentStraceCall.Ret < 0 {
 		return nil
 	}
 	if name := execLifecycleCall(ctx.currentStraceCall); name != "" {
@@ -715,6 +721,16 @@ func roundUp(v, unit uint64) uint64 {
 }
 
 // execLifecycleCall selects the bounded helper matching the traced exec entry point.
+const atEmptyPath = 0x1000
+
+func isExec(call *parser.Syscall) bool {
+	return call.CallName == "execve" || call.CallName == "execveat"
+}
+
+func isSuccessfulExec(call *parser.Syscall) bool {
+	return isExec(call) && call.Ret == 0
+}
+
 func execLifecycleCall(call *parser.Syscall) string {
 	switch call.CallName {
 	case "execve":
@@ -723,7 +739,7 @@ func execLifecycleCall(call *parser.Syscall) string {
 		if len(call.Args) > 4 {
 			path, pathOK := call.Args[1].(*parser.BufferType)
 			flags, flagsOK := call.Args[4].(parser.Constant)
-			if pathOK && path.Val == "" && flagsOK && flags.Val()&0x1000 != 0 {
+			if pathOK && path.Val == "" && flagsOK && flags.Val()&atEmptyPath != 0 {
 				return "syz_csb_fexecve"
 			}
 		}

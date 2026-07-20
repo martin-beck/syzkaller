@@ -13,21 +13,33 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 
+enum csb_exec_kind {
+	CSB_EXECVE,
+	CSB_EXECVEAT,
+	CSB_FEXECVE,
+};
+
+static void __attribute__((constructor)) csb_exec_child(void)
+{
+	if (getenv("syz_csb_exec_child"))
+		syscall(__NR_exit, 0);
+}
+
 // Run exec in a child so the benchmark process survives and the lifecycle remains bounded.
-static long csb_exec_lifecycle(int kind)
+static long csb_exec_lifecycle(enum csb_exec_kind kind)
 {
 	pid_t pid = fork();
 	if (pid < 0)
 		return -1;
 	if (pid == 0) {
-		char* const argv[] = {(char*)"true", NULL};
-		char* const envp[] = {NULL};
-		if (kind == 0) {
-			syscall(__NR_execve, "/bin/true", argv, envp);
-		} else if (kind == 1) {
-			syscall(__NR_execveat, AT_FDCWD, "/bin/true", argv, envp, 0);
+		char* const argv[] = {(char*)"syz-csb-exec", NULL};
+		char* const envp[] = {(char*)"syz_csb_exec_child=1", NULL};
+		if (kind == CSB_EXECVE) {
+			syscall(__NR_execve, "/proc/self/exe", argv, envp);
+		} else if (kind == CSB_EXECVEAT) {
+			syscall(__NR_execveat, AT_FDCWD, "/proc/self/exe", argv, envp, 0);
 		} else {
-			int fd = syscall(__NR_openat, AT_FDCWD, "/bin/true", O_RDONLY, 0);
+			int fd = syscall(__NR_openat, AT_FDCWD, "/proc/self/exe", O_RDONLY, 0);
 			if (fd >= 0)
 				syscall(__NR_execveat, fd, "", argv, envp, AT_EMPTY_PATH);
 		}
@@ -46,20 +58,26 @@ static long csb_exec_lifecycle(int kind)
 	return -1;
 }
 
+#if SYZ_EXECUTOR || __NR_syz_csb_execve
 static long syz_csb_execve(void)
 {
-	return csb_exec_lifecycle(0);
+	return csb_exec_lifecycle(CSB_EXECVE);
 }
+#endif
 
+#if SYZ_EXECUTOR || __NR_syz_csb_execveat
 static long syz_csb_execveat(void)
 {
-	return csb_exec_lifecycle(1);
+	return csb_exec_lifecycle(CSB_EXECVEAT);
 }
+#endif
 
+#if SYZ_EXECUTOR || __NR_syz_csb_fexecve
 static long syz_csb_fexecve(void)
 {
-	return csb_exec_lifecycle(2);
+	return csb_exec_lifecycle(CSB_FEXECVE);
 }
+#endif
 #endif
 
 #if SYZ_EXECUTOR

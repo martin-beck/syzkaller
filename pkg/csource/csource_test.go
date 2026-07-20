@@ -72,20 +72,21 @@ func TestCSBExecLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := target.Deserialize([]byte("syz_csb_execve()\nsyz_csb_execveat()\nsyz_csb_fexecve()\n"), prog.NonStrict)
-	if err != nil {
-		t.Fatal(err)
+	for _, call := range []string{"syz_csb_execve()", "syz_csb_execveat()", "syz_csb_fexecve()"} {
+		p, err := target.Deserialize([]byte(call+"\n"), prog.NonStrict)
+		if err != nil {
+			t.Fatal(err)
+		}
+		testOne(t, p, Options{Slowdown: 1})
+		src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"csb_exec_lifecycle", "/proc/self/exe", "syz_csb_exec_child"} {
+			assert.Contains(t, string(src), want)
+		}
+		assert.NotContains(t, string(src), "return -errno")
 	}
-
-	testOne(t, p, Options{Slowdown: 1})
-	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"csb_exec_lifecycle", "__NR_execveat", "__NR_wait4"} {
-		assert.Contains(t, string(src), want)
-	}
-	assert.NotContains(t, string(src), "return -errno")
 }
 
 func testPseudoSyscalls(t *testing.T, target *prog.Target, ct *prog.ChoiceTable) {
