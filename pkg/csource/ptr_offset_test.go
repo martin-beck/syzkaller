@@ -31,3 +31,76 @@ func TestPtrOffsetChecksumAddresses(t *testing.T) {
 		t.Fatalf("got %d offsets, want 2:\n%s", got, out.String())
 	}
 }
+
+func TestValInMMapRange(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := &context{target: target, sysTarget: targets.Get(target.OS, target.Arch)}
+	min := target.DataOffset
+	max := min + target.NumPages*target.PageSize
+	tests := []struct {
+		value uint64
+		want  bool
+	}{
+		{min - 1, false}, {min, true}, {max - 1, true}, {max, false}, {max + 0x1000, false},
+	}
+	for _, test := range tests {
+		if got := valInMMapRange(ctx, test.value); got != test.want {
+			t.Errorf("valInMMapRange(%#x)=%v, want %v", test.value, got, test.want)
+		}
+	}
+}
+
+func TestPtrOffsetBitfieldDestination(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := &context{opts: Options{CSB: true}, target: target,
+		sysTarget: targets.Get(target.OS, target.Arch)}
+	var out bytes.Buffer
+	ctx.copyin(&out, new(int), prog.ExecCopyin{Addr: target.DataOffset, Arg: prog.ExecArgConst{
+		Size: 2, Value: target.DataOffset, BitfieldLength: 4,
+	}})
+	// The destination is an address; the numerically equal bitfield value is data.
+	if got := strings.Count(out.String(), "+PTR_OFFSET"); got != 1 {
+		t.Fatalf("got %d offsets, want 1:\n%s", got, out.String())
+	}
+}
+
+func TestPtrOffsetUsesPointerEncoding(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := &context{p: &prog.Prog{Target: target}, opts: Options{CSB: true}, target: target,
+		sysTarget: targets.Get(target.OS, target.Arch)}
+	addr := target.DataOffset
+	for _, test := range []struct {
+		name string
+		arg  prog.ExecArgConst
+		want int
+	}{
+		{"scalar", prog.ExecArgConst{Size: 8, Value: addr}, 1},
+		{"pointer", prog.ExecArgConst{IsPointer: true, Size: 8, Value: addr}, 2},
+		{"null pointer", prog.ExecArgConst{IsPointer: true, Size: 8}, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var out bytes.Buffer
+			ctx.copyin(&out, new(int), prog.ExecCopyin{Addr: addr, Arg: test.arg})
+			if got := strings.Count(out.String(), "+PTR_OFFSET"); got != test.want {
+				t.Fatalf("got %d offsets, want %d:\n%s", got, test.want, out.String())
+			}
+		})
+	}
+
+	meta := target.SyscallMap["close"]
+	for _, arg := range []prog.ExecArgConst{{Size: 8, Value: addr}, {IsPointer: true, Size: 8, Value: addr}} {
+		got := ctx.fmtCallBody(prog.ExecCall{Meta: meta, Args: []prog.ExecArg{arg}}, false)
+		if strings.Contains(got, "+PTR_OFFSET") != arg.IsPointer {
+			t.Fatalf("direct argument relocation does not match pointer encoding: %s", got)
+		}
+	}
+}

@@ -884,13 +884,11 @@ func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCo
 }
 
 func valInMMapRange(ctx *context, val uint64) bool {
-	argValOffsetRangeMin := ctx.sysTarget.DataOffset - 0x1000
-	argValOffsetRangeMax := ctx.sysTarget.DataOffset + (ctx.target.NumPages * ctx.target.PageSize) + 0x1000
+	min := ctx.sysTarget.DataOffset
+	max := min + ctx.target.NumPages*ctx.target.PageSize
 
-	if val >= argValOffsetRangeMin && val <= argValOffsetRangeMax {
-		return true
-	}
-	return false
+	// The CSB mapping is exactly [min, max); adjacent values are not pointers into it.
+	return val >= min && val < max
 }
 
 func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool) string {
