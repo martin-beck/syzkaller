@@ -1125,8 +1125,8 @@ func (ctx *context) copyin(w *bytes.Buffer, csumSeq *int, copyin prog.ExecCopyin
 			if ctx.target.BigEndian {
 				bitfieldOffset = arg.Size*8 - arg.BitfieldOffset - arg.BitfieldLength
 			}
-			fmt.Fprintf(w, "\tNONFAILING(STORE_BY_BITMASK(uint%v, %v, 0x%x, %v, %v, %v));\n",
-				arg.Size*8, htobe, copyin.Addr, ctx.constArgToStr(arg, false),
+			fmt.Fprintf(w, "\tNONFAILING(STORE_BY_BITMASK(uint%v, %v, 0x%xul%v, %v, %v, %v));\n",
+				arg.Size*8, htobe, copyin.Addr, PTR_OFFSET_STR_ADDR, ctx.constArgToStr(arg, false),
 				bitfieldOffset, arg.BitfieldLength)
 		}
 	case prog.ExecArgResult:

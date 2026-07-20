@@ -76,3 +76,20 @@ func TestDataMmapProgOffsetsGuards(t *testing.T) {
 		t.Fatalf("data mmap and guards are not all relocated: %d offsets", got)
 	}
 }
+
+func TestPtrOffsetBitfieldDestination(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := &context{opts: Options{CSB: true}, target: target,
+		sysTarget: targets.Get(target.OS, target.Arch)}
+	var out bytes.Buffer
+	ctx.copyin(&out, new(int), prog.ExecCopyin{Addr: target.DataOffset, Arg: prog.ExecArgConst{
+		Size: 2, Value: target.DataOffset, BitfieldLength: 4,
+	}})
+	// The destination is an address; the numerically equal bitfield value is data.
+	if got := strings.Count(out.String(), "+PTR_OFFSET"); got != 1 {
+		t.Fatalf("got %d offsets, want 1:\n%s", got, out.String())
+	}
+}
