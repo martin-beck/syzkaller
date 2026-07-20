@@ -912,6 +912,12 @@ func (ctx *context) genStruct(syzType *prog.StructType, dir prog.Dir, traceType 
 		// ioctl(3, 35111, {ifr_name="\x6c\x6f", ifr_hwaddr=00:00:00:00:00:00}) = 0
 		// if_hwaddr gets parsed as a BufferType but our syscall descriptions have it as a struct type
 		return syzType.DefaultArg(dir)
+	case parser.Constant:
+		// A zero scalar represents an omitted or NULL struct in some strace output.
+		if a.Val() == 0 {
+			return syzType.DefaultArg(dir)
+		}
+		log.Fatalf("unsupported nonzero constant for struct: %#v", a)
 	default:
 		log.Fatalf("unsupported type for struct: %#v", a)
 	}
