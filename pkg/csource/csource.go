@@ -906,6 +906,11 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool) string {
 		argsStrs = append(argsStrs, ctx.sysTarget.SyscallPrefix+callName)
 	} else if strings.HasPrefix(callName, "syz_") {
 		funcName = callName
+		// Multiple generated CSB headers share a translation unit, so calls must
+		// use the same header-local name as their UNIQUE_FUNC declarations.
+		if ctx.opts.CSB && (strings.HasPrefix(callName, "syz_csb_exec") || callName == "syz_csb_fexecve") {
+			funcName = fmt.Sprintf("UNIQUE_FUNC(%v)", callName)
+		}
 	} else {
 		args := strings.Repeat(",intptr_t", len(call.Args)+call.Meta.MissingArgs)
 		if args != "" {

@@ -13,20 +13,20 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 
-enum csb_exec_kind {
-	CSB_EXECVE,
-	CSB_EXECVEAT,
-	CSB_FEXECVE,
+enum UNIQUE_FUNC(csb_exec_kind) {
+	UNIQUE_FUNC(CSB_EXECVE),
+	UNIQUE_FUNC(CSB_EXECVEAT),
+	UNIQUE_FUNC(CSB_FEXECVE),
 };
 
-static void __attribute__((constructor)) csb_exec_child(void)
+static void __attribute__((constructor)) UNIQUE_FUNC(csb_exec_child)(void)
 {
 	if (getenv("syz_csb_exec_child"))
 		syscall(__NR_exit, 0);
 }
 
 // Run exec in a child so the benchmark process survives and the lifecycle remains bounded.
-static long csb_exec_lifecycle(enum csb_exec_kind kind)
+static long UNIQUE_FUNC(csb_exec_lifecycle)(enum UNIQUE_FUNC(csb_exec_kind) kind)
 {
 	pid_t pid = fork();
 	if (pid < 0)
@@ -34,9 +34,9 @@ static long csb_exec_lifecycle(enum csb_exec_kind kind)
 	if (pid == 0) {
 		char* const argv[] = {(char*)"syz-csb-exec", NULL};
 		char* const envp[] = {(char*)"syz_csb_exec_child=1", NULL};
-		if (kind == CSB_EXECVE) {
+		if (kind == UNIQUE_FUNC(CSB_EXECVE)) {
 			syscall(__NR_execve, "/proc/self/exe", argv, envp);
-		} else if (kind == CSB_EXECVEAT) {
+		} else if (kind == UNIQUE_FUNC(CSB_EXECVEAT)) {
 			syscall(__NR_execveat, AT_FDCWD, "/proc/self/exe", argv, envp, 0);
 		} else {
 			int fd = syscall(__NR_openat, AT_FDCWD, "/proc/self/exe", O_RDONLY, 0);
@@ -59,23 +59,23 @@ static long csb_exec_lifecycle(enum csb_exec_kind kind)
 }
 
 #if SYZ_EXECUTOR || __NR_syz_csb_execve
-static long syz_csb_execve(void)
+static long UNIQUE_FUNC(syz_csb_execve)(void)
 {
-	return csb_exec_lifecycle(CSB_EXECVE);
+	return UNIQUE_FUNC(csb_exec_lifecycle)(UNIQUE_FUNC(CSB_EXECVE));
 }
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_execveat
-static long syz_csb_execveat(void)
+static long UNIQUE_FUNC(syz_csb_execveat)(void)
 {
-	return csb_exec_lifecycle(CSB_EXECVEAT);
+	return UNIQUE_FUNC(csb_exec_lifecycle)(UNIQUE_FUNC(CSB_EXECVEAT));
 }
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_fexecve
-static long syz_csb_fexecve(void)
+static long UNIQUE_FUNC(syz_csb_fexecve)(void)
 {
-	return csb_exec_lifecycle(CSB_FEXECVE);
+	return UNIQUE_FUNC(csb_exec_lifecycle)(UNIQUE_FUNC(CSB_FEXECVE));
 }
 #endif
 #endif
