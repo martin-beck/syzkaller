@@ -94,6 +94,29 @@ static long syz_csb_exit(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(false); 
 static long syz_csb_exit_group(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(true); }
 #endif
 
+#if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction
+#include <signal.h>
+#include <string.h>
+
+static void UNIQUE_FUNC(csb_noop_signal_handler)(int sig)
+{
+	(void)sig;
+}
+
+// Use a generated handler because executable addresses in strace are not portable.
+static long syz_csb_rt_sigaction(void)
+{
+	struct sigaction action;
+	struct sigaction old;
+	memset(&action, 0, sizeof(action));
+	action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
+	sigemptyset(&action.sa_mask);
+	if (sigaction(SIGUSR1, &action, &old) < 0)
+		return -1;
+	return sigaction(SIGUSR1, &old, 0);
+}
+#endif
+
 #if SYZ_EXECUTOR || __NR_syz_csb_execve || __NR_syz_csb_execveat || __NR_syz_csb_fexecve
 #include <errno.h>
 #include <fcntl.h>

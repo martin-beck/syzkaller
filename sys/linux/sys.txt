@@ -390,6 +390,7 @@ syz_csb_io_submit() (automatic_helper)
 syz_csb_io_cancel() (automatic_helper)
 syz_csb_exit() (automatic_helper)
 syz_csb_exit_group() (automatic_helper)
+syz_csb_rt_sigaction() (automatic_helper)
 
 # We need these disabled definitions to simplify the presence and the NR checking.
 clone(flags flags[clone_flags], sp buffer[in], parentid ptr[out, int32], childtid ptr[out, int32], tls buffer[in]) (breaks_returns, disabled)
