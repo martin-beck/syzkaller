@@ -253,6 +253,10 @@ func (ctx *context) genCalls() []*prog.Call {
 		return singleCall(ctx.genTaskLifecycleCall("syz_csb_fork_wait"))
 	case "vfork":
 		return singleCall(ctx.genTaskLifecycleCall("syz_csb_vfork_wait"))
+	case "io_setup", "io_getevents", "io_pgetevents", "io_destroy", "io_submit", "io_cancel":
+		// Trace AIO contexts and iocb pointers are process-local. Exercise the
+		// requested syscall through a helper that owns a complete, bounded AIO lifecycle.
+		return singleCall(ctx.genDefaultSafeCall("syz_csb_" + ctx.currentStraceCall.CallName))
 	default:
 		return singleCall(ctx.genCall())
 	}

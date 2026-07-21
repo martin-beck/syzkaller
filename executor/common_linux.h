@@ -8,6 +8,65 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#if SYZ_EXECUTOR || __NR_syz_csb_io_setup || __NR_syz_csb_io_getevents || __NR_syz_csb_io_pgetevents || __NR_syz_csb_io_destroy || __NR_syz_csb_io_submit || __NR_syz_csb_io_cancel
+#include <fcntl.h>
+#include <linux/aio_abi.h>
+#include <string.h>
+
+enum csb_aio_op {
+	CSB_AIO_SETUP,
+	CSB_AIO_GETEVENTS,
+	CSB_AIO_PGETEVENTS,
+	CSB_AIO_DESTROY,
+	CSB_AIO_SUBMIT,
+	CSB_AIO_CANCEL,
+};
+
+// csb_aio_lifecycle owns every pointer and resource used by the replay so a
+// trace from another process cannot block or leak an AIO context.
+static long UNIQUE_FUNC(csb_aio_lifecycle)(enum csb_aio_op op)
+{
+	aio_context_t ctx = 0;
+	if (syscall(__NR_io_setup, 1, &ctx) < 0)
+		return -1;
+	long ret = 0;
+	struct io_event event;
+	struct timespec timeout = {};
+	if (op == CSB_AIO_GETEVENTS)
+		ret = syscall(__NR_io_getevents, ctx, 0, 1, &event, &timeout);
+#if defined(__NR_io_pgetevents)
+	else if (op == CSB_AIO_PGETEVENTS)
+		ret = syscall(__NR_io_pgetevents, ctx, 0, 1, &event, &timeout, 0);
+#endif
+	else if (op == CSB_AIO_SUBMIT || op == CSB_AIO_CANCEL) {
+		char byte = 0;
+		struct iocb cb;
+		memset(&cb, 0, sizeof(cb));
+		cb.aio_lio_opcode = IOCB_CMD_PWRITE;
+		cb.aio_fildes = open("/dev/null", O_WRONLY);
+		cb.aio_buf = (uint64)&byte;
+		cb.aio_nbytes = 1;
+		struct iocb* list[] = {&cb};
+		ret = syscall(__NR_io_submit, ctx, 1, list);
+		if (op == CSB_AIO_CANCEL)
+			ret = syscall(__NR_io_cancel, ctx, &cb, &event);
+		else if (ret == 1)
+			ret = syscall(__NR_io_getevents, ctx, 0, 1, &event, &timeout);
+		if (cb.aio_fildes >= 0)
+			close(cb.aio_fildes);
+	}
+	long destroyed = syscall(__NR_io_destroy, ctx);
+	return ret < 0 ? ret : destroyed;
+}
+
+static long syz_csb_io_setup(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(CSB_AIO_SETUP); }
+static long syz_csb_io_getevents(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(CSB_AIO_GETEVENTS); }
+static long syz_csb_io_pgetevents(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(CSB_AIO_PGETEVENTS); }
+static long syz_csb_io_destroy(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(CSB_AIO_DESTROY); }
+static long syz_csb_io_submit(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(CSB_AIO_SUBMIT); }
+static long syz_csb_io_cancel(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(CSB_AIO_CANCEL); }
+#endif
+
 #if SYZ_EXECUTOR || __NR_syz_csb_execve || __NR_syz_csb_execveat || __NR_syz_csb_fexecve
 #include <errno.h>
 #include <fcntl.h>
