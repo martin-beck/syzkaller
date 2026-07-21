@@ -67,6 +67,47 @@ func TestGenerate(t *testing.T) {
 	}
 }
 
+func TestCSBExecLifecycle(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range []string{"syz_csb_execve()", "syz_csb_execveat()", "syz_csb_fexecve()"} {
+		p, err := target.Deserialize([]byte(call+"\n"), prog.NonStrict)
+		if err != nil {
+			t.Fatal(err)
+		}
+		testOne(t, p, Options{Slowdown: 1})
+		src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"csb_exec_lifecycle", "/proc/self/exe", "syz_csb_exec_child"} {
+			assert.Contains(t, string(src), want)
+		}
+		assertCSBExecIdentifiersNamespaced(t, src)
+		assert.NotContains(t, string(src), "return -errno")
+	}
+}
+
+func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {
+	t.Helper()
+	// Strip text that cannot declare or reference a C identifier. In particular,
+	// syz_csb_exec_child is intentionally shared as an environment variable name.
+	code := regexp.MustCompile(`(?s)/\*.*?\*/|"(?:\\.|[^"\\])*"`).ReplaceAll(src, nil)
+	code = regexp.MustCompile(`(?m)//.*$`).ReplaceAll(code, nil)
+	execIdentifier := regexp.MustCompile(
+		`\b(?:csb_exec_[A-Za-z0-9_]*|CSB_[A-Z0-9_]*EXEC[A-Z0-9_]*|syz_csb_[a-z0-9_]*exec[a-z0-9_]*)\b`)
+	all := execIdentifier.FindAll(code, -1)
+	if len(all) == 0 {
+		t.Fatal("generated source contains no exec lifecycle identifiers")
+	}
+	namespaced := regexp.MustCompile(`UNIQUE_FUNC\(`+execIdentifier.String()+`\)`).ReplaceAll(code, nil)
+	if bare := execIdentifier.FindAll(namespaced, -1); len(bare) != 0 {
+		t.Fatalf("exec lifecycle identifiers are not namespaced: %q", bare)
+	}
+}
+
 func testPseudoSyscalls(t *testing.T, target *prog.Target, ct *prog.ChoiceTable) {
 	// Use options that are as minimal as possible.
 	// We want to ensure that the code can always be compiled.

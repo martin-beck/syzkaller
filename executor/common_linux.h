@@ -8,6 +8,78 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#if SYZ_EXECUTOR || __NR_syz_csb_execve || __NR_syz_csb_execveat || __NR_syz_csb_fexecve
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+
+enum UNIQUE_FUNC(csb_exec_kind) {
+	UNIQUE_FUNC(CSB_EXECVE),
+	UNIQUE_FUNC(CSB_EXECVEAT),
+	UNIQUE_FUNC(CSB_FEXECVE),
+};
+
+static void __attribute__((constructor)) UNIQUE_FUNC(csb_exec_child)(void)
+{
+	if (getenv("syz_csb_exec_child"))
+		syscall(__NR_exit, 0);
+}
+
+// Run exec in a child so the benchmark process survives and the lifecycle remains bounded.
+static long UNIQUE_FUNC(csb_exec_lifecycle)(enum UNIQUE_FUNC(csb_exec_kind) kind)
+{
+	pid_t pid = fork();
+	if (pid < 0)
+		return -1;
+	if (pid == 0) {
+		char* const argv[] = {(char*)"syz-csb-exec", NULL};
+		char* const envp[] = {(char*)"syz_csb_exec_child=1", NULL};
+		if (kind == UNIQUE_FUNC(CSB_EXECVE)) {
+			syscall(__NR_execve, "/proc/self/exe", argv, envp);
+		} else if (kind == UNIQUE_FUNC(CSB_EXECVEAT)) {
+			syscall(__NR_execveat, AT_FDCWD, "/proc/self/exe", argv, envp, 0);
+		} else {
+			int fd = syscall(__NR_openat, AT_FDCWD, "/proc/self/exe", O_RDONLY, 0);
+			if (fd >= 0)
+				syscall(__NR_execveat, fd, "", argv, envp, AT_EMPTY_PATH);
+		}
+		syscall(__NR_exit, 127);
+		__builtin_unreachable();
+	}
+
+	int status;
+	while (syscall(__NR_wait4, pid, &status, 0, NULL) < 0) {
+		if (errno != EINTR)
+			return -1;
+	}
+	if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
+		return 0;
+	errno = EIO;
+	return -1;
+}
+
+#if SYZ_EXECUTOR || __NR_syz_csb_execve
+static long UNIQUE_FUNC(syz_csb_execve)(void)
+{
+	return UNIQUE_FUNC(csb_exec_lifecycle)(UNIQUE_FUNC(CSB_EXECVE));
+}
+#endif
+
+#if SYZ_EXECUTOR || __NR_syz_csb_execveat
+static long UNIQUE_FUNC(syz_csb_execveat)(void)
+{
+	return UNIQUE_FUNC(csb_exec_lifecycle)(UNIQUE_FUNC(CSB_EXECVEAT));
+}
+#endif
+
+#if SYZ_EXECUTOR || __NR_syz_csb_fexecve
+static long UNIQUE_FUNC(syz_csb_fexecve)(void)
+{
+	return UNIQUE_FUNC(csb_exec_lifecycle)(UNIQUE_FUNC(CSB_FEXECVE));
+}
+#endif
+#endif
+
 #if SYZ_EXECUTOR
 const int kExtraCoverSize = 1024 << 10;
 struct cover_t;

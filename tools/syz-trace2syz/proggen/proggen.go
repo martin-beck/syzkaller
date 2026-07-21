@@ -109,9 +109,9 @@ func ParseData(data []byte, target *prog.Target, splitThreads, argLength, madvis
 	}
 	var progs []*prog.Prog
 	if splitThreads {
-		parseTree(tree, tree.RootPid, target, &progs, argLength, madviseSetup)
+		parseTree(tree, tree.RootPid, target, &progs, argLength, madviseSetup, true)
 	} else {
-		progs = append(progs, genProg(trace, target, argLength, false, madviseSetup))
+		progs = append(progs, genProg(trace, target, argLength, false, madviseSetup, true))
 	}
 	return progs, nil
 }
@@ -119,14 +119,14 @@ func ParseData(data []byte, target *prog.Target, splitThreads, argLength, madvis
 // parseTree groups system calls in the trace by process id.
 // The tree preserves process hierarchy i.e. parent->[]child
 func parseTree(tree *parser.TraceTree, pid int64, target *prog.Target, progs *[]*prog.Prog,
-	argLength, madviseSetup bool) {
+	argLength, madviseSetup, skipBootstrapExec bool) {
 	log.Logf(2, "parsing trace pid %v", pid)
-	if p := genProg(tree.TraceMap[pid], target, argLength, false, madviseSetup); p != nil {
+	if p := genProg(tree.TraceMap[pid], target, argLength, false, madviseSetup, skipBootstrapExec); p != nil {
 		*progs = append(*progs, p)
 	}
 	for _, childPid := range tree.Ptree[pid] {
 		if tree.TraceMap[childPid] != nil {
-			parseTree(tree, childPid, target, progs, argLength, madviseSetup)
+			parseTree(tree, childPid, target, progs, argLength, madviseSetup, false)
 		}
 	}
 }
@@ -144,7 +144,8 @@ type context struct {
 }
 
 // genProg converts a trace to one of our programs.
-func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, madviseSetup bool) *prog.Prog {
+func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, madviseSetup,
+	skipBootstrapExec bool) *prog.Prog {
 	var status string
 	retCache := newRCache()
 	ctx := &context{
@@ -157,6 +158,13 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 	}
 	fmt.Fprintf(os.Stderr, "Parsing syscalls into syzlang\n")
 	numCalls := len(trace.Calls)
+	// Skip only the root bootstrap; a later successful exec ends that TID's original workload.
+	bootstrapExecSkipped := false
+	var rootPID int64
+	if len(trace.Calls) != 0 {
+		rootPID = trace.Calls[0].Pid
+	}
+	terminatedTIDs := make(map[int64]bool)
 	for sIdx, sCall := range trace.Calls {
 		if sIdx%1000 == 0 {
 			status = fmt.Sprintf("-- Progress [%03.1f/100%%] --", (100.0 * float32(sIdx) / float32(numCalls)))
@@ -167,6 +175,13 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 			// 2179  wait4(2180,  <unfinished ...>
 			// 2179  <... wait4 resumed> 0x7fff28981bf8, 0, NULL) = ? ERESTARTSYS
 			// 2179  --- SIGUSR1 {si_signo=SIGUSR1, si_code=SI_USER, si_pid=2180, si_uid=0} ---
+			continue
+		}
+		if terminatedTIDs[sCall.Pid] {
+			continue
+		}
+		if skipBootstrapExec && !bootstrapExecSkipped && sCall.Pid == rootPID && isSuccessfulExec(sCall) {
+			bootstrapExecSkipped = true
 			continue
 		}
 		if shouldSkip(sCall) {
@@ -183,6 +198,10 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 				log.Fatalf("%v", err)
 			}
 		}
+		// Later calls from this TID belong to the replacement image.
+		if isSuccessfulExec(sCall) {
+			terminatedTIDs[sCall.Pid] = true
+		}
 	}
 	fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 	p, err := ctx.builder.Finalize()
@@ -196,6 +215,12 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 func (ctx *context) genCalls() []*prog.Call {
 	if minArgs := sanitizedCallMinArgs[ctx.currentStraceCall.CallName]; len(ctx.currentStraceCall.Args) < minArgs {
 		return nil
+	}
+	if isExec(ctx.currentStraceCall) && ctx.currentStraceCall.Ret < 0 {
+		return nil
+	}
+	if name := execLifecycleCall(ctx.currentStraceCall); name != "" {
+		return singleCall(ctx.genDefaultSafeCall(name))
 	}
 	switch ctx.currentStraceCall.CallName {
 	case "madvise":
@@ -693,6 +718,35 @@ func roundUp(v, unit uint64) uint64 {
 		return v
 	}
 	return ((v + unit - 1) / unit) * unit
+}
+
+// execLifecycleCall selects the bounded helper matching the traced exec entry point.
+const atEmptyPath = 0x1000
+
+func isExec(call *parser.Syscall) bool {
+	return call.CallName == "execve" || call.CallName == "execveat"
+}
+
+func isSuccessfulExec(call *parser.Syscall) bool {
+	return isExec(call) && call.Ret == 0
+}
+
+func execLifecycleCall(call *parser.Syscall) string {
+	switch call.CallName {
+	case "execve":
+		return "syz_csb_execve"
+	case "execveat":
+		if len(call.Args) > 4 {
+			path, pathOK := call.Args[1].(*parser.BufferType)
+			flags, flagsOK := call.Args[4].(parser.Constant)
+			if pathOK && path.Val == "" && flagsOK && flags.Val()&atEmptyPath != 0 {
+				return "syz_csb_fexecve"
+			}
+		}
+		return "syz_csb_execveat"
+	default:
+		return ""
+	}
 }
 
 func (ctx *context) Select(syscall *parser.Syscall) *prog.Syscall {
