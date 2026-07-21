@@ -38,6 +38,7 @@ static long UNIQUE_FUNC(csb_aio_lifecycle)(enum csb_aio_op op)
 	else if (op == CSB_AIO_PGETEVENTS)
 		ret = syscall(__NR_io_pgetevents, ctx, 0, 1, &event, &timeout, 0);
 #endif
+
 	else if (op == CSB_AIO_SUBMIT || op == CSB_AIO_CANCEL) {
 		char byte = 0;
 		struct iocb cb;
@@ -65,6 +66,32 @@ static long syz_csb_io_pgetevents(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(
 static long syz_csb_io_destroy(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(CSB_AIO_DESTROY); }
 static long syz_csb_io_submit(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(CSB_AIO_SUBMIT); }
 static long syz_csb_io_cancel(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(CSB_AIO_CANCEL); }
+#endif
+
+#if SYZ_EXECUTOR || __NR_syz_csb_exit || __NR_syz_csb_exit_group
+#include <errno.h>
+#include <sys/wait.h>
+
+// Run termination in a child and reap it so a CSB operation can repeat safely.
+static long UNIQUE_FUNC(csb_exit_lifecycle)(bool group)
+{
+	long pid = syscall(__NR_fork);
+	if (pid < 0)
+		return -1;
+	if (pid == 0) {
+		syscall(group ? __NR_exit_group : __NR_exit, 0);
+		UNIQUE_FUNC(doexit_thread)(0);
+	}
+	int status = 0;
+	long ret;
+	do {
+		ret = syscall(__NR_wait4, pid, &status, 0, 0);
+	} while (ret < 0 && errno == EINTR);
+	return ret == pid ? 0 : -1;
+}
+
+static long syz_csb_exit(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(false); }
+static long syz_csb_exit_group(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(true); }
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_execve || __NR_syz_csb_execveat || __NR_syz_csb_fexecve
