@@ -440,7 +440,7 @@ syscall(SYS_csource8, /*num=*/(intptr_t)-1);
 }
 
 func generateSandboxFunctionSignatureTestCase(t *testing.T, sandbox string, sandboxArg int, expected, message string) {
-	actual := generateSandboxFunctionSignature(sandbox, sandboxArg, &context{})
+	actual := (&context{}).sourceDialect().sandboxCall(sandbox, sandboxArg)
 	assert.Equal(t, actual, expected, message)
 }
 

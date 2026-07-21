@@ -557,7 +557,7 @@ func TestTaskCreationLifecycleFromTrace(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(src), test.want) {
+			if !strings.Contains(string(src), generatedCSBCall(test.want)) {
 				t.Fatalf("generated CSB header missing %q:\n%s", test.want, src)
 			}
 		})
@@ -607,7 +607,7 @@ func TestAIOCallsUseBoundedLifecycles(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if helper := "syz_csb_" + name + "()"; !strings.Contains(string(src), helper) {
+			if helper := "syz_csb_" + name + "()"; !strings.Contains(string(src), generatedCSBCall(helper)) {
 				t.Fatalf("generated CSB header missing %q", helper)
 			}
 		})
@@ -623,7 +623,7 @@ func TestRtSigactionUsesGeneratedHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "syz_csb_rt_sigaction()"; !strings.Contains(string(src), want) {
+	if want := "syz_csb_rt_sigaction()"; !strings.Contains(string(src), generatedCSBCall(want)) {
 		t.Fatalf("generated CSB header missing %q", want)
 	}
 }
@@ -789,10 +789,14 @@ func TestExitCallsUseBoundedLifecycles(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"syz_csb_exit()", "syz_csb_exit_group()"} {
-		if !strings.Contains(string(src), want) {
+		if !strings.Contains(string(src), generatedCSBCall(want)) {
 			t.Fatalf("generated CSB header missing %q", want)
 		}
 	}
+}
+
+func generatedCSBCall(call string) string {
+	return "UNIQUE_FUNC(" + strings.TrimSuffix(call, "()") + ")()"
 }
 
 func parseSingleProg(t *testing.T, input string) *prog.Prog {
