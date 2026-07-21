@@ -715,6 +715,25 @@ func TestTaskCreationLifecycleCompiles(t *testing.T) {
 	}
 }
 
+func TestAIOCallsUseBoundedLifecycles(t *testing.T) {
+	for _, name := range []string{"io_setup", "io_getevents", "io_pgetevents", "io_destroy", "io_submit", "io_cancel"} {
+		t.Run(name, func(t *testing.T) {
+			p := parseSingleProg(t, name+"() = 0")
+			want := "syz_csb_" + name + "()[0]"
+			if got := strings.TrimSpace(string(p.Serialize())); got != want {
+				t.Fatalf("got %q, want %q", got, want)
+			}
+			src, _, err := csource.Write(p, csource.Options{Slowdown: 1, CSB: true, Trace: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if helper := "syz_csb_" + name + "()"; !strings.Contains(string(src), helper) {
+				t.Fatalf("generated CSB header missing %q", helper)
+			}
+		})
+	}
+}
+
 func TestShortSafeCallsAreDropped(t *testing.T) {
 	p := parseSingleProg(t, `
 madvise() = 0
