@@ -850,7 +850,7 @@ func TestResumedCallAfterExecIsKept(t *testing.T) {
 	}
 }
 
-func TestExitCallsAreSkipped(t *testing.T) {
+func TestExitCallsUseBoundedLifecycles(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {
 		t.Fatal(err)
@@ -865,8 +865,20 @@ func TestExitCallsAreSkipped(t *testing.T) {
 	if !strings.Contains(got, "syz_csb_execve()") {
 		t.Fatalf("exec lifecycle was lost:\n%s", got)
 	}
-	if strings.Contains(got, "exit(") || strings.Contains(got, "exit_group(") {
-		t.Fatalf("process termination call remained:\n%s", got)
+	for _, want := range []string{"syz_csb_exit()[0]", "syz_csb_exit_group()[0]"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("bounded termination helper %q missing:\n%s", want, got)
+		}
+	}
+	src, _, err := csource.Write(genProg(trace, target, false, false, false, false),
+		csource.Options{Slowdown: 1, CSB: true, Trace: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"syz_csb_exit()", "syz_csb_exit_group()"} {
+		if !strings.Contains(string(src), want) {
+			t.Fatalf("generated CSB header missing %q", want)
+		}
 	}
 }
 

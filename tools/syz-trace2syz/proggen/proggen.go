@@ -256,6 +256,9 @@ func (ctx *context) genCalls() []*prog.Call {
 		// Trace AIO contexts and iocb pointers are process-local. Exercise the
 		// requested syscall through a helper that owns a complete, bounded AIO lifecycle.
 		return singleCall(ctx.genDefaultSafeCall("syz_csb_" + ctx.currentStraceCall.CallName))
+	case "exit", "exit_group":
+		// Terminate a disposable child so the repeated CSB worker remains alive.
+		return singleCall(ctx.genDefaultSafeCall("syz_csb_" + ctx.currentStraceCall.CallName))
 	default:
 		return singleCall(ctx.genCall())
 	}
