@@ -94,7 +94,7 @@ static long syz_csb_exit(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(false); 
 static long syz_csb_exit_group(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(true); }
 #endif
 
-#if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction || __NR_syz_csb_rt_sigreturn
+#if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction || __NR_syz_csb_rt_sigreturn || __NR_syz_csb_rt_sigqueueinfo || __NR_syz_csb_rt_sigsuspend
 #include <signal.h>
 #include <string.h>
 
@@ -130,6 +130,60 @@ static long syz_csb_rt_sigreturn(void)
 	long ret = raise(SIGUSR1);
 	if (sigaction(SIGUSR1, &old, 0) < 0)
 		return -1;
+	return ret;
+}
+
+static long UNIQUE_FUNC(csb_queue_owned_signal)(void)
+{
+	siginfo_t info;
+	memset(&info, 0, sizeof(info));
+	info.si_signo = SIGUSR1;
+	info.si_code = SI_QUEUE;
+	info.si_pid = getpid();
+	info.si_uid = getuid();
+	return syscall(__NR_rt_sigqueueinfo, getpid(), SIGUSR1, &info);
+}
+
+// Queue only to this process after installing a generated handler.
+static long syz_csb_rt_sigqueueinfo(void)
+{
+	struct sigaction action;
+	struct sigaction old;
+	memset(&action, 0, sizeof(action));
+	action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
+	sigemptyset(&action.sa_mask);
+	if (sigaction(SIGUSR1, &action, &old) < 0)
+		return -1;
+	long ret = UNIQUE_FUNC(csb_queue_owned_signal)();
+	if (sigaction(SIGUSR1, &old, 0) < 0)
+		return -1;
+	return ret;
+}
+
+// Queue SIGUSR1 before suspending so replay cannot wait indefinitely.
+static long syz_csb_rt_sigsuspend(void)
+{
+	struct sigaction action;
+	struct sigaction old_action;
+	sigset_t blocked;
+	sigset_t old_mask;
+	memset(&action, 0, sizeof(action));
+	action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
+	sigemptyset(&action.sa_mask);
+	if (sigaction(SIGUSR1, &action, &old_action) < 0)
+		return -1;
+	sigemptyset(&blocked);
+	sigaddset(&blocked, SIGUSR1);
+	if (sigprocmask(SIG_BLOCK, &blocked, &old_mask) < 0)
+		return -1;
+	long ret = UNIQUE_FUNC(csb_queue_owned_signal)();
+	if (ret >= 0) {
+		sigset_t suspend_mask = old_mask;
+		sigdelset(&suspend_mask, SIGUSR1);
+		ret = syscall(__NR_rt_sigsuspend, &suspend_mask, 8);
+	}
+	sigprocmask(SIG_SETMASK, &old_mask, 0);
+	sigaction(SIGUSR1, &old_action, 0);
 	return ret;
 }
 #endif

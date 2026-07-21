@@ -638,6 +638,21 @@ func TestRtSigreturnUsesDeliveredSignal(t *testing.T) {
 	}
 }
 
+func TestRemainingRtSignalCallsUseOwnedSignals(t *testing.T) {
+	for _, name := range []string{"rt_sigqueueinfo", "rt_sigsuspend"} {
+		t.Run(name, func(t *testing.T) {
+			p := parseSingleProg(t, name+"() = 0")
+			want := "syz_csb_" + name + "()[0]"
+			if got := strings.TrimSpace(string(p.Serialize())); got != want {
+				t.Fatalf("got %q, want %q", got, want)
+			}
+			if _, _, err := csource.Write(p, csource.Options{Slowdown: 1, CSB: true, Trace: true}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestShortSafeCallsAreDropped(t *testing.T) {
 	p := parseSingleProg(t, `
 madvise() = 0

@@ -266,6 +266,9 @@ func (ctx *context) genCalls() []*prog.Call {
 	case "rt_sigreturn":
 		// A real delivered signal lets the kernel construct the architecture-specific frame.
 		return singleCall(ctx.genDefaultSafeCall("syz_csb_rt_sigreturn"))
+	case "rt_sigqueueinfo", "rt_sigsuspend":
+		// Target only the current process and guarantee that suspension has a pending wakeup.
+		return singleCall(ctx.genDefaultSafeCall("syz_csb_" + ctx.currentStraceCall.CallName))
 	default:
 		return singleCall(ctx.genCall())
 	}
