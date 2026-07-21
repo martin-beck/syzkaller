@@ -313,6 +313,29 @@ func executableCallKeys(p *prog.Prog) []string {
 	return keys
 }
 
+// canFrequencyWeight reports whether csource can repeat a call without losing
+// per-invocation behavior. Copyins run only once before a rerun loop.
+func canFrequencyWeight(call *prog.Call) bool {
+	return call.Props.FailNth == 0 && !call.Props.Async && !hasCopyin(call)
+}
+
+func hasCopyin(call *prog.Call) bool {
+	found := false
+	prog.ForeachArg(call, func(arg prog.Arg, ctx *prog.ArgCtx) {
+		if found || ctx.Base == nil {
+			return
+		}
+		switch arg.(type) {
+		case *prog.GroupArg, *prog.UnionArg:
+			return
+		}
+		typ := arg.Type()
+		found = arg.Dir() != prog.DirOut && !prog.IsPad(typ) &&
+			(arg.Size() != 0 || typ.IsBitfield())
+	})
+	return found
+}
+
 func writeExecutableArgKey(b *strings.Builder, arg prog.Arg, resourceIDs map[*prog.ResultArg]int) {
 	switch arg := arg.(type) {
 	case *prog.ConstArg:
@@ -390,7 +413,7 @@ func mandatoryExecutableCalls(p *prog.Prog, execKeys []string) []bool {
 		if !ok || len(closures[i]) < len(closures[previous]) {
 			best[key] = i
 		}
-		if call.Props.FailNth == 0 && !call.Props.Async {
+		if canFrequencyWeight(call) {
 			previous, ok := bestRerunnable[key]
 			if !ok || len(closures[i]) < len(closures[previous]) {
 				bestRerunnable[key] = i
@@ -409,11 +432,9 @@ func mandatoryExecutableCalls(p *prog.Prog, execKeys []string) []bool {
 		}
 		addClosure(representative)
 	}
-	// Retain fault-injected and asynchronous calls structurally. Rerun is
-	// incompatible with fail_nth and executes sequentially, so it cannot
-	// preserve either property.
+	// Retain calls that cannot safely use rerun and their dependencies.
 	for i, call := range p.Calls {
-		if call.Props.FailNth > 0 || call.Props.Async {
+		if !canFrequencyWeight(call) {
 			addClosure(i)
 		}
 	}
@@ -435,7 +456,7 @@ func applyFrequencyWeights(original, reduced *prog.Prog, keep []bool, execKeys [
 			continue
 		}
 		originalToReduced[originalIndex] = reducedIndex
-		if original.Calls[originalIndex].Props.FailNth == 0 && !original.Calls[originalIndex].Props.Async {
+		if canFrequencyWeight(original.Calls[originalIndex]) {
 			key := execKeys[originalIndex]
 			byExecutableCall[key] = append(byExecutableCall[key], originalIndex)
 		}
@@ -444,7 +465,7 @@ func applyFrequencyWeights(original, reduced *prog.Prog, keep []bool, execKeys [
 
 	weights := make([]int, len(reduced.Calls))
 	for originalIndex, call := range original.Calls {
-		if call.Props.FailNth > 0 || call.Props.Async {
+		if !canFrequencyWeight(call) {
 			weights[originalToReduced[originalIndex]] += 1 + call.Props.Rerun
 			continue
 		}

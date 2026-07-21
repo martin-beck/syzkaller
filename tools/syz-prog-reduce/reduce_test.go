@@ -50,8 +50,8 @@ func TestReduceProgSamplesDynamicMotifs(t *testing.T) {
 func TestReduceProgKeepsOnlyDependencyValidCalls(t *testing.T) {
 	p := testProg(t, ""+
 		"r0 = test$res2()\n"+
-		"mutate6(r0, &(0x7f0000000040)=\"abcd\", 0x4)\n"+
-		"mutate6(r0, &(0x7f0000000040)=\"abcd\", 0x4)\n")
+		"fallback$1(r0)\n"+
+		"fallback$1(r0)\n")
 	reduced, _ := reduceProg(p, reduceOptions{
 		MaxCalls:          0,
 		MaxMotifInstances: 1,
@@ -198,6 +198,29 @@ func TestReduceProgKeepsAsyncCallsStructural(t *testing.T) {
 	for _, call := range reduced.Calls {
 		if call.Props.Rerun != 0 {
 			t.Fatalf("asynchronous call was collapsed into rerun:\n%s", reduced.Serialize())
+		}
+	}
+	if stats.WeightedCalls != len(p.Calls) {
+		t.Fatalf("weighted calls = %d, want %d", stats.WeightedCalls, len(p.Calls))
+	}
+}
+
+func TestReduceProgKeepsCopiedInCallsStructural(t *testing.T) {
+	p := testProg(t, ""+
+		"r0 = test$res2()\n"+
+		"mutate6(r0, &(0x7f0000000040)=\"abcd\", 0x4)\n"+
+		"mutate6(r0, &(0x7f0000000040)=\"abcd\", 0x4)\n")
+	reduced, stats := reduceProg(p, reduceOptions{
+		MaxMotifInstances: 1,
+		IncludeConsts:     true,
+	})
+	if len(reduced.Calls) != len(p.Calls) {
+		t.Fatalf("kept %d calls, want all %d copied-in calls structural:\n%s",
+			len(reduced.Calls), len(p.Calls), reduced.Serialize())
+	}
+	for _, call := range reduced.Calls {
+		if call.Props.Rerun != 0 {
+			t.Fatalf("copied-in call was collapsed into rerun:\n%s", reduced.Serialize())
 		}
 	}
 	if stats.WeightedCalls != len(p.Calls) {
