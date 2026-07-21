@@ -614,6 +614,20 @@ func TestAIOCallsUseBoundedLifecycles(t *testing.T) {
 	}
 }
 
+func TestRtSigactionUsesGeneratedHandler(t *testing.T) {
+	p := parseSingleProg(t, `rt_sigaction(10, {sa_handler=0x1234}, NULL, 8) = 0`)
+	if got := strings.TrimSpace(string(p.Serialize())); got != "syz_csb_rt_sigaction()[0]" {
+		t.Fatalf("got %q", got)
+	}
+	src, _, err := csource.Write(p, csource.Options{Slowdown: 1, CSB: true, Trace: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "syz_csb_rt_sigaction()"; !strings.Contains(string(src), want) {
+		t.Fatalf("generated CSB header missing %q", want)
+	}
+}
+
 func TestShortSafeCallsAreDropped(t *testing.T) {
 	p := parseSingleProg(t, `
 madvise() = 0

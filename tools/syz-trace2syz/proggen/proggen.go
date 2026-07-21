@@ -260,6 +260,9 @@ func (ctx *context) genCalls() []*prog.Call {
 	case "exit", "exit_group":
 		// Terminate a disposable child so the repeated CSB worker remains alive.
 		return singleCall(ctx.genDefaultSafeCall("syz_csb_" + ctx.currentStraceCall.CallName))
+	case "rt_sigaction":
+		// Handler addresses are not portable; install and restore a generated no-op handler.
+		return singleCall(ctx.genDefaultSafeCall("syz_csb_rt_sigaction"))
 	default:
 		return singleCall(ctx.genCall())
 	}
