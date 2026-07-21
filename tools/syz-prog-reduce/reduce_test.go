@@ -27,7 +27,7 @@ func testProg(t *testing.T, text string) *prog.Prog {
 }
 
 func TestReduceProgSamplesDynamicMotifs(t *testing.T) {
-	p := testProg(t, repeatedFilesProg(10))
+	p := testProg(t, repeatedEquivalentCallsProg(10))
 	reduced, stats := reduceProg(p, reduceOptions{
 		MaxCalls:          0,
 		MaxMotifInstances: 3,
@@ -51,8 +51,7 @@ func TestReduceProgKeepsOnlyDependencyValidCalls(t *testing.T) {
 	p := testProg(t, ""+
 		"r0 = test$res2()\n"+
 		"mutate6(r0, &(0x7f0000000040)=\"abcd\", 0x4)\n"+
-		"r1 = test$res2()\n"+
-		"mutate6(r1, &(0x7f0000000080)=\"abcd\", 0x4)\n")
+		"mutate6(r0, &(0x7f0000000040)=\"abcd\", 0x4)\n")
 	reduced, _ := reduceProg(p, reduceOptions{
 		MaxCalls:          0,
 		MaxMotifInstances: 1,
@@ -112,7 +111,7 @@ func TestReduceProgKeepsEverySyscallVariantWithDependencies(t *testing.T) {
 }
 
 func TestReduceProgRestoresMotifFrequenciesWithRerun(t *testing.T) {
-	p := testProg(t, repeatedFilesProg(10))
+	p := testProg(t, repeatedEquivalentCallsProg(10))
 	reduced, stats := reduceProg(p, reduceOptions{
 		MaxCalls:          0,
 		MaxMotifInstances: 3,
@@ -125,8 +124,30 @@ func TestReduceProgRestoresMotifFrequenciesWithRerun(t *testing.T) {
 	for _, call := range reduced.Calls {
 		weighted[call.Meta.Name] += 1 + call.Props.Rerun
 	}
-	if weighted["mutate5"] != 10 || weighted["mutate6"] != 10 {
-		t.Fatalf("weighted calls = %v, want mutate5=10 mutate6=10\n%s", weighted, reduced.Serialize())
+	if weighted["test"] != 10 || weighted["test$int"] != 10 {
+		t.Fatalf("weighted calls = %v, want test=10 test$int=10\n%s", weighted, reduced.Serialize())
+	}
+	if stats.WeightedCalls != len(p.Calls) {
+		t.Fatalf("weighted calls = %d, want %d", stats.WeightedCalls, len(p.Calls))
+	}
+}
+
+func TestReduceProgKeepsArgumentDistinctCallsStructural(t *testing.T) {
+	p := testProg(t, repeatedFilesProg(4))
+	reduced, stats := reduceProg(p, reduceOptions{
+		MaxCalls:          1,
+		MaxMotifInstances: 1,
+		MaxLiveResources:  1,
+		IncludeConsts:     true,
+	})
+	if len(reduced.Calls) != len(p.Calls) {
+		t.Fatalf("kept %d calls, want all %d argument-distinct calls:\n%s",
+			len(reduced.Calls), len(p.Calls), reduced.Serialize())
+	}
+	for _, call := range reduced.Calls {
+		if call.Props.Rerun != 0 {
+			t.Fatalf("argument-distinct call was weighted:\n%s", reduced.Serialize())
+		}
 	}
 	if stats.WeightedCalls != len(p.Calls) {
 		t.Fatalf("weighted calls = %d, want %d", stats.WeightedCalls, len(p.Calls))
@@ -165,8 +186,7 @@ func TestReduceProgHonorsLiveResourceCap(t *testing.T) {
 	p := testProg(t, ""+
 		"r0 = test$res2()\n"+
 		"r1 = test$res2()\n"+
-		"mutate6(r0, &(0x7f0000000040)=\"abcd\", 0x4)\n"+
-		"mutate6(r1, &(0x7f0000000080)=\"abcd\", 0x4)\n")
+		"mutate6(r0, &(0x7f0000000040)=\"abcd\", 0x4)\n")
 	reduced, stats := reduceProg(p, reduceOptions{
 		MaxCalls:          0,
 		MaxMotifInstances: 0,
@@ -216,6 +236,15 @@ func repeatedFilesProg(n int) string {
 	for i := 0; i < n; i++ {
 		fmt.Fprintf(&b, "r%d = mutate5(&(0x%x)='./file-%d\\x00', 0x0)\n", i, 0x7f0000000000+i*0x80, i)
 		fmt.Fprintf(&b, "mutate6(r%d, &(0x%x)=\"abcd\", 0x4)\n", i, 0x7f0000000040+i*0x80)
+	}
+	return b.String()
+}
+
+func repeatedEquivalentCallsProg(n int) string {
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		b.WriteString("test()\n")
+		b.WriteString("test$int(0x1, 0x2, 0x3, 0x4, 0x5)\n")
 	}
 	return b.String()
 }

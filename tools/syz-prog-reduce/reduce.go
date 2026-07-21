@@ -208,6 +208,7 @@ func escapingFilename(file string) bool {
 func reduceProg(p *prog.Prog, opts reduceOptions) (*prog.Prog, reduceStats) {
 	stats := reduceStats{InputCalls: len(p.Calls)}
 	motifKeys := make([]string, len(p.Calls))
+	execKeys := executableCallKeys(p)
 	motifRanks := make([]int, len(p.Calls))
 	motifCounts := make(map[string]int)
 	for i, call := range p.Calls {
@@ -223,7 +224,7 @@ func reduceProg(p *prog.Prog, opts reduceOptions) (*prog.Prog, reduceStats) {
 	// calls as possible. Mandatory calls override the configured size and live
 	// resource caps: silently losing a syscall variant is worse than exceeding a
 	// soft reduction target.
-	mandatory := mandatoryVariantCalls(p)
+	mandatory := mandatoryExecutableCalls(p, execKeys)
 	keep := make([]bool, len(p.Calls))
 	available := make(map[*prog.ResultArg]bool)
 	liveResources := make(map[*prog.ResultArg]bool)
@@ -270,7 +271,7 @@ func reduceProg(p *prog.Prog, opts reduceOptions) (*prog.Prog, reduceStats) {
 		stats.OutputCalls = 1
 	}
 	reduced := p.CloneFilter(keep)
-	stats.WeightedCalls = applyFrequencyWeights(p, reduced, keep, motifKeys)
+	stats.WeightedCalls = applyFrequencyWeights(p, reduced, keep, execKeys)
 	return reduced, stats
 }
 
@@ -287,7 +288,70 @@ func keepCall(call *prog.Call, index int, keep []bool, available, liveResources 
 	}
 }
 
-func mandatoryVariantCalls(p *prog.Prog) []bool {
+// executableCallKeys identifies calls that rerun can safely combine. Pointer
+// addresses, copied-in data, and resource identities are executable arguments;
+// differing in any of them requires retaining a separate structural call.
+func executableCallKeys(p *prog.Prog) []string {
+	resourceIDs := make(map[*prog.ResultArg]int)
+	for _, call := range p.Calls {
+		for _, res := range producedResources(call) {
+			if _, ok := resourceIDs[res]; !ok {
+				resourceIDs[res] = len(resourceIDs)
+			}
+		}
+	}
+	keys := make([]string, len(p.Calls))
+	for i, call := range p.Calls {
+		var b strings.Builder
+		b.WriteString(call.Meta.Name)
+		for _, arg := range call.Args {
+			b.WriteByte('|')
+			writeExecutableArgKey(&b, arg, resourceIDs)
+		}
+		keys[i] = b.String()
+	}
+	return keys
+}
+
+func writeExecutableArgKey(b *strings.Builder, arg prog.Arg, resourceIDs map[*prog.ResultArg]int) {
+	switch arg := arg.(type) {
+	case *prog.ConstArg:
+		fmt.Fprintf(b, "c:%x", arg.Val)
+	case *prog.ResultArg:
+		if arg.Res == nil {
+			fmt.Fprintf(b, "r:v%x", arg.Val)
+		} else {
+			fmt.Fprintf(b, "r:%d/%x+%x", resourceIDs[arg.Res], arg.OpDiv, arg.OpAdd)
+		}
+	case *prog.PointerArg:
+		fmt.Fprintf(b, "p:%x:%x(", arg.Address, arg.VmaSize)
+		if arg.Res != nil {
+			writeExecutableArgKey(b, arg.Res, resourceIDs)
+		}
+		b.WriteByte(')')
+	case *prog.DataArg:
+		if arg.Dir() == prog.DirOut {
+			fmt.Fprintf(b, "d:out:%x", arg.Size())
+		} else {
+			fmt.Fprintf(b, "d:in:%x", arg.Data())
+		}
+	case *prog.GroupArg:
+		b.WriteString("g[")
+		for _, inner := range arg.Inner {
+			writeExecutableArgKey(b, inner, resourceIDs)
+			b.WriteByte(';')
+		}
+		b.WriteByte(']')
+	case *prog.UnionArg:
+		fmt.Fprintf(b, "u:%d(", arg.Index)
+		writeExecutableArgKey(b, arg.Option, resourceIDs)
+		b.WriteByte(')')
+	default:
+		panic(fmt.Sprintf("unsupported executable argument type %T", arg))
+	}
+}
+
+func mandatoryExecutableCalls(p *prog.Prog, execKeys []string) []bool {
 	producer := make(map[*prog.ResultArg]int)
 	for i, call := range p.Calls {
 		for _, res := range producedResources(call) {
@@ -321,14 +385,15 @@ func mandatoryVariantCalls(p *prog.Prog) []bool {
 	best := make(map[string]int)
 	bestRerunnable := make(map[string]int)
 	for i, call := range p.Calls {
-		previous, ok := best[call.Meta.Name]
+		key := execKeys[i]
+		previous, ok := best[key]
 		if !ok || len(closures[i]) < len(closures[previous]) {
-			best[call.Meta.Name] = i
+			best[key] = i
 		}
 		if call.Props.FailNth == 0 {
-			previous, ok := bestRerunnable[call.Meta.Name]
+			previous, ok := bestRerunnable[key]
 			if !ok || len(closures[i]) < len(closures[previous]) {
-				bestRerunnable[call.Meta.Name] = i
+				bestRerunnable[key] = i
 			}
 		}
 	}
@@ -356,13 +421,11 @@ func mandatoryVariantCalls(p *prog.Prog) []bool {
 }
 
 // applyFrequencyWeights accounts for every original invocation in the reduced
-// program. Calls are assigned to the nearest retained instance of the same
-// motif. If reduction could not retain that motif, the nearest retained call of
-// the same syscall variant is used. mandatoryVariantCalls guarantees that the
-// fallback always exists.
-func applyFrequencyWeights(original, reduced *prog.Prog, keep []bool, motifKeys []string) int {
-	byMotif := make(map[string][]int)
-	byVariant := make(map[string][]int)
+// program. Only calls with identical executable arguments share a weight:
+// csource performs copyins once and rerun repeats the retained call verbatim.
+// mandatoryExecutableCalls guarantees a retained representative for every key.
+func applyFrequencyWeights(original, reduced *prog.Prog, keep []bool, execKeys []string) int {
+	byExecutableCall := make(map[string][]int)
 	originalToReduced := make([]int, len(original.Calls))
 	for i := range originalToReduced {
 		originalToReduced[i] = -1
@@ -372,10 +435,9 @@ func applyFrequencyWeights(original, reduced *prog.Prog, keep []bool, motifKeys 
 			continue
 		}
 		originalToReduced[originalIndex] = reducedIndex
-		name := original.Calls[originalIndex].Meta.Name
 		if original.Calls[originalIndex].Props.FailNth == 0 {
-			byMotif[motifKeys[originalIndex]] = append(byMotif[motifKeys[originalIndex]], originalIndex)
-			byVariant[name] = append(byVariant[name], originalIndex)
+			key := execKeys[originalIndex]
+			byExecutableCall[key] = append(byExecutableCall[key], originalIndex)
 		}
 		reducedIndex++
 	}
@@ -386,10 +448,7 @@ func applyFrequencyWeights(original, reduced *prog.Prog, keep []bool, motifKeys 
 			weights[originalToReduced[originalIndex]]++
 			continue
 		}
-		candidates := byMotif[motifKeys[originalIndex]]
-		if len(candidates) == 0 {
-			candidates = byVariant[call.Meta.Name]
-		}
+		candidates := byExecutableCall[execKeys[originalIndex]]
 		representative := nearestIndex(candidates, originalIndex)
 		weight := 1 + call.Props.Rerun
 		weights[originalToReduced[representative]] += weight
