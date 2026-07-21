@@ -77,6 +77,7 @@ func (*upstreamDialect) resultArrayName() string {
 }
 
 func (*upstreamDialect) rewriteExit(result []byte) []byte {
+	result = bytes.ReplaceAll(result, []byte("UNIQUE_FUNC(doexit)("), []byte("exit("))
 	return bytes.ReplaceAll(result, []byte("doexit("), []byte("exit("))
 }
 
@@ -95,7 +96,7 @@ func (*upstreamDialect) declareResults(vars []uint64) string {
 		return ""
 	}
 	var out strings.Builder
-	fmt.Fprintf(&out, "uint64 UNIQUE_VAR(ctx->r)[%v] = {", len(vars))
+	fmt.Fprintf(&out, "uint64 r[%v] = {", len(vars))
 	for index, value := range vars {
 		if index != 0 {
 			out.WriteString(", ")

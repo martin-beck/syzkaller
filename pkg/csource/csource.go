@@ -1153,20 +1153,21 @@ func (ctx *context) postProcess(result []byte) []byte {
 	result = bytes.ReplaceAll(result, []byte("NORETURN"), nil)
 	result = ctx.sourceDialect().rewriteExit(result)
 	// TODO: Figure out what would be the right replacement for doexit_thread().
+	result = bytes.ReplaceAll(result, []byte("UNIQUE_FUNC(doexit_thread)("), []byte("exit("))
 	result = bytes.ReplaceAll(result, []byte("doexit_thread("), []byte("exit("))
 	result = regexp.MustCompile(`PRINTF\(.*?\)`).ReplaceAll(result, nil)
 	result = regexp.MustCompile(`\t*debug\((.*\n)*?.*\);\n`).ReplaceAll(result, nil)
 	result = regexp.MustCompile(`\t*debug_dump_data\((.*\n)*?.*\);\n`).ReplaceAll(result, nil)
-	result = regexp.MustCompile(`\t*exitf\((.*\n)*?.*\);\n`).ReplaceAll(result, []byte("\tassert(0);\n"))
-	result = regexp.MustCompile(`\t*fail(msg)?\((.*\n)*?.*\);\n`).ReplaceAll(result, []byte("\tassert(0);\n"))
+	result = regexp.MustCompile(`\t*exitf\((.*\n)*?.*\);\n`).ReplaceAll(result, []byte("\texit(1);\n"))
+	result = regexp.MustCompile(`\t*fail(msg)?\((.*\n)*?.*\);\n`).ReplaceAll(result, []byte("\texit(1);\n"))
 
 	// Remove executor include guards.
 	result = regexp.MustCompile(`#define\s+[A-Z0-9_]*_H\s*\n`).ReplaceAll(result, nil)
 
 	// Add guarded definition for REPEAT_NUM to be used by CSB bench framework
 	// rep_def := fmt.Sprintf("#ifndef REPEAT_NUM\\n#define REPEAT_NUM %d\\n#endif", ctx.opts.RepeatTimes)
-	result = bytes.ReplaceAll(result, []byte("//%#ifndef"), []byte("#ifndef"))
-	result = bytes.ReplaceAll(result, []byte("//%#endif"), []byte("#endif"))
+	result = regexp.MustCompile(`CSB_IFNDEF\(([^)]+)\)`).ReplaceAll(result, []byte("#ifndef $1"))
+	result = bytes.ReplaceAll(result, []byte("CSB_ENDIF"), []byte("#endif"))
 
 	result = ctx.hoistIncludes(result)
 	result = ctx.removeEmptyLines(result)
