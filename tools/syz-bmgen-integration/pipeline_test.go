@@ -125,7 +125,7 @@ func testProg2C(t *testing.T, arch, input, work string) {
 				t.Fatalf("implausible generated output %s (%d bytes)", outputs[0], len(data))
 			}
 			if !variant.csb {
-				runOK(t, compiler(t), "-fsyntax-only", outputs[0])
+				runOK(t, compiler(t), cSyntaxArgs(outputs[0])...)
 			}
 		})
 	}
@@ -151,6 +151,16 @@ func TestPipelineRejectsInvalidInputs(t *testing.T) {
 	}
 	runFail(t, tool("syz-trace2syz"), "-file="+filepath.Join(t.TempDir(), "missing.strace"),
 		"-deserialize="+t.TempDir(), "-nocorpus")
+	badC := filepath.Join(t.TempDir(), "bad-c-without-extension")
+	if err := os.WriteFile(badC, []byte("not valid C\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runFail(t, compiler(t), cSyntaxArgs(badC)...)
+}
+
+func cSyntaxArgs(file string) []string {
+	// prog2c output may be extensionless, so do not rely on compiler guessing.
+	return []string{"-x", "c", "-fsyntax-only", file}
 }
 
 func assertPrograms(t *testing.T, dir, arch string) {
