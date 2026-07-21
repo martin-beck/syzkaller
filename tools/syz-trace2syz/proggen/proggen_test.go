@@ -628,6 +628,16 @@ func TestRtSigactionUsesGeneratedHandler(t *testing.T) {
 	}
 }
 
+func TestRtSigreturnUsesDeliveredSignal(t *testing.T) {
+	p := parseSingleProg(t, `rt_sigreturn() = 0`)
+	if got := strings.TrimSpace(string(p.Serialize())); got != "syz_csb_rt_sigreturn()[0]" {
+		t.Fatalf("got %q", got)
+	}
+	if _, _, err := csource.Write(p, csource.Options{Slowdown: 1, CSB: true, Trace: true}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestShortSafeCallsAreDropped(t *testing.T) {
 	p := parseSingleProg(t, `
 madvise() = 0

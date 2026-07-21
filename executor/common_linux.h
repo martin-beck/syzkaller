@@ -94,7 +94,7 @@ static long syz_csb_exit(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(false); 
 static long syz_csb_exit_group(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(true); }
 #endif
 
-#if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction
+#if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction || __NR_syz_csb_rt_sigreturn
 #include <signal.h>
 #include <string.h>
 
@@ -114,6 +114,23 @@ static long syz_csb_rt_sigaction(void)
 	if (sigaction(SIGUSR1, &action, &old) < 0)
 		return -1;
 	return sigaction(SIGUSR1, &old, 0);
+}
+
+// Returning from a delivered signal asks the kernel to perform rt_sigreturn
+// with a valid, architecture-specific frame instead of a traced stack pointer.
+static long syz_csb_rt_sigreturn(void)
+{
+	struct sigaction action;
+	struct sigaction old;
+	memset(&action, 0, sizeof(action));
+	action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
+	sigemptyset(&action.sa_mask);
+	if (sigaction(SIGUSR1, &action, &old) < 0)
+		return -1;
+	long ret = raise(SIGUSR1);
+	if (sigaction(SIGUSR1, &old, 0) < 0)
+		return -1;
+	return ret;
 }
 #endif
 
