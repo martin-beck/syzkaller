@@ -7,12 +7,21 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"github.com/google/syzkaller/sys/targets"
 )
+
+func TestTrace2SyzDefaultArch(t *testing.T) {
+	if got := flag.Lookup("arch").DefValue; got != targets.AMD64 {
+		t.Fatalf("default arch is %q, want %q", got, targets.AMD64)
+	}
+}
 
 func TestTrace2SyzDeterministicOutput(t *testing.T) {
 	tracePath := os.Getenv("SYZ_TRACE2SYZ_TEST_TRACE")

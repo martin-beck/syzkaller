@@ -41,8 +41,9 @@ var (
 	flagArgLength    = flag.Bool("argLength", false, "trim the length syscall arguments to the actual data size")
 	flagMadviseSetup = flag.Bool("madviseSetup", false,
 		"map a dedicated VMA before destructive madvise calls instead of using MADV_NORMAL")
-	flagOS   = flag.String("os", targets.Linux, "target OS")
-	flagArch = flag.String("arch", targets.ARM64, "target architecture")
+	flagOS = flag.String("os", targets.Linux, "target OS")
+	// Preserve the converter's historical amd64 behavior unless the trace architecture is explicit.
+	flagArch = flag.String("arch", targets.AMD64, "target architecture")
 )
 
 func main() {
