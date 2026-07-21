@@ -50,7 +50,7 @@ getsockopt(-1, 132, 119, 0x200005c0, [14]) = -1 EBADF (Bad file descriptor)
 
 func runTrace2Syz(t *testing.T, tracePath string) map[string][]byte {
 	t.Helper()
-	return runTrace2SyzForArch(t, tracePath, "arm64")
+	return runTrace2SyzForArch(t, tracePath, targets.AMD64)
 }
 
 func TestTrace2SyzEmbedsTargetArchMetadata(t *testing.T) {
