@@ -7,9 +7,6 @@ var (
 	// unsupportedCalls lists system calls that we should skip when parsing.
 	// Some of these are unsupported or not worth executing.
 	unsupportedCalls = map[string]bool{
-		// Process termination cannot be replayed inside a repeatable CSB operation.
-		"exit":       true,
-		"exit_group": true,
 		// Unsafe to set process properties.
 		"arch_prctl": true,
 		// Not interesting coverage
