@@ -40,6 +40,19 @@ func TestRealTracePipeline(t *testing.T) {
 	}
 }
 
+// TestLargeTraceConversion covers parser state and serialization at a size
+// representative of an application trace without making every CI run extract
+// thousands of dependency components.
+func TestLargeTraceConversion(t *testing.T) {
+	requireTools(t)
+	work := t.TempDir()
+	trace := filepath.Join(repoRoot, "traces/git_fetch_strace.log")
+	first := trace2syz(t, "amd64", trace, filepath.Join(work, "first"))
+	second := trace2syz(t, "amd64", trace, filepath.Join(work, "second"))
+	compareTrees(t, first, second)
+	assertPrograms(t, first, "amd64")
+}
+
 func testPipeline(t *testing.T, arch string) {
 	work := t.TempDir()
 	trace := filepath.Join(repoRoot, "traces/bash_ls_grep_strace.log")
