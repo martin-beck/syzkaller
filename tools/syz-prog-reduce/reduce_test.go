@@ -182,6 +182,29 @@ func TestReduceProgDoesNotCombineFailNthAndRerun(t *testing.T) {
 	}
 }
 
+func TestReduceProgKeepsAsyncCallsStructural(t *testing.T) {
+	p := testProg(t, ""+
+		"test() (async)\n"+
+		"test() (async)\n"+
+		"test()\n")
+	reduced, stats := reduceProg(p, reduceOptions{
+		MaxMotifInstances: 1,
+		IncludeConsts:     true,
+	})
+	if len(reduced.Calls) != len(p.Calls) {
+		t.Fatalf("kept %d calls, want all %d asynchronous calls structural:\n%s",
+			len(reduced.Calls), len(p.Calls), reduced.Serialize())
+	}
+	for _, call := range reduced.Calls {
+		if call.Props.Rerun != 0 {
+			t.Fatalf("asynchronous call was collapsed into rerun:\n%s", reduced.Serialize())
+		}
+	}
+	if stats.WeightedCalls != len(p.Calls) {
+		t.Fatalf("weighted calls = %d, want %d", stats.WeightedCalls, len(p.Calls))
+	}
+}
+
 func TestReduceProgHonorsLiveResourceCap(t *testing.T) {
 	p := testProg(t, ""+
 		"r0 = test$res2()\n"+

@@ -175,6 +175,24 @@ func TestSanitizeProgramOpenFlagsRecordedArchMatrix(t *testing.T) {
 	}
 }
 
+func TestSanitizeOpenWithoutDirectoryFlag(t *testing.T) {
+	p := deserializeTestProg(t, `
+r0 = openat(0xffffffffffffff9c, &(0x7f0000000000)='/tmp/file\x00', 0x0, 0x0)
+`)
+	flags := targetOpenFlagConsts(p.Target)
+	flags.Directory = 0
+	flags.HasDirectory = false
+	subdirs, _ := sanitizeOpenAt(p.Calls[0], flags, make(map[string]bool), make(map[uint64]string))
+
+	gotFlags := p.Calls[0].Args[2].(*prog.ConstArg).Val
+	if gotFlags&flags.Creat == 0 {
+		t.Fatalf("openat flags %#x do not include O_CREAT %#x", gotFlags, flags.Creat)
+	}
+	if subdirs["./tmp/file"] {
+		t.Fatalf("file path was registered as a directory: %v", subdirs)
+	}
+}
+
 func sanitizeRecordedOpenWithGenerationArch(t *testing.T, recordedArch, generationArch string) (
 	*prog.Prog, map[string]bool, map[uint64]uint64, map[uint64]string, uint64, uint64,
 ) {

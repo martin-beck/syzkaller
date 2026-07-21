@@ -390,7 +390,7 @@ func mandatoryExecutableCalls(p *prog.Prog, execKeys []string) []bool {
 		if !ok || len(closures[i]) < len(closures[previous]) {
 			best[key] = i
 		}
-		if call.Props.FailNth == 0 {
+		if call.Props.FailNth == 0 && !call.Props.Async {
 			previous, ok := bestRerunnable[key]
 			if !ok || len(closures[i]) < len(closures[previous]) {
 				bestRerunnable[key] = i
@@ -409,11 +409,11 @@ func mandatoryExecutableCalls(p *prog.Prog, execKeys []string) []bool {
 		}
 		addClosure(representative)
 	}
-	// fail_nth and rerun are mutually exclusive syzlang properties. Retain all
-	// fault-injected calls structurally so frequency weighting never needs to
-	// attach rerun to one of them.
+	// Retain fault-injected and asynchronous calls structurally. Rerun is
+	// incompatible with fail_nth and executes sequentially, so it cannot
+	// preserve either property.
 	for i, call := range p.Calls {
-		if call.Props.FailNth > 0 {
+		if call.Props.FailNth > 0 || call.Props.Async {
 			addClosure(i)
 		}
 	}
@@ -435,7 +435,7 @@ func applyFrequencyWeights(original, reduced *prog.Prog, keep []bool, execKeys [
 			continue
 		}
 		originalToReduced[originalIndex] = reducedIndex
-		if original.Calls[originalIndex].Props.FailNth == 0 {
+		if original.Calls[originalIndex].Props.FailNth == 0 && !original.Calls[originalIndex].Props.Async {
 			key := execKeys[originalIndex]
 			byExecutableCall[key] = append(byExecutableCall[key], originalIndex)
 		}
@@ -444,8 +444,8 @@ func applyFrequencyWeights(original, reduced *prog.Prog, keep []bool, execKeys [
 
 	weights := make([]int, len(reduced.Calls))
 	for originalIndex, call := range original.Calls {
-		if call.Props.FailNth > 0 {
-			weights[originalToReduced[originalIndex]]++
+		if call.Props.FailNth > 0 || call.Props.Async {
+			weights[originalToReduced[originalIndex]] += 1 + call.Props.Rerun
 			continue
 		}
 		candidates := byExecutableCall[execKeys[originalIndex]]

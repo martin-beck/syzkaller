@@ -126,19 +126,22 @@ func sanitizePathArg(call *prog.Call, argnum int) string {
 }
 
 type openFlagConsts struct {
-	Creat     uint64
-	Excl      uint64
-	Direct    uint64
-	Directory uint64
+	Creat        uint64
+	Excl         uint64
+	Direct       uint64
+	Directory    uint64
+	HasDirectory bool
 }
 
 // targetOpenFlagConsts avoids applying host or amd64 flag values to cross-architecture programs.
 func targetOpenFlagConsts(target *prog.Target) openFlagConsts {
+	directory, hasDirectory := target.ConstMap["O_DIRECTORY"]
 	return openFlagConsts{
-		Creat:     target.ConstMap["O_CREAT"],
-		Excl:      target.ConstMap["O_EXCL"],
-		Direct:    target.ConstMap["O_DIRECT"],
-		Directory: target.ConstMap["O_DIRECTORY"],
+		Creat:        target.ConstMap["O_CREAT"],
+		Excl:         target.ConstMap["O_EXCL"],
+		Direct:       target.ConstMap["O_DIRECT"],
+		Directory:    directory,
+		HasDirectory: hasDirectory,
 	}
 }
 
@@ -172,12 +175,12 @@ func sanitizeOpenAt(call *prog.Call, flags openFlagConsts, subdirs map[string](b
 
 	// adds O_CREAT if O_DIRECTORY is not specified (include O_TMPFILE)
 	a2 := call.Args[2].(*prog.ConstArg)
-	if (a2.Val & flags.Directory) != flags.Directory {
+	if !flags.HasDirectory || (a2.Val&flags.Directory) != flags.Directory {
 		a2.Val |= flags.Creat
 	}
 
 	// if it wants to open a directory, put the complete path into the list of created directories
-	if (a2.Val & flags.Directory) == flags.Directory {
+	if flags.HasDirectory && (a2.Val&flags.Directory) == flags.Directory {
 		subdirs[d1_str] = true
 	}
 
