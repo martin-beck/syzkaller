@@ -268,6 +268,9 @@ func (ctx *context) genCalls() []*prog.Call {
 	case "rt_sigaction":
 		// Handler addresses are not portable; install and restore a generated no-op handler.
 		return singleCall(ctx.genDefaultSafeCall("syz_csb_rt_sigaction"))
+	case "rt_sigreturn":
+		// A real delivered signal lets the kernel construct the architecture-specific frame.
+		return singleCall(ctx.genDefaultSafeCall("syz_csb_rt_sigreturn"))
 	default:
 		return singleCall(ctx.genCall())
 	}
