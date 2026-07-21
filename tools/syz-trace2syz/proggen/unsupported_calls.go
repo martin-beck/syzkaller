@@ -13,7 +13,6 @@ var (
 		// "getcwd": true,
 		// "getcpu": true,
 		// Cannot evaluate sigset
-		"rt_sigreturn":    true,
 		"rt_sigqueueinfo": true,
 		"rt_sigsuspend":   true,
 	}

@@ -518,6 +518,7 @@ var oses = map[string]osCommon{
 			"syz_csb_exit":          {"exit", "wait4"},
 			"syz_csb_exit_group":    {"exit_group", "wait4"},
 			"syz_csb_rt_sigaction":  {"rt_sigaction"},
+			"syz_csb_rt_sigreturn":  {"rt_sigaction", "rt_sigreturn", "tgkill"},
 			"syz_clone3":            {"clone3", "exit"},
 			"syz_clone":             {"clone", "exit"},
 			"syz_pidfd_open":        {"pidfd_open"},
