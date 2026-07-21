@@ -16,7 +16,5 @@ var (
 		"rt_sigreturn":    true,
 		"rt_sigqueueinfo": true,
 		"rt_sigsuspend":   true,
-		// Require function pointers which are not recovered by strace
-		"rt_sigaction": true,
 	}
 )
