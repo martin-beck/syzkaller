@@ -60,12 +60,42 @@ static long UNIQUE_FUNC(csb_aio_lifecycle)(enum UNIQUE_FUNC(csb_aio_op) op)
 	return ret < 0 ? ret : destroyed;
 }
 
-static long UNIQUE_FUNC(syz_csb_io_setup)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_SETUP)); }
-static long UNIQUE_FUNC(syz_csb_io_getevents)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_GETEVENTS)); }
-static long UNIQUE_FUNC(syz_csb_io_pgetevents)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_PGETEVENTS)); }
-static long UNIQUE_FUNC(syz_csb_io_destroy)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_DESTROY)); }
-static long UNIQUE_FUNC(syz_csb_io_submit)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_SUBMIT)); }
-static long UNIQUE_FUNC(syz_csb_io_cancel)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_CANCEL)); }
+#if SYZ_EXECUTOR || __NR_syz_csb_io_setup
+static long UNIQUE_FUNC(syz_csb_io_setup)(void)
+{
+	return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_SETUP));
+}
+#endif
+#if SYZ_EXECUTOR || __NR_syz_csb_io_getevents
+static long UNIQUE_FUNC(syz_csb_io_getevents)(void)
+{
+	return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_GETEVENTS));
+}
+#endif
+#if SYZ_EXECUTOR || __NR_syz_csb_io_pgetevents
+static long UNIQUE_FUNC(syz_csb_io_pgetevents)(void)
+{
+	return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_PGETEVENTS));
+}
+#endif
+#if SYZ_EXECUTOR || __NR_syz_csb_io_destroy
+static long UNIQUE_FUNC(syz_csb_io_destroy)(void)
+{
+	return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_DESTROY));
+}
+#endif
+#if SYZ_EXECUTOR || __NR_syz_csb_io_submit
+static long UNIQUE_FUNC(syz_csb_io_submit)(void)
+{
+	return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_SUBMIT));
+}
+#endif
+#if SYZ_EXECUTOR || __NR_syz_csb_io_cancel
+static long UNIQUE_FUNC(syz_csb_io_cancel)(void)
+{
+	return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_CANCEL));
+}
+#endif
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_exit || __NR_syz_csb_exit_group
@@ -94,8 +124,18 @@ static long UNIQUE_FUNC(csb_exit_lifecycle)(int group)
 	return ret == pid ? 0 : -1;
 }
 
-static long UNIQUE_FUNC(syz_csb_exit)(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(0); }
-static long UNIQUE_FUNC(syz_csb_exit_group)(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(1); }
+#if SYZ_EXECUTOR || __NR_syz_csb_exit
+static long UNIQUE_FUNC(syz_csb_exit)(void)
+{
+	return UNIQUE_FUNC(csb_exit_lifecycle)(0);
+}
+#endif
+#if SYZ_EXECUTOR || __NR_syz_csb_exit_group
+static long UNIQUE_FUNC(syz_csb_exit_group)(void)
+{
+	return UNIQUE_FUNC(csb_exit_lifecycle)(1);
+}
+#endif
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction || __NR_syz_csb_rt_sigreturn
@@ -121,6 +161,7 @@ static void UNIQUE_FUNC(csb_noop_signal_handler)(int sig)
 }
 
 // Use a generated handler because executable addresses in strace are not portable.
+#if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction
 static long UNIQUE_FUNC(syz_csb_rt_sigaction)(void)
 {
 	struct sigaction action;
@@ -139,9 +180,11 @@ static long UNIQUE_FUNC(syz_csb_rt_sigaction)(void)
 	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 	return ret;
 }
+#endif
 
 // Returning from a delivered signal asks the kernel to perform rt_sigreturn
 // with a valid, architecture-specific frame instead of a traced stack pointer.
+#if SYZ_EXECUTOR || __NR_syz_csb_rt_sigreturn
 static long UNIQUE_FUNC(syz_csb_rt_sigreturn)(void)
 {
 	struct sigaction action;
@@ -189,6 +232,7 @@ fail:
 	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 	return -1;
 }
+#endif
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_execve || __NR_syz_csb_execveat || __NR_syz_csb_fexecve
