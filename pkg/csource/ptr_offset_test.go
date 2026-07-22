@@ -52,3 +52,27 @@ func TestValInMMapRange(t *testing.T) {
 		}
 	}
 }
+
+func TestDataMmapProgOffsetsGuards(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := target.DataMmapProg()
+	exec, err := p.SerializeForExec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := target.DeserializeExec(exec, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := &context{p: p, target: target, sysTarget: targets.Get(target.OS, target.Arch), opts: Options{CSB: true}}
+	var calls strings.Builder
+	for _, call := range decoded.Calls {
+		calls.WriteString(ctx.fmtCallBody(call, false, true))
+	}
+	if got := strings.Count(calls.String(), "+PTR_OFFSET"); got != 3 {
+		t.Fatalf("data mmap and guards are not all relocated: %d offsets", got)
+	}
+}
