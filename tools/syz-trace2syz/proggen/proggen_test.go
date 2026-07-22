@@ -24,12 +24,12 @@ func TestParse(t *testing.T) {
 		output string
 	}
 	tests := []Test{
-		// A single exec string-array element is flattened to BufferType by the parser.
-		// Keep this on a supported exec path so genArray must consume that buffer.
 		{`
-execve("\x2f\x62\x69\x6e\x2f\x74\x6f\x6f\x6c", ["\x2f\x62\x69\x6e\x2f\x74\x6f\x6f\x6c"], ["\x41\x3d\x42"]) = 0
+socket(37, 1, 0) = 3
+setsockopt(3, 278, 128, "abc", 3) = 0
 `, `
-syz_csb_execve()[0]
+r0 = socket$caif_stream(0x25, 0x1, 0x0)[3]
+setsockopt$CAIFSO_REQ_PARAM(r0, 0x116, 0x80, &(0x7f0000000000)='abc', 0x3)[0]
 `,
 		},
 		{`

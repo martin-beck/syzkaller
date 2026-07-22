@@ -831,9 +831,16 @@ func (ctx *context) genArray(syzType *prog.ArrayType, dir prog.Dir, traceType pa
 			args = append(args, ctx.genArg(syzType.Elem, dir, a.Elems[i]))
 		}
 	case *parser.BufferType:
-		// The parser flattens a single-element string array to its buffer.
-		// Preserve it as one array element (for example execve argv[0]).
-		args = append(args, ctx.genArg(syzType.Elem, dir, a))
+		if ptr, ok := syzType.Elem.(*prog.PtrType); ok {
+			if _, ok := ptr.Elem.(*prog.BufferType); ok {
+				// The parser flattens a single-element string array to its buffer.
+				args = append(args, ctx.genArg(syzType.Elem, dir, a))
+				break
+			}
+		}
+		for _, val := range []byte(a.Val) {
+			args = append(args, ctx.genArg(syzType.Elem, dir, parser.Constant(val)))
+		}
 	default:
 		log.Fatalf("unsupported type for array: %#v", traceType)
 	}
