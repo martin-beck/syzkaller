@@ -132,6 +132,26 @@ func TestCSBProtectControlFDs(t *testing.T) {
 	}
 }
 
+func TestCSBProtectControlFDsIoUring(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("syz_io_uring_submit(0x0, 0x0, &(0x7f0000000000)={0x13, 0x0, 0x2})\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, csb := range []bool{true, false} {
+		src, _, err := Write(p, Options{CSB: csb, Slowdown: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(string(src), "== 19 &&"); got != csb {
+			t.Fatalf("CSB=%v: io_uring close guard present=%v", csb, got)
+		}
+	}
+}
+
 func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {
 	t.Helper()
 	// Strip text that cannot declare or reference a C identifier. In particular,

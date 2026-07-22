@@ -695,6 +695,13 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		for _, copyin := range call.Copyin {
 			ctx.copyin(w, &csumSeq, copyin)
 		}
+		if ctx.opts.CSB && call.Meta.Name == "syz_io_uring_submit" {
+			if sqe, ok := call.Args[2].(prog.ExecArgConst); ok {
+				// IORING_OP_CLOSE stores its fd at offset 4 in the SQE.
+				fmt.Fprintf(w, "\tif (*(uint8_t*)0x%x == 19 && *(int32_t*)0x%x <= 2) *(int32_t*)0x%x = -1;\n",
+					sqe.Value, sqe.Value+4, sqe.Value+4)
+			}
+		}
 
 		if call.Props.FailNth > 0 {
 			fmt.Fprintf(w, "\tinject_fault(%v);\n", call.Props.FailNth)
