@@ -692,6 +692,16 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	for _, call := range p.Calls {
 		if call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup" {
 			ioUringCreated = true
+			if call.Meta.CallName == "io_uring_setup" {
+				if params, ok := call.Args[1].(prog.ExecArgConst); ok {
+					for _, copyin := range call.Copyin {
+						flags, ok := copyin.Arg.(prog.ExecArgConst)
+						if ok && copyin.Addr == params.Value+8 && flags.Value&ctx.target.ConstMap["IORING_SETUP_NO_MMAP"] != 0 {
+							rawIOUring = true
+						}
+					}
+				}
+			}
 			if call.Index != prog.ExecNoCopyout {
 				ioUringFDs[call.Index] = true
 			}
@@ -756,10 +766,14 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				if valInMMapRange(ctx, sqe.Value) {
 					offset = "+PTR_OFFSET"
 				}
-				fmt.Fprintf(w, "\tint csb_sqe_ok_%d = NONFAILING(if (*(uint8*)(0x%x%s) == 19 && *(int32*)(0x%x%s) <= 2) *(int32*)(0x%x%s) = -1);\n",
-					ci,
-					sqe.Value, offset, sqe.Value+4, offset, sqe.Value+4, offset)
-				guardSQE = true
+				if ctx.opts.HandleSegv {
+					fmt.Fprintf(w, "\tint csb_sqe_ok_%d = NONFAILING(if (*(uint8*)(0x%x%s) == 19 && *(int32*)(0x%x%s) <= 2) *(int32*)(0x%x%s) = -1);\n",
+						ci, sqe.Value, offset, sqe.Value+4, offset, sqe.Value+4, offset)
+					guardSQE = true
+				} else {
+					fmt.Fprintf(w, "\tif (*(uint8*)(0x%x%s) == 19 && *(int32*)(0x%x%s) <= 2) *(int32*)(0x%x%s) = -1;\n",
+						sqe.Value, offset, sqe.Value+4, offset, sqe.Value+4, offset)
+				}
 			}
 		}
 

@@ -160,6 +160,7 @@ func TestCSBProtectControlFDsIoUring(t *testing.T) {
 		}
 		if csb {
 			assert.Contains(t, string(src), "+PTR_OFFSET) == 19")
+			assert.NotContains(t, string(src), " = if (")
 		}
 	}
 	p, err = target.Deserialize([]byte("syz_io_uring_submit(0x0, 0x0, 0x0)\n"), prog.NonStrict)
@@ -213,6 +214,23 @@ func TestCSBProtectRawIoUringMmap2(t *testing.T) {
 	}
 	p, err := target.Deserialize([]byte("r0 = io_uring_setup(0x1, &(0x7f0000000000))\n"+
 		"mmap2$auto(0x20000000, 0x1000, 0x3, 0x1, r0, 0x10000)\n"+
+		"io_uring_enter(r0, 0x1, 0x0, 0x0, 0x0, 0x0)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "/*to_submit=*/0")
+}
+
+func TestCSBProtectRawIoUringNoMmap(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("r0 = io_uring_setup$auto(0x1, &(0x7f0000000000)={0x0, 0x0, 0x4000})\n"+
 		"io_uring_enter(r0, 0x1, 0x0, 0x0, 0x0, 0x0)\n"), prog.NonStrict)
 	if err != nil {
 		t.Fatal(err)
