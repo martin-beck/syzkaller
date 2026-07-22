@@ -95,8 +95,29 @@ static long UNIQUE_FUNC(syz_csb_exit_group)(void) { return UNIQUE_FUNC(csb_exit_
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction || __NR_syz_csb_rt_sigreturn || __NR_syz_csb_rt_sigqueueinfo || __NR_syz_csb_rt_sigsuspend
+#include <pthread.h>
 #include <signal.h>
 #include <string.h>
+
+#if CSB
+/*#ifndef*/ CSB_SIGNAL_LOCK_DEFINED
+#define CSB_SIGNAL_LOCK_DEFINED
+static pthread_mutex_t csb_signal_lock = PTHREAD_MUTEX_INITIALIZER;
+/*#endif*/
+#define CSB_SIGNAL_LOCK csb_signal_lock
+#else
+static pthread_mutex_t UNIQUE_VAR(csb_signal_lock) = PTHREAD_MUTEX_INITIALIZER;
+#define CSB_SIGNAL_LOCK UNIQUE_VAR(csb_signal_lock)
+#endif
+
+static long UNIQUE_FUNC(csb_lock_signal)(void)
+{
+	int err = pthread_mutex_lock(&CSB_SIGNAL_LOCK);
+	if (!err)
+		return 0;
+	errno = err;
+	return -1;
+}
 
 static void UNIQUE_FUNC(csb_noop_signal_handler)(int sig)
 {
@@ -108,12 +129,16 @@ static long UNIQUE_FUNC(syz_csb_rt_sigaction)(void)
 {
 	struct sigaction action;
 	struct sigaction old;
+	if (UNIQUE_FUNC(csb_lock_signal)() < 0)
+		return -1;
 	memset(&action, 0, sizeof(action));
 	action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
 	sigemptyset(&action.sa_mask);
-	if (sigaction(SIGUSR1, &action, &old) < 0)
-		return -1;
-	return sigaction(SIGUSR1, &old, 0);
+	long ret = sigaction(SIGUSR1, &action, &old);
+	if (ret == 0)
+		ret = sigaction(SIGUSR1, &old, 0);
+	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
+	return ret;
 }
 
 // Returning from a delivered signal asks the kernel to perform rt_sigreturn
@@ -122,14 +147,19 @@ static long UNIQUE_FUNC(syz_csb_rt_sigreturn)(void)
 {
 	struct sigaction action;
 	struct sigaction old;
+	if (UNIQUE_FUNC(csb_lock_signal)() < 0)
+		return -1;
 	memset(&action, 0, sizeof(action));
 	action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
 	sigemptyset(&action.sa_mask);
-	if (sigaction(SIGUSR1, &action, &old) < 0)
+	if (sigaction(SIGUSR1, &action, &old) < 0) {
+		pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 		return -1;
+	}
 	long ret = raise(SIGUSR1);
 	if (sigaction(SIGUSR1, &old, 0) < 0)
-		return -1;
+		ret = -1;
+	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 	return ret;
 }
 
@@ -153,22 +183,28 @@ static long UNIQUE_FUNC(syz_csb_rt_sigqueueinfo)(void)
 	struct sigaction old;
 	sigset_t helper_mask;
 	sigset_t old_mask;
+	if (UNIQUE_FUNC(csb_lock_signal)() < 0)
+		return -1;
 	memset(&action, 0, sizeof(action));
 	action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
 	sigemptyset(&action.sa_mask);
-	if (sigaction(SIGUSR1, &action, &old) < 0)
+	if (sigaction(SIGUSR1, &action, &old) < 0) {
+		pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 		return -1;
+	}
 	sigemptyset(&helper_mask);
 	sigaddset(&helper_mask, SIGUSR1);
 	if (sigprocmask(SIG_UNBLOCK, &helper_mask, &old_mask) < 0) {
 		sigaction(SIGUSR1, &old, 0);
+		pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 		return -1;
 	}
-	long ret = UNIQUE_FUNC(csb_queue_owned_signal)(0);
+	long ret = UNIQUE_FUNC(csb_queue_owned_signal)(syscall(__NR_gettid));
 	if (sigprocmask(SIG_SETMASK, &old_mask, 0) < 0)
 		ret = -1;
 	if (sigaction(SIGUSR1, &old, 0) < 0)
-		return -1;
+		ret = -1;
+	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 	return ret;
 }
 
@@ -179,15 +215,22 @@ static long UNIQUE_FUNC(syz_csb_rt_sigsuspend)(void)
 	struct sigaction old_action;
 	sigset_t blocked;
 	sigset_t old_mask;
+	if (UNIQUE_FUNC(csb_lock_signal)() < 0)
+		return -1;
 	memset(&action, 0, sizeof(action));
 	action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
 	sigemptyset(&action.sa_mask);
-	if (sigaction(SIGUSR1, &action, &old_action) < 0)
+	if (sigaction(SIGUSR1, &action, &old_action) < 0) {
+		pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 		return -1;
+	}
 	sigemptyset(&blocked);
 	sigaddset(&blocked, SIGUSR1);
-	if (sigprocmask(SIG_BLOCK, &blocked, &old_mask) < 0)
+	if (sigprocmask(SIG_BLOCK, &blocked, &old_mask) < 0) {
+		sigaction(SIGUSR1, &old_action, 0);
+		pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 		return -1;
+	}
 	long ret = UNIQUE_FUNC(csb_queue_owned_signal)(syscall(__NR_gettid));
 	if (ret >= 0) {
 		sigset_t suspend_mask = old_mask;
@@ -200,6 +243,7 @@ static long UNIQUE_FUNC(syz_csb_rt_sigsuspend)(void)
 	}
 	sigprocmask(SIG_SETMASK, &old_mask, 0);
 	sigaction(SIGUSR1, &old_action, 0);
+	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 	return ret;
 }
 #endif
