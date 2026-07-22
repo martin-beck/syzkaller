@@ -387,3 +387,9 @@ func TestUnusableMarkersInArgumentsAreParsed(t *testing.T) {
 		t.Fatalf("got %d calls, want 1", len(calls))
 	}
 }
+
+func TestRestartedResumedRecordIsSkipped(t *testing.T) {
+	if !shouldSkip(`1 <... wait4 resumed>) = ? ERESTARTSYS (To be restarted if SA_RESTART is set)`) {
+		t.Fatal("resumed restart record was not skipped")
+	}
+}
