@@ -694,12 +694,17 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		}
 		if call.Meta.Name == "mmap$IORING_OFF_SQ_RING" || call.Meta.Name == "mmap$IORING_OFF_SQES" {
 			rawIOUring = true
-		} else if call.Meta.CallName == "mmap" && len(call.Args) > 5 {
+		} else if (call.Meta.CallName == "mmap" || call.Meta.CallName == "mmap2") && len(call.Args) > 5 {
 			fd, fdOK := call.Args[4].(prog.ExecArgResult)
 			offset, offsetOK := call.Args[5].(prog.ExecArgConst)
+			sqRingOffset := ctx.target.ConstMap["IORING_OFF_SQ_RING"]
+			sqesOffset := ctx.target.ConstMap["IORING_OFF_SQES"]
+			if call.Meta.CallName == "mmap2" {
+				sqRingOffset /= ctx.target.PageSize
+				sqesOffset /= ctx.target.PageSize
+			}
 			if fdOK && offsetOK && ioUringFDs[fd.Index] &&
-				(offset.Value == ctx.target.ConstMap["IORING_OFF_SQ_RING"] ||
-					offset.Value == ctx.target.ConstMap["IORING_OFF_SQES"]) {
+				(offset.Value == sqRingOffset || offset.Value == sqesOffset) {
 				rawIOUring = true
 			}
 		}
