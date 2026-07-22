@@ -735,8 +735,13 @@ func TestRtSigactionUsesGeneratedHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "syz_csb_rt_sigaction()"; !strings.Contains(string(src), want) {
+	if want := "UNIQUE_FUNC(syz_csb_rt_sigaction)"; !strings.Contains(string(src), want) {
 		t.Fatalf("generated CSB header missing %q", want)
+	}
+	for _, want := range []string{"pthread_mutex_lock", "pthread_mutex_unlock"} {
+		if !strings.Contains(string(src), want) {
+			t.Fatalf("generated helper missing %q", want)
+		}
 	}
 }
 
@@ -745,8 +750,14 @@ func TestRtSigreturnUsesDeliveredSignal(t *testing.T) {
 	if got := strings.TrimSpace(string(p.Serialize())); got != "syz_csb_rt_sigreturn()[0]" {
 		t.Fatalf("got %q", got)
 	}
-	if _, _, err := csource.Write(p, csource.Options{Slowdown: 1, CSB: true, Trace: true}); err != nil {
+	src, _, err := csource.Write(p, csource.Options{Slowdown: 1, CSB: true, Trace: true})
+	if err != nil {
 		t.Fatal(err)
+	}
+	for _, want := range []string{"SIG_UNBLOCK", "SIG_SETMASK", "pthread_mutex_lock", "pthread_mutex_unlock"} {
+		if !strings.Contains(string(src), want) {
+			t.Fatalf("generated helper missing %q", want)
+		}
 	}
 }
 

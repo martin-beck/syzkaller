@@ -73,14 +73,18 @@ static long UNIQUE_FUNC(syz_csb_io_cancel)(void) { return UNIQUE_FUNC(csb_aio_li
 #include <sys/wait.h>
 
 // Run termination in a child and reap it so a CSB operation can repeat safely.
-static long UNIQUE_FUNC(csb_exit_lifecycle)(bool group)
+static long UNIQUE_FUNC(csb_exit_lifecycle)(int group)
 {
+#if defined(__NR_fork)
 	long pid = syscall(__NR_fork);
+#else
+	long pid = syscall(__NR_clone, SIGCHLD, 0, 0, 0, 0);
+#endif
 	if (pid < 0)
 		return -1;
 	if (pid == 0) {
 		syscall(group ? __NR_exit_group : __NR_exit, 0);
-		UNIQUE_FUNC(doexit_thread)(0);
+		_exit(0);
 	}
 	int status = 0;
 	long ret;
@@ -90,13 +94,16 @@ static long UNIQUE_FUNC(csb_exit_lifecycle)(bool group)
 	return ret == pid ? 0 : -1;
 }
 
-static long UNIQUE_FUNC(syz_csb_exit)(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(false); }
-static long UNIQUE_FUNC(syz_csb_exit_group)(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(true); }
+static long UNIQUE_FUNC(syz_csb_exit)(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(0); }
+static long UNIQUE_FUNC(syz_csb_exit_group)(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(1); }
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction || __NR_syz_csb_rt_sigreturn
+#include <pthread.h>
 #include <signal.h>
 #include <string.h>
+
+static pthread_mutex_t UNIQUE_VAR(csb_signal_lock) = PTHREAD_MUTEX_INITIALIZER;
 
 static void UNIQUE_FUNC(csb_noop_signal_handler)(int sig)
 {
@@ -108,12 +115,19 @@ static long UNIQUE_FUNC(syz_csb_rt_sigaction)(void)
 {
 	struct sigaction action;
 	struct sigaction old;
+	int err = pthread_mutex_lock(&UNIQUE_VAR(csb_signal_lock));
+	if (err) {
+		errno = err;
+		return -1;
+	}
 	memset(&action, 0, sizeof(action));
 	action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
 	sigemptyset(&action.sa_mask);
-	if (sigaction(SIGUSR1, &action, &old) < 0)
-		return -1;
-	return sigaction(SIGUSR1, &old, 0);
+	long ret = sigaction(SIGUSR1, &action, &old);
+	if (ret == 0)
+		ret = sigaction(SIGUSR1, &old, 0);
+	pthread_mutex_unlock(&UNIQUE_VAR(csb_signal_lock));
+	return ret;
 }
 
 // Returning from a delivered signal asks the kernel to perform rt_sigreturn
@@ -124,22 +138,31 @@ static long UNIQUE_FUNC(syz_csb_rt_sigreturn)(void)
 	struct sigaction old;
 	sigset_t helper_mask;
 	sigset_t old_mask;
+	int err = pthread_mutex_lock(&UNIQUE_VAR(csb_signal_lock));
+	if (err) {
+		errno = err;
+		return -1;
+	}
 	memset(&action, 0, sizeof(action));
 	action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
 	sigemptyset(&action.sa_mask);
-	if (sigaction(SIGUSR1, &action, &old) < 0)
+	if (sigaction(SIGUSR1, &action, &old) < 0) {
+		pthread_mutex_unlock(&UNIQUE_VAR(csb_signal_lock));
 		return -1;
+	}
 	sigemptyset(&helper_mask);
 	sigaddset(&helper_mask, SIGUSR1);
 	if (sigprocmask(SIG_UNBLOCK, &helper_mask, &old_mask) < 0) {
 		sigaction(SIGUSR1, &old, 0);
+		pthread_mutex_unlock(&UNIQUE_VAR(csb_signal_lock));
 		return -1;
 	}
 	long ret = raise(SIGUSR1);
 	if (sigprocmask(SIG_SETMASK, &old_mask, 0) < 0)
 		ret = -1;
 	if (sigaction(SIGUSR1, &old, 0) < 0)
-		return -1;
+		ret = -1;
+	pthread_mutex_unlock(&UNIQUE_VAR(csb_signal_lock));
 	return ret;
 }
 #endif
