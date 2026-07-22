@@ -257,7 +257,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		excludeIdices = append(excludeIdices, netSrvCloseIdxs...)
 	}
 
-	calls, vars, err := ctx.generateProgCalls(ctx.p, ctx.opts.Trace, ctx.opts.CallComments, netSrvListenIdxs, false)
+	calls, vars, resultResets, err := ctx.generateProgCalls(ctx.p, ctx.opts.Trace, ctx.opts.CallComments, netSrvListenIdxs)
 	if err != nil {
 		return nil, metaData, err
 	}
@@ -267,7 +267,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	// for a program and always very similar. Comments on these provide
 	// little-to-no additional context that can't be inferred from looking at
 	// the call arguments directly, and just make the source longer.
-	mmapCalls, _, err := ctx.generateProgCalls(mmapProg, false, false, []int{}, true)
+	mmapCalls, _, _, err := ctx.generateProgCalls(mmapProg, false, false, []int{})
 	if err != nil {
 		return nil, metaData, err
 	}
@@ -327,15 +327,6 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	sandboxFunc := generateSandboxFunctionSignature(ctx.opts.Sandbox, ctx.opts.SandboxArg, ctx)
 
 	results := varsBuf.String()
-	resultResets := ""
-	if ctx.opts.CSB {
-		resetBuf := new(bytes.Buffer)
-		for i, value := range vars {
-			fmt.Fprintf(resetBuf, "\tUNIQUE_VAR(ctx->r)[%d] = 0x%x;\n", i, value)
-		}
-		resultResets = resetBuf.String()
-	}
-
 	// initialization of resource array in reg function
 	var callsNetSrvReg []string
 	if len(vars) > 0 {
@@ -361,6 +352,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 
 	// use all but reg and dereg syscalls
 	var callsNetSrvBody []string
+	var asyncResultResets []string
 	for idx, call := range calls {
 		if slices.Contains(netSrvListenIdxs, idx) {
 			continue
@@ -372,8 +364,14 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 			continue
 		}
 		callsNetSrvBody = append(callsNetSrvBody, call)
+		if ctx.p.Calls[idx].Props.Async {
+			asyncResultResets = append(asyncResultResets, resultResets[idx])
+		} else {
+			asyncResultResets = append(asyncResultResets, "")
+		}
 	}
 	syscallsBody := ctx.generateSyscalls(callsNetSrvBody, len(vars) != 0)
+	resultResetsCode := generateResultResetSwitch(asyncResultResets)
 
 	// Get number of listen annotations
 	var callsNetSrvDereg []string
@@ -399,7 +397,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		"SYSCALL_DEFINES":        ctx.generateSyscallDefines(),
 		"SANDBOX_FUNC":           sandboxFunc,
 		"RESULTS":                results,
-		"RESULT_RESETS":          resultResets,
+		"RESULT_RESETS":          resultResetsCode,
 		"SYSCALLS":               syscalls,
 		"SYSCALLS_NET_SRV_REG":   syscallsNetSrvReg,
 		"SYSCALLS_NET_SRV_DEREG": syscallsNetSrvDereg,
@@ -617,8 +615,8 @@ func generateComment(call *prog.Call) string {
 	return linesToCStyleComment(lines)
 }
 
-func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool, initIndices []int,
-	dataMmap bool) ([]string, []uint64, error) {
+func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool,
+	initIndices []int) ([]string, []uint64, []string, error) {
 	msgSizes := make([]uint64, len(p.Calls))
 	var comments []string
 	if addComments {
@@ -681,19 +679,20 @@ func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool, ini
 
 	exec, err := p.SerializeForExec()
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to serialize program: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to serialize program: %w", err)
 	}
 	decoded, err := ctx.target.DeserializeExec(exec, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	calls, vars := ctx.generateCalls(decoded, trace, addComments, comments, msgSizes, initIndices, dataMmap)
-	return calls, vars, nil
+	calls, vars, resultResets := ctx.generateCalls(decoded, trace, addComments, comments, msgSizes, initIndices)
+	return calls, vars, resultResets, nil
 }
 
 func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
-	callComments []string, msgSizes []uint64, initIndices []int, dataMmap bool) ([]string, []uint64) {
+	callComments []string, msgSizes []uint64, initIndices []int) ([]string, []uint64, []string) {
 	var calls []string
+	var resultResets []string
 	csumSeq := 0
 	for ci, call := range p.Calls {
 		w := new(bytes.Buffer)
@@ -716,6 +715,9 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		if slices.Contains(initIndices, ci) {
 			initCall = true
 		}
+		resetBuf := new(bytes.Buffer)
+		ctx.invalidateCSBResults(resetBuf, call, resCopyout, p.Vars)
+		w.Write(resetBuf.Bytes())
 		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall)
 
 		if call.Props.Rerun > 0 {
@@ -729,6 +731,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			ctx.copyout(w, call, resCopyout)
 		}
 		calls = append(calls, w.String())
+		resultResets = append(resultResets, resetBuf.String())
 
 		// get resource indices for filedescriptor related calls
 		if resCopyout {
@@ -821,7 +824,36 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 
 	NetOpsFDsAccept = tmpOps
 
-	return calls, p.Vars
+	return calls, p.Vars, resultResets
+}
+
+func (ctx *context) invalidateCSBResults(w *bytes.Buffer, call prog.ExecCall, resCopyout bool, defaults []uint64) {
+	if !ctx.opts.CSB {
+		return
+	}
+	if resCopyout {
+		fmt.Fprintf(w, "\t%v[%v] = 0x%x;\n", ctx.resultArrayName(), call.Index, defaults[call.Index])
+	}
+	for _, copyout := range call.Copyout {
+		fmt.Fprintf(w, "\t%v[%v] = 0x%x;\n", ctx.resultArrayName(), copyout.Index, defaults[copyout.Index])
+	}
+}
+
+func generateResultResetSwitch(resets []string) string {
+	buf := new(bytes.Buffer)
+	for call, reset := range resets {
+		if reset == "" {
+			continue
+		}
+		if buf.Len() == 0 {
+			buf.WriteString("\tswitch (call) {\n")
+		}
+		fmt.Fprintf(buf, "\tcase %d:\n%s\t\tbreak;\n", call, strings.ReplaceAll(reset, "\t", "\t\t"))
+	}
+	if buf.Len() != 0 {
+		buf.WriteString("\t}\n")
+	}
+	return buf.String()
 }
 
 func loopIdenticalCalls(calls []string, minRun int) []string {

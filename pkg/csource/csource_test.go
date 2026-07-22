@@ -140,8 +140,7 @@ func TestCSBInvalidatesResultsBeforeCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Less(t, strings.Index(string(src), "UNIQUE_VAR(ctx->r)[0] = 0xffffffffffffffff;"),
-		strings.Index(string(src), "UNIQUE_FUNC(event_set)(&th->ready)"))
+	assert.Contains(t, string(src), "case 0:\n\t\tUNIQUE_VAR(ctx->r)[0] = 0xffffffffffffffff;\n\t\tbreak;")
 	src, _, err = Write(p, Options{Slowdown: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -495,7 +494,7 @@ syscall(SYS_csource8, /*num=*/(intptr_t)-1);
 			// Disable comment generation, as it's not the focus of these tests.
 			// This simplifies the expected output. For tests covering comments, see
 			// /pkg/csource/syscall_generation_test.go.
-			calls, _, err := ctx.generateProgCalls(p, false, false, nil, false)
+			calls, _, _, err := ctx.generateProgCalls(p, false, false, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
