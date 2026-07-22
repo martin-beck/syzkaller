@@ -690,14 +690,26 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	ioUringFDs := make(map[uint64]bool)
 	rawIOUringFDs := make(map[uint64]bool)
 	rawIOUringConstants := make(map[int32]bool)
+	rawUnknownIOUring := false
 	// Async calls can execute after later mappings, so collect their potentially raw rings up front.
 	futureRawIOUringFDs := make(map[uint64]bool)
 	futureRawIOUringConstants := make(map[int32]bool)
+	futureRawUnknownIOUring := false
 	hasIOUringSetup := false
 	for _, call := range p.Calls {
 		if call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup" {
 			hasIOUringSetup = true
-			break
+			if call.Meta.CallName == "io_uring_setup" && call.Index == prog.ExecNoCopyout {
+				if params, ok := call.Args[1].(prog.ExecArgConst); ok {
+					for _, copyin := range call.Copyin {
+						flags, ok := copyin.Arg.(prog.ExecArgConst)
+						if ok && copyin.Addr == params.Value+8 &&
+							flags.Value&ctx.target.ConstMap["IORING_SETUP_NO_MMAP"] != 0 {
+							futureRawUnknownIOUring = true
+						}
+					}
+				}
+			}
 		}
 	}
 	for _, call := range p.Calls {
@@ -775,6 +787,9 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 							if call.Index != prog.ExecNoCopyout {
 								rawIOUringFDs[call.Index] = true
 								futureRawIOUringFDs[call.Index] = true
+							} else {
+								rawUnknownIOUring = true
+								futureRawUnknownIOUring = true
 							}
 						}
 					}
@@ -909,19 +924,21 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		rawRing := false
 		if call.Meta.CallName == "io_uring_enter" && len(call.Args) != 0 {
 			fds, constants := rawIOUringFDs, rawIOUringConstants
+			unknown := rawUnknownIOUring
 			if call.Props.Async {
 				fds, constants = futureRawIOUringFDs, futureRawIOUringConstants
+				unknown = futureRawUnknownIOUring
 			}
 			if fd, ok := call.Args[0].(prog.ExecArgResult); ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
 				rawRing = fds[fd.Index]
 			} else if fd, ok := call.Args[0].(prog.ExecArgConst); ok {
-				rawRing = constants[int32(fd.Value)]
+				rawRing = constants[int32(fd.Value)] || unknown
 			}
 			if flags, ok := call.Args[3].(prog.ExecArgConst); ok &&
 				flags.Value&ctx.target.ConstMap["IORING_ENTER_REGISTERED_RING"] != 0 {
 				// A registered-ring enter carries an index rather than a descriptor, so block it
 				// whenever its execution window contains a raw ring.
-				rawRing = len(fds) != 0 || len(constants) != 0
+				rawRing = len(fds) != 0 || len(constants) != 0 || unknown
 			}
 		}
 		if ctx.opts.CSB && rawRing {

@@ -399,6 +399,23 @@ func TestCSBProtectRawIoUringFromConstantDup2(t *testing.T) {
 	assert.Contains(t, string(src), "/*to_submit=*/0")
 }
 
+func TestCSBProtectNoCopyoutNoMmapIoUring(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("io_uring_setup$auto(0x1, &(0x7f0000000000)={0x0, 0x0, 0x4000})\n"+
+		"io_uring_enter(0x3, 0x1, 0x0, 0x0, 0x0, 0x0)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "/*to_submit=*/0")
+}
+
 func TestCSBProtectRawIoUringMmap2(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.I386)
 	if err != nil {
