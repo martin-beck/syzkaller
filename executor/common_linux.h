@@ -62,8 +62,15 @@ static long UNIQUE_FUNC(csb_aio_lifecycle)(enum UNIQUE_FUNC(csb_aio_op) op)
 			ret = syscall(__NR_io_cancel, ctx, &cb, &event);
 		else if (ret == 1)
 			ret = syscall(__NR_io_getevents, ctx, 0, 1, &event, &timeout);
-		if (op == UNIQUE_FUNC(CSB_AIO_CANCEL) && ret < 0 && errno == EINPROGRESS)
-			ret = 0;
+		if (op == UNIQUE_FUNC(CSB_AIO_CANCEL) && ret < 0 && errno == EINPROGRESS) {
+			uint64 one = 1;
+			struct timespec cancel_timeout = {.tv_nsec = 10 * 1000 * 1000};
+			// Wake and reap the deferred poll cancellation before destroying its context.
+			if (write(cb.aio_fildes, &one, sizeof(one)) == sizeof(one))
+				ret = syscall(__NR_io_getevents, ctx, 1, 1, &event, &cancel_timeout);
+			if (ret >= 0)
+				ret = 0;
+		}
 		if (cb.aio_fildes >= 0)
 			close(cb.aio_fildes);
 	}
