@@ -664,10 +664,10 @@ static void UNIQUE_FUNC(loop)(void)
 	fprintf(stderr, "### start\n");
 #endif
 	int i, call, thread;
+	for (call = 0; call < /*{{{NUM_CALLS}}}*/; call++) {
 #if CSB
 /*{{{RESULT_RESETS}}}*/
 #endif
-	for (call = 0; call < /*{{{NUM_CALLS}}}*/; call++) {
 		for (thread = 0; thread < (int)(sizeof(threads) / sizeof(threads[0])); thread++) {
 			struct thread_t* th = &threads[thread];
 			if (!th->created) {

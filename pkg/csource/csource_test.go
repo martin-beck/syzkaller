@@ -140,7 +140,8 @@ func TestCSBInvalidatesResultsBeforeCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Contains(t, string(src), "case 0:\n\t\tUNIQUE_VAR(ctx->r)[0] = 0xffffffffffffffff;\n\t\tbreak;")
+	assert.Contains(t, string(src), "for (call = 0; call < 5; call++) {\n\tswitch (call) {\n"+
+		"\tcase 0:\n\t\tUNIQUE_VAR(ctx->r)[0] = 0xffffffffffffffff;\n\t\tbreak;")
 	src, _, err = Write(p, Options{Slowdown: 1})
 	if err != nil {
 		t.Fatal(err)
