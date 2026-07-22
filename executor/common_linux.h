@@ -99,6 +99,7 @@ static long UNIQUE_FUNC(syz_csb_exit_group)(void) { return UNIQUE_FUNC(csb_exit_
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction || __NR_syz_csb_rt_sigreturn
+#include <errno.h>
 #include <pthread.h>
 #include <signal.h>
 #include <string.h>
@@ -147,10 +148,21 @@ static long UNIQUE_FUNC(syz_csb_rt_sigreturn)(void)
 	struct sigaction old;
 	sigset_t helper_mask;
 	sigset_t old_mask;
+	sigset_t pending;
+	int is_pending;
+	long ret;
 	int err = pthread_mutex_lock(&CSB_SIGNAL_LOCK);
 	if (err) {
 		errno = err;
 		return -1;
+	}
+	if (sigpending(&pending) < 0)
+		goto fail;
+	is_pending = sigismember(&pending, SIGUSR1);
+	if (is_pending != 0) {
+		if (is_pending > 0)
+			errno = EAGAIN;
+		goto fail;
 	}
 	memset(&action, 0, sizeof(action));
 	action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
@@ -166,13 +178,16 @@ static long UNIQUE_FUNC(syz_csb_rt_sigreturn)(void)
 		pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 		return -1;
 	}
-	long ret = raise(SIGUSR1);
+	ret = raise(SIGUSR1);
 	if (sigprocmask(SIG_SETMASK, &old_mask, 0) < 0)
 		ret = -1;
 	if (sigaction(SIGUSR1, &old, 0) < 0)
 		ret = -1;
 	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 	return ret;
+fail:
+	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
+	return -1;
 }
 #endif
 

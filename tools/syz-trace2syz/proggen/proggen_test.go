@@ -755,7 +755,9 @@ func TestRtSigreturnUsesDeliveredSignal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"SIG_UNBLOCK", "SIG_SETMASK", "pthread_mutex_lock", "pthread_mutex_unlock"} {
+	for _, want := range []string{
+		"sigpending", "EAGAIN", "SIG_UNBLOCK", "SIG_SETMASK", "pthread_mutex_lock", "pthread_mutex_unlock",
+	} {
 		if !strings.Contains(string(src), want) {
 			t.Fatalf("generated helper missing %q", want)
 		}
