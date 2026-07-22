@@ -714,7 +714,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			rawMapping = ok && (offset.Value == sqRingOffset || offset.Value == sqesOffset)
 		}
 		if rawMapping && len(call.Args) > 4 {
-			if fd, ok := call.Args[4].(prog.ExecArgResult); ok && fd.DivOp <= 1 && fd.AddOp == 0 {
+			if fd, ok := call.Args[4].(prog.ExecArgResult); ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
 				futureRawIOUringFDs[fd.Index] = true
 			} else if fd, ok := call.Args[4].(prog.ExecArgConst); ok && int32(fd.Value) > 2 {
 				futureRawIOUringConstants[int32(fd.Value)] = true
@@ -727,21 +727,21 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			fcntlCommand(call, ctx.target.ConstMap["F_DUPFD"]) ||
 			fcntlCommand(call, ctx.target.ConstMap["F_DUPFD_CLOEXEC"])
 		if duplicate && call.Index != prog.ExecNoCopyout && futureRawIOUringFDs[call.Index] {
-			if fd, ok := call.Args[0].(prog.ExecArgResult); ok && fd.DivOp <= 1 && fd.AddOp == 0 {
+			if fd, ok := call.Args[0].(prog.ExecArgResult); ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
 				futureRawIOUringFDs[fd.Index] = true
 			}
 		}
 		if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
-			if dst, ok := call.Args[1].(prog.ExecArgResult); ok && dst.DivOp <= 1 && dst.AddOp == 0 &&
+			if dst, ok := call.Args[1].(prog.ExecArgResult); ok && dst.DivOp <= 1 && uint32(dst.AddOp) == 0 &&
 				futureRawIOUringFDs[dst.Index] {
-				if src, ok := call.Args[0].(prog.ExecArgResult); ok && src.DivOp <= 1 && src.AddOp == 0 {
+				if src, ok := call.Args[0].(prog.ExecArgResult); ok && src.DivOp <= 1 && uint32(src.AddOp) == 0 {
 					futureRawIOUringFDs[src.Index] = true
 				}
 			}
 		}
 		if call.Meta.CallName == "pidfd_getfd" && call.Index != prog.ExecNoCopyout &&
 			futureRawIOUringFDs[call.Index] && len(call.Args) > 1 {
-			if src, ok := call.Args[1].(prog.ExecArgResult); ok && src.DivOp <= 1 && src.AddOp == 0 {
+			if src, ok := call.Args[1].(prog.ExecArgResult); ok && src.DivOp <= 1 && uint32(src.AddOp) == 0 {
 				futureRawIOUringFDs[src.Index] = true
 			}
 		}
@@ -775,7 +775,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				ioUringFDs[call.Index] = true
 			}
 			if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
-				if fd, ok := call.Args[1].(prog.ExecArgResult); ok && fd.DivOp <= 1 && fd.AddOp == 0 {
+				if fd, ok := call.Args[1].(prog.ExecArgResult); ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
 					ioUringFDs[fd.Index] = true
 				}
 			}
@@ -785,19 +785,19 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				rawIOUringFDs[call.Index] = true
 			}
 			if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
-				if fd, ok := call.Args[1].(prog.ExecArgResult); ok && fd.DivOp <= 1 && fd.AddOp == 0 {
+				if fd, ok := call.Args[1].(prog.ExecArgResult); ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
 					rawIOUringFDs[fd.Index] = true
 				}
 			}
 		}
 		if call.Meta.CallName == "pidfd_getfd" && call.Index != prog.ExecNoCopyout && len(call.Args) > 1 {
-			if src, ok := call.Args[1].(prog.ExecArgResult); ok && src.DivOp <= 1 && src.AddOp == 0 &&
+			if src, ok := call.Args[1].(prog.ExecArgResult); ok && src.DivOp <= 1 && uint32(src.AddOp) == 0 &&
 				rawIOUringFDs[src.Index] {
 				rawIOUringFDs[call.Index] = true
 			}
 		}
 		if call.Meta.Name == "mmap$IORING_OFF_SQ_RING" || call.Meta.Name == "mmap$IORING_OFF_SQES" {
-			if fd, ok := call.Args[4].(prog.ExecArgResult); ok && fd.DivOp <= 1 && fd.AddOp == 0 {
+			if fd, ok := call.Args[4].(prog.ExecArgResult); ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
 				rawIOUringFDs[fd.Index] = true
 			} else if fd, ok := call.Args[4].(prog.ExecArgConst); ok {
 				rawIOUringConstants[int32(fd.Value)] = true
@@ -812,12 +812,12 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				sqRingOffset /= ctx.target.PageSize
 				sqesOffset /= ctx.target.PageSize
 			}
-			knownRingFD := (fdOK && fd.DivOp <= 1 && fd.AddOp == 0 && ioUringFDs[fd.Index]) ||
+			knownRingFD := (fdOK && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 && ioUringFDs[fd.Index]) ||
 				(fdOK && ioUringCreated) ||
 				(constantFD && int32(constant.Value) > 2 && ioUringCreated)
 			if knownRingFD && offsetOK &&
 				(offset.Value == sqRingOffset || offset.Value == sqesOffset) {
-				if fdOK && fd.DivOp <= 1 && fd.AddOp == 0 {
+				if fdOK && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
 					rawIOUringFDs[fd.Index] = true
 				} else if constantFD {
 					rawIOUringConstants[int32(constant.Value)] = true
@@ -878,7 +878,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			if call.Props.Async {
 				fds, constants = futureRawIOUringFDs, futureRawIOUringConstants
 			}
-			if fd, ok := call.Args[0].(prog.ExecArgResult); ok && fd.DivOp <= 1 && fd.AddOp == 0 {
+			if fd, ok := call.Args[0].(prog.ExecArgResult); ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
 				rawRing = fds[fd.Index]
 			} else if fd, ok := call.Args[0].(prog.ExecArgConst); ok {
 				rawRing = constants[int32(fd.Value)]
@@ -1017,7 +1017,7 @@ func ioUringResultArg(call prog.ExecCall, fds map[uint64]bool) bool {
 		return false
 	}
 	fd, ok := call.Args[0].(prog.ExecArgResult)
-	return ok && fd.DivOp <= 1 && fd.AddOp == 0 && fds[fd.Index]
+	return ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 && fds[fd.Index]
 }
 
 func fcntlCommand(call prog.ExecCall, command uint64) bool {
