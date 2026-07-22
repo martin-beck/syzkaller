@@ -669,6 +669,13 @@ func TestSchedSetaffinityUsesCurrentMask(t *testing.T) {
 	os.Remove(bin)
 }
 
+func TestFailedSchedSetaffinityIsDropped(t *testing.T) {
+	p := parseSingleProg(t, `sched_setaffinity(0, 0, NULL) = -1 EINVAL (Invalid argument)`)
+	if len(p.Calls) != 0 {
+		t.Fatalf("failed affinity call must be dropped:\n%s", p.Serialize())
+	}
+}
+
 func TestFailedTaskCreationIsDropped(t *testing.T) {
 	p := parseSingleProg(t, `
 clone(child_stack=NULL, flags=0x7c021000|17) = -1 EPERM (Operation not permitted)

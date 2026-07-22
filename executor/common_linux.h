@@ -6015,6 +6015,7 @@ static long syz_csb_vfork_wait(void)
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_reapply_affinity
+#include <errno.h>
 #include <sched.h>
 
 static long UNIQUE_FUNC(syz_reapply_affinity)(void)
