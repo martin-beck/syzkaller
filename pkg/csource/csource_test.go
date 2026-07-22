@@ -99,7 +99,7 @@ func TestCSBReappliesCurrentAffinity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+	src, _, err := Write(p, Options{Slowdown: 1, Repeat: true, Sandbox: "csb"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,6 +107,36 @@ func TestCSBReappliesCurrentAffinity(t *testing.T) {
 	assert.Contains(t, string(src), "static __thread cpu_set_t* mask = NULL")
 	assert.Contains(t, string(src), "mask = CPU_ALLOC(cpus)")
 	assert.Contains(t, string(src), "sched_getaffinity(0, mask_size, mask)")
+}
+
+func TestCSBInvalidatesResultsBeforeCalls(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte(
+		"r0 = openat(0xffffffffffffff9c, &(0x7f0000000000)='file\\x00', 0x0, 0x0)\n"+
+			"close(r0)\n"+
+			"pipe(&(0x7f0000000040)={<r1=>0x0, <r2=>0x0})\n"+
+			"close(r1)\nclose(r2)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"UNIQUE_VAR(ctx->r)[0] = -1;\n\tres = syscall(__NR_openat",
+		"UNIQUE_VAR(ctx->r)[1] = -1;\n\tUNIQUE_VAR(ctx->r)[2] = -1;\n\tres = syscall(__NR_pipe",
+	} {
+		assert.Contains(t, string(src), want)
+	}
+	src, _, err = Write(p, Options{Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.NotContains(t, string(src), "r[0] = -1;")
 }
 
 func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {
