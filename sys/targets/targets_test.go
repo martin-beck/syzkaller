@@ -5,10 +5,18 @@ package targets
 
 import "testing"
 
-func TestCSBSigreturnIsNotProbed(t *testing.T) {
-	for _, dep := range Get(Linux, AMD64).PseudoSyscallDeps["syz_csb_rt_sigreturn"] {
-		if dep == "rt_sigreturn" {
-			t.Fatal("rt_sigreturn cannot be invoked without a kernel signal frame")
+func TestUnsafeCSBSyscallsAreNotProbed(t *testing.T) {
+	unsafe := map[string]map[string]bool{
+		"syz_csb_exit":         {"exit": true},
+		"syz_csb_exit_group":   {"exit_group": true},
+		"syz_csb_rt_sigreturn": {"rt_sigreturn": true},
+	}
+	for name, calls := range unsafe {
+		deps := Get(Linux, AMD64).PseudoSyscallDeps[name]
+		for _, dep := range deps {
+			if calls[dep] {
+				t.Errorf("%s must not probe %s directly", name, dep)
+			}
 		}
 	}
 }
