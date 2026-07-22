@@ -860,6 +860,7 @@ func TestSkipOnlyLeadingBootstrapExec(t *testing.T) {
 		t.Fatalf("child retained calls after its successful workload exec:\n%s", child)
 	}
 	leading := &parser.Trace{Calls: []*parser.Syscall{
+		parser.NewSyscall(1, "execve", nil, -1, false, false),
 		parser.NewSyscall(1, "execve", nil, 0, false, false),
 		parser.NewSyscall(1, "getpid", nil, 1, false, false),
 	}}

@@ -159,6 +159,11 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 	fmt.Fprintf(os.Stderr, "Parsing syscalls into syzlang\n")
 	numCalls := len(trace.Calls)
 	// Skip only a leading bootstrap exec; later successful execs are workload.
+	bootstrapSequence := skipBootstrapExec && len(trace.Calls) != 0
+	var rootTID int64
+	if bootstrapSequence {
+		rootTID = trace.Calls[0].Pid
+	}
 	terminatedTIDs := make(map[int64]bool)
 	for sIdx, sCall := range trace.Calls {
 		if sIdx%1000 == 0 {
@@ -175,8 +180,14 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 		if terminatedTIDs[sCall.Pid] {
 			continue
 		}
-		if skipBootstrapExec && sIdx == 0 && isSuccessfulExec(sCall) {
-			continue
+		isExec := sCall.CallName == "execve" || sCall.CallName == "execveat"
+		if bootstrapSequence {
+			if sCall.Pid != rootTID || !isExec {
+				bootstrapSequence = false
+			} else if isSuccessfulExec(sCall) {
+				bootstrapSequence = false
+				continue
+			}
 		}
 		if shouldSkip(sCall) {
 			continue
