@@ -75,11 +75,7 @@ static long UNIQUE_FUNC(syz_csb_io_cancel)(void) { return UNIQUE_FUNC(csb_aio_li
 // Run termination in a child and reap it so a CSB operation can repeat safely.
 static long UNIQUE_FUNC(csb_exit_lifecycle)(int group)
 {
-#if defined(__NR_fork)
-	long pid = syscall(__NR_fork);
-#else
-	long pid = syscall(__NR_clone, SIGCHLD, 0, 0, 0, 0);
-#endif
+	long pid = fork();
 	if (pid < 0)
 		return -1;
 	if (pid == 0) {
