@@ -60,12 +60,24 @@ static long UNIQUE_FUNC(csb_aio_lifecycle)(enum UNIQUE_FUNC(csb_aio_op) op)
 	return ret < 0 ? ret : destroyed;
 }
 
+#if SYZ_EXECUTOR || __NR_syz_csb_io_setup
 static long UNIQUE_FUNC(syz_csb_io_setup)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_SETUP)); }
+#endif
+#if SYZ_EXECUTOR || __NR_syz_csb_io_getevents
 static long UNIQUE_FUNC(syz_csb_io_getevents)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_GETEVENTS)); }
+#endif
+#if SYZ_EXECUTOR || __NR_syz_csb_io_pgetevents
 static long UNIQUE_FUNC(syz_csb_io_pgetevents)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_PGETEVENTS)); }
+#endif
+#if SYZ_EXECUTOR || __NR_syz_csb_io_destroy
 static long UNIQUE_FUNC(syz_csb_io_destroy)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_DESTROY)); }
+#endif
+#if SYZ_EXECUTOR || __NR_syz_csb_io_submit
 static long UNIQUE_FUNC(syz_csb_io_submit)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_SUBMIT)); }
+#endif
+#if SYZ_EXECUTOR || __NR_syz_csb_io_cancel
 static long UNIQUE_FUNC(syz_csb_io_cancel)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_CANCEL)); }
+#endif
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_exit || __NR_syz_csb_exit_group
@@ -90,8 +102,12 @@ static long UNIQUE_FUNC(csb_exit_lifecycle)(int group)
 	return ret == pid ? 0 : -1;
 }
 
+#if SYZ_EXECUTOR || __NR_syz_csb_exit
 static long UNIQUE_FUNC(syz_csb_exit)(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(0); }
+#endif
+#if SYZ_EXECUTOR || __NR_syz_csb_exit_group
 static long UNIQUE_FUNC(syz_csb_exit_group)(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(1); }
+#endif
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_execve || __NR_syz_csb_execveat || __NR_syz_csb_fexecve
