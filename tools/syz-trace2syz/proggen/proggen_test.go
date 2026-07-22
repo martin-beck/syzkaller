@@ -730,6 +730,13 @@ func TestAIOCallsUseBoundedLifecycles(t *testing.T) {
 	}
 }
 
+func TestFailedAIOCallsAreDropped(t *testing.T) {
+	p := parseSingleProg(t, `io_setup() = -1`)
+	if len(p.Calls) != 0 {
+		t.Fatalf("failed AIO call must be dropped:\n%s", p.Serialize())
+	}
+}
+
 func TestShortSafeCallsAreDropped(t *testing.T) {
 	p := parseSingleProg(t, `
 madvise() = 0
@@ -845,8 +852,8 @@ func TestExitCallsUseBoundedLifecycles(t *testing.T) {
 	}
 	trace := &parser.Trace{Calls: []*parser.Syscall{
 		parser.NewSyscall(1, "execve", nil, 0, false, false),
-		parser.NewSyscall(2, "exit", []parser.IrType{parser.Constant(0)}, 0, false, false),
-		parser.NewSyscall(3, "exit_group", []parser.IrType{parser.Constant(0)}, 0, false, false),
+		parser.NewSyscall(2, "exit", []parser.IrType{parser.Constant(0)}, -1, false, false),
+		parser.NewSyscall(3, "exit_group", []parser.IrType{parser.Constant(0)}, -1, false, false),
 	}}
 
 	got := string(genProg(trace, target, false, false, false, false).Serialize())
