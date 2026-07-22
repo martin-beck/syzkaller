@@ -45,7 +45,7 @@ static long UNIQUE_FUNC(csb_aio_lifecycle)(enum UNIQUE_FUNC(csb_aio_op) op)
 		memset(&cb, 0, sizeof(cb));
 		cb.aio_lio_opcode = IOCB_CMD_PWRITE;
 		cb.aio_fildes = open("/dev/null", O_WRONLY);
-		cb.aio_buf = (uint64)&byte;
+		cb.aio_buf = (uint64)(uintptr_t)&byte;
 		cb.aio_nbytes = 1;
 		struct iocb* list[] = {&cb};
 		ret = syscall(__NR_io_submit, ctx, 1, list);
