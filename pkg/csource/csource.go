@@ -731,6 +731,18 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				futureRawIOUringFDs[fd.Index] = true
 			}
 		}
+		if duplicate && len(call.Args) != 0 {
+			if src, ok := call.Args[0].(prog.ExecArgConst); ok && futureRawIOUringConstants[int32(src.Value)] {
+				if call.Index != prog.ExecNoCopyout {
+					futureRawIOUringFDs[call.Index] = true
+				}
+				if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
+					if dst, ok := call.Args[1].(prog.ExecArgResult); ok && dst.DivOp <= 1 && uint32(dst.AddOp) == 0 {
+						futureRawIOUringFDs[dst.Index] = true
+					}
+				}
+			}
+		}
 		if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
 			if dst, ok := call.Args[1].(prog.ExecArgResult); ok && dst.DivOp <= 1 && uint32(dst.AddOp) == 0 &&
 				futureRawIOUringFDs[dst.Index] {
@@ -795,6 +807,20 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				}
 				if fd, ok := call.Args[1].(prog.ExecArgConst); ok {
 					rawIOUringConstants[int32(fd.Value)] = true
+				}
+			}
+		}
+		if duplicate && len(call.Args) != 0 {
+			if src, ok := call.Args[0].(prog.ExecArgConst); ok && rawIOUringConstants[int32(src.Value)] {
+				if call.Index != prog.ExecNoCopyout {
+					rawIOUringFDs[call.Index] = true
+				}
+				if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
+					if dst, ok := call.Args[1].(prog.ExecArgResult); ok && dst.DivOp <= 1 && uint32(dst.AddOp) == 0 {
+						rawIOUringFDs[dst.Index] = true
+					} else if dst, ok := call.Args[1].(prog.ExecArgConst); ok {
+						rawIOUringConstants[int32(dst.Value)] = true
+					}
 				}
 			}
 		}
