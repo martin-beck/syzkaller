@@ -693,9 +693,27 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	// Async calls can execute after later mappings, so collect their potentially raw rings up front.
 	futureRawIOUringFDs := make(map[uint64]bool)
 	futureRawIOUringConstants := make(map[int32]bool)
+	hasIOUringSetup := false
 	for _, call := range p.Calls {
-		if (call.Meta.Name == "mmap$IORING_OFF_SQ_RING" || call.Meta.Name == "mmap$IORING_OFF_SQES" ||
-			call.Meta.CallName == "mmap" || call.Meta.CallName == "mmap2") && len(call.Args) > 4 {
+		if call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup" {
+			hasIOUringSetup = true
+			break
+		}
+	}
+	for _, call := range p.Calls {
+		rawMapping := call.Meta.Name == "mmap$IORING_OFF_SQ_RING" || call.Meta.Name == "mmap$IORING_OFF_SQES"
+		if !rawMapping && hasIOUringSetup && (call.Meta.CallName == "mmap" || call.Meta.CallName == "mmap2") &&
+			len(call.Args) > 5 {
+			offset, ok := call.Args[5].(prog.ExecArgConst)
+			sqRingOffset := ctx.target.ConstMap["IORING_OFF_SQ_RING"]
+			sqesOffset := ctx.target.ConstMap["IORING_OFF_SQES"]
+			if call.Meta.CallName == "mmap2" {
+				sqRingOffset /= ctx.target.PageSize
+				sqesOffset /= ctx.target.PageSize
+			}
+			rawMapping = ok && (offset.Value == sqRingOffset || offset.Value == sqesOffset)
+		}
+		if rawMapping && len(call.Args) > 4 {
 			if fd, ok := call.Args[4].(prog.ExecArgResult); ok && fd.DivOp == 0 && fd.AddOp == 0 {
 				futureRawIOUringFDs[fd.Index] = true
 			} else if fd, ok := call.Args[4].(prog.ExecArgConst); ok && int32(fd.Value) > 2 {
