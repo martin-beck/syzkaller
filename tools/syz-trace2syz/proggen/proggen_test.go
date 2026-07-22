@@ -746,8 +746,12 @@ func TestRtSigreturnUsesDeliveredSignal(t *testing.T) {
 	if got := strings.TrimSpace(string(p.Serialize())); got != "syz_csb_rt_sigreturn()[0]" {
 		t.Fatalf("got %q", got)
 	}
-	if _, _, err := csource.Write(p, csource.Options{Slowdown: 1, CSB: true, Trace: true}); err != nil {
+	src, _, err := csource.Write(p, csource.Options{Slowdown: 1, CSB: true, Trace: true})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "SIG_UNBLOCK") || !strings.Contains(string(src), "SIG_SETMASK") {
+		t.Fatal("signal mask is not restored around delivery")
 	}
 }
 

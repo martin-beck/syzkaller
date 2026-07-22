@@ -151,6 +151,8 @@ static long UNIQUE_FUNC(syz_csb_rt_sigreturn)(void)
 {
 	struct sigaction action;
 	struct sigaction old;
+	sigset_t helper_mask;
+	sigset_t old_mask;
 	if (UNIQUE_FUNC(csb_lock_signal)() < 0)
 		return -1;
 	memset(&action, 0, sizeof(action));
@@ -160,7 +162,16 @@ static long UNIQUE_FUNC(syz_csb_rt_sigreturn)(void)
 		pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 		return -1;
 	}
+	sigemptyset(&helper_mask);
+	sigaddset(&helper_mask, SIGUSR1);
+	if (sigprocmask(SIG_UNBLOCK, &helper_mask, &old_mask) < 0) {
+		sigaction(SIGUSR1, &old, 0);
+		pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
+		return -1;
+	}
 	long ret = raise(SIGUSR1);
+	if (sigprocmask(SIG_SETMASK, &old_mask, 0) < 0)
+		ret = -1;
 	if (sigaction(SIGUSR1, &old, 0) < 0)
 		ret = -1;
 	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);

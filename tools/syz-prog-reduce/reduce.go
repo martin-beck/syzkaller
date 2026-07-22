@@ -316,7 +316,8 @@ func executableCallKeys(p *prog.Prog) []string {
 // canFrequencyWeight reports whether csource can repeat a call without losing
 // per-invocation behavior. Copyins run only once before a rerun loop.
 func canFrequencyWeight(call *prog.Call) bool {
-	return call.Props.FailNth == 0 && !call.Props.Async && !hasCopyin(call)
+	return call.Props.FailNth == 0 && !call.Props.Async && !hasCopyin(call) &&
+		len(producedResources(call)) == 0 && len(usedResources(call)) == 0
 }
 
 func hasCopyin(call *prog.Call) bool {
@@ -476,9 +477,6 @@ func applyFrequencyWeights(original, reduced *prog.Prog, keep []bool, execKeys [
 	}
 	total := 0
 	for i, weight := range weights {
-		if len(producedResources(reduced.Calls[i])) != 0 || len(usedResources(reduced.Calls[i])) != 0 {
-			weight = 1
-		}
 		// csource emits the call once, followed by Props.Rerun extra calls.
 		reduced.Calls[i].Props.Rerun = weight - 1
 		total += weight
