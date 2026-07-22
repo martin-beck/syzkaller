@@ -13,18 +13,18 @@
 #include <linux/aio_abi.h>
 #include <string.h>
 
-enum csb_aio_op {
-	CSB_AIO_SETUP,
-	CSB_AIO_GETEVENTS,
-	CSB_AIO_PGETEVENTS,
-	CSB_AIO_DESTROY,
-	CSB_AIO_SUBMIT,
-	CSB_AIO_CANCEL,
+enum UNIQUE_FUNC(csb_aio_op) {
+	UNIQUE_FUNC(CSB_AIO_SETUP),
+	UNIQUE_FUNC(CSB_AIO_GETEVENTS),
+	UNIQUE_FUNC(CSB_AIO_PGETEVENTS),
+	UNIQUE_FUNC(CSB_AIO_DESTROY),
+	UNIQUE_FUNC(CSB_AIO_SUBMIT),
+	UNIQUE_FUNC(CSB_AIO_CANCEL),
 };
 
 // csb_aio_lifecycle owns every pointer and resource used by the replay so a
 // trace from another process cannot block or leak an AIO context.
-static long UNIQUE_FUNC(csb_aio_lifecycle)(enum csb_aio_op op)
+static long UNIQUE_FUNC(csb_aio_lifecycle)(enum UNIQUE_FUNC(csb_aio_op) op)
 {
 	aio_context_t ctx = 0;
 	if (syscall(__NR_io_setup, 1, &ctx) < 0)
@@ -32,14 +32,14 @@ static long UNIQUE_FUNC(csb_aio_lifecycle)(enum csb_aio_op op)
 	long ret = 0;
 	struct io_event event;
 	struct timespec timeout = {};
-	if (op == CSB_AIO_GETEVENTS)
+	if (op == UNIQUE_FUNC(CSB_AIO_GETEVENTS))
 		ret = syscall(__NR_io_getevents, ctx, 0, 1, &event, &timeout);
 #if defined(__NR_io_pgetevents)
-	else if (op == CSB_AIO_PGETEVENTS)
+	else if (op == UNIQUE_FUNC(CSB_AIO_PGETEVENTS))
 		ret = syscall(__NR_io_pgetevents, ctx, 0, 1, &event, &timeout, 0);
 #endif
 
-	else if (op == CSB_AIO_SUBMIT || op == CSB_AIO_CANCEL) {
+	else if (op == UNIQUE_FUNC(CSB_AIO_SUBMIT) || op == UNIQUE_FUNC(CSB_AIO_CANCEL)) {
 		char byte = 0;
 		struct iocb cb;
 		memset(&cb, 0, sizeof(cb));
@@ -49,7 +49,7 @@ static long UNIQUE_FUNC(csb_aio_lifecycle)(enum csb_aio_op op)
 		cb.aio_nbytes = 1;
 		struct iocb* list[] = {&cb};
 		ret = syscall(__NR_io_submit, ctx, 1, list);
-		if (op == CSB_AIO_CANCEL)
+		if (op == UNIQUE_FUNC(CSB_AIO_CANCEL))
 			ret = syscall(__NR_io_cancel, ctx, &cb, &event);
 		else if (ret == 1)
 			ret = syscall(__NR_io_getevents, ctx, 0, 1, &event, &timeout);
@@ -60,12 +60,12 @@ static long UNIQUE_FUNC(csb_aio_lifecycle)(enum csb_aio_op op)
 	return ret < 0 ? ret : destroyed;
 }
 
-static long syz_csb_io_setup(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(CSB_AIO_SETUP); }
-static long syz_csb_io_getevents(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(CSB_AIO_GETEVENTS); }
-static long syz_csb_io_pgetevents(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(CSB_AIO_PGETEVENTS); }
-static long syz_csb_io_destroy(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(CSB_AIO_DESTROY); }
-static long syz_csb_io_submit(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(CSB_AIO_SUBMIT); }
-static long syz_csb_io_cancel(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(CSB_AIO_CANCEL); }
+static long UNIQUE_FUNC(syz_csb_io_setup)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_SETUP)); }
+static long UNIQUE_FUNC(syz_csb_io_getevents)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_GETEVENTS)); }
+static long UNIQUE_FUNC(syz_csb_io_pgetevents)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_PGETEVENTS)); }
+static long UNIQUE_FUNC(syz_csb_io_destroy)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_DESTROY)); }
+static long UNIQUE_FUNC(syz_csb_io_submit)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_SUBMIT)); }
+static long UNIQUE_FUNC(syz_csb_io_cancel)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_CANCEL)); }
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_exit || __NR_syz_csb_exit_group
@@ -90,8 +90,8 @@ static long UNIQUE_FUNC(csb_exit_lifecycle)(bool group)
 	return ret == pid ? 0 : -1;
 }
 
-static long syz_csb_exit(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(false); }
-static long syz_csb_exit_group(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(true); }
+static long UNIQUE_FUNC(syz_csb_exit)(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(false); }
+static long UNIQUE_FUNC(syz_csb_exit_group)(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(true); }
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction || __NR_syz_csb_rt_sigreturn || __NR_syz_csb_rt_sigqueueinfo || __NR_syz_csb_rt_sigsuspend
@@ -104,7 +104,7 @@ static void UNIQUE_FUNC(csb_noop_signal_handler)(int sig)
 }
 
 // Use a generated handler because executable addresses in strace are not portable.
-static long syz_csb_rt_sigaction(void)
+static long UNIQUE_FUNC(syz_csb_rt_sigaction)(void)
 {
 	struct sigaction action;
 	struct sigaction old;
@@ -118,7 +118,7 @@ static long syz_csb_rt_sigaction(void)
 
 // Returning from a delivered signal asks the kernel to perform rt_sigreturn
 // with a valid, architecture-specific frame instead of a traced stack pointer.
-static long syz_csb_rt_sigreturn(void)
+static long UNIQUE_FUNC(syz_csb_rt_sigreturn)(void)
 {
 	struct sigaction action;
 	struct sigaction old;
@@ -145,7 +145,7 @@ static long UNIQUE_FUNC(csb_queue_owned_signal)(void)
 }
 
 // Queue only to this process after installing a generated handler.
-static long syz_csb_rt_sigqueueinfo(void)
+static long UNIQUE_FUNC(syz_csb_rt_sigqueueinfo)(void)
 {
 	struct sigaction action;
 	struct sigaction old;
@@ -161,7 +161,7 @@ static long syz_csb_rt_sigqueueinfo(void)
 }
 
 // Queue SIGUSR1 before suspending so replay cannot wait indefinitely.
-static long syz_csb_rt_sigsuspend(void)
+static long UNIQUE_FUNC(syz_csb_rt_sigsuspend)(void)
 {
 	struct sigaction action;
 	struct sigaction old_action;
@@ -6131,15 +6131,15 @@ static long syz_clone3(volatile long a0, volatile long a1)
 #include <pthread.h>
 
 // Exercise task creation and teardown without replaying the traced child workload.
-static void* csb_thread_exit(void* arg)
+static void* UNIQUE_FUNC(csb_thread_exit)(void* arg)
 {
 	return arg;
 }
 
-static long syz_csb_thread_create_join(void)
+static long UNIQUE_FUNC(syz_csb_thread_create_join)(void)
 {
 	pthread_t thread;
-	int ret = pthread_create(&thread, 0, csb_thread_exit, 0);
+	int ret = pthread_create(&thread, 0, UNIQUE_FUNC(csb_thread_exit), 0);
 	if (ret != 0) {
 		errno = ret;
 		return -1;
@@ -6154,7 +6154,7 @@ static long syz_csb_thread_create_join(void)
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_fork_wait || __NR_syz_csb_vfork_wait
-static long csb_wait_child(pid_t pid)
+static long UNIQUE_FUNC(csb_wait_child)(pid_t pid)
 {
 	int status = 0;
 	long ret = 0;
@@ -6167,7 +6167,7 @@ static long csb_wait_child(pid_t pid)
 
 #if SYZ_EXECUTOR || __NR_syz_csb_fork_wait
 #include <signal.h>
-static long syz_csb_fork_wait(void)
+static long UNIQUE_FUNC(syz_csb_fork_wait)(void)
 {
 #if defined(__NR_fork)
 	long pid = syscall(__NR_fork);
@@ -6179,18 +6179,18 @@ static long syz_csb_fork_wait(void)
 		for (;;) {
 		}
 	}
-	return pid < 0 ? -1 : csb_wait_child(pid);
+	return pid < 0 ? -1 : UNIQUE_FUNC(csb_wait_child)(pid);
 }
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_vfork_wait
-static long syz_csb_vfork_wait(void)
+static long UNIQUE_FUNC(syz_csb_vfork_wait)(void)
 {
 	long pid = vfork();
 	if (pid == 0) {
 		_exit(0);
 	}
-	return pid < 0 ? -1 : csb_wait_child(pid);
+	return pid < 0 ? -1 : UNIQUE_FUNC(csb_wait_child)(pid);
 }
 #endif
 
