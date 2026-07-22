@@ -643,8 +643,9 @@ func TestTaskCreationLifecycleFromTrace(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(src), test.want) {
-				t.Fatalf("generated CSB header missing %q:\n%s", test.want, src)
+			helper := "UNIQUE_FUNC(" + strings.TrimSuffix(test.want, "()") + ")()"
+			if !strings.Contains(string(src), helper) {
+				t.Fatalf("generated CSB header missing %q:\n%s", helper, src)
 			}
 		})
 	}
@@ -719,7 +720,7 @@ func TestAIOCallsUseBoundedLifecycles(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if helper := "syz_csb_" + name + "()"; !strings.Contains(string(src), helper) {
+			if helper := "UNIQUE_FUNC(syz_csb_" + name + ")()"; !strings.Contains(string(src), helper) {
 				t.Fatalf("generated CSB header missing %q", helper)
 			}
 		})
