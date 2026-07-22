@@ -691,7 +691,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	callComments []string, msgSizes []uint64, initIndices []int, dataMmap bool) ([]string, []uint64) {
 	var calls []string
 	csumSeq := 0
-	localIO := localIOResources(p)
+	localIO := localIOResources(p, ctx.target)
 	for ci, call := range p.Calls {
 		w := new(bytes.Buffer)
 		if addComments {
@@ -721,7 +721,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		if slices.Contains(initIndices, ci) {
 			initCall = true
 		}
-		if ctx.opts.CSB && call.Meta.Name == "fcntl$setstatus" && localIOArg(call, localIO) {
+		if ctx.opts.CSB && fcntlCommand(call, ctx.target.ConstMap["F_SETFL"]) && localIOArg(call, localIO) {
 			args := append([]prog.ExecArg(nil), call.Args...)
 			flags := args[2].(prog.ExecArgConst)
 			flags.Value |= ctx.target.ConstMap["O_NONBLOCK"]
@@ -861,7 +861,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	return calls, p.Vars
 }
 
-func localIOResources(p prog.ExecProg) map[uint64]bool {
+func localIOResources(p prog.ExecProg, target *prog.Target) map[uint64]bool {
 	local := make(map[uint64]bool)
 	for _, call := range p.Calls {
 		switch call.Meta.CallName {
@@ -878,13 +878,23 @@ func localIOResources(p prog.ExecProg) map[uint64]bool {
 				local[call.Index] = true
 			}
 		case "fcntl":
-			if strings.HasPrefix(call.Meta.Name, "fcntl$dupfd") &&
+			duplicate := fcntlCommand(call, target.ConstMap["F_DUPFD"]) ||
+				fcntlCommand(call, target.ConstMap["F_DUPFD_CLOEXEC"])
+			if duplicate &&
 				call.Index != prog.ExecNoCopyout && localIOArg(call, local) {
 				local[call.Index] = true
 			}
 		}
 	}
 	return local
+}
+
+func fcntlCommand(call prog.ExecCall, command uint64) bool {
+	if call.Meta.CallName != "fcntl" || len(call.Args) < 2 {
+		return false
+	}
+	arg, ok := call.Args[1].(prog.ExecArgConst)
+	return ok && arg.Value == command
 }
 
 func localIOArg(call prog.ExecCall, local map[uint64]bool) bool {

@@ -128,6 +128,11 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 			"ioctl$int_in(r0, 0x5421, &(0x7f0000000040)=0x0)\nread(r0, &(0x7f0000000080), 0x1)\n",
 		"pipe(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n" +
 			"ioctl$auto_FIONBIO(r0, 0x5421, 0x200000000040)\nread(r0, &(0x7f0000000080), 0x1)\n",
+		"pipe(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n" +
+			"fcntl$auto_F_SETFL(r0, 0x4, 0x0)\nread(r0, &(0x7f0000000040), 0x1)\n",
+		"pipe(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n" +
+			"r2 = fcntl$auto_F_DUPFD_CLOEXEC(r0, 0x406, 0x3)\n" +
+			"fcntl$auto_F_SETFL(r2, 0x4, 0x0)\nread(r0, &(0x7f0000000040), 0x1)\n",
 	}
 	for _, input := range tests {
 		p, err := target.Deserialize([]byte(input), prog.NonStrict)
@@ -145,8 +150,8 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 		}
 		assert.Contains(t, string(src), "O_NONBLOCK")
 		assert.NotContains(t, string(src), "csb_io_errno_")
-		if strings.Contains(input, "fcntl$setstatus") {
-			assert.Contains(t, string(src), "/*flags=O_NONBLOCK*/0x800")
+		if strings.Contains(input, "F_SETFL") || strings.Contains(input, "fcntl$setstatus") {
+			assert.Contains(t, string(src), "0x800")
 		}
 		if strings.Contains(input, "FIONBIO") {
 			assert.Contains(t, string(src), "NONFAILING(*(uint32_t*)")
