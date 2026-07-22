@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -296,8 +297,12 @@ func runOK(t *testing.T, command string, args ...string) {
 
 func runFail(t *testing.T, command string, args ...string) {
 	t.Helper()
-	if output, err := run(command, args...); err == nil {
+	output, err := run(command, args...)
+	if err == nil {
 		t.Fatalf("%s %s unexpectedly succeeded:\n%s", command, strings.Join(args, " "), output)
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		t.Fatalf("%s %s did not reject input: %v\n%s", command, strings.Join(args, " "), err, output)
 	}
 }
 
