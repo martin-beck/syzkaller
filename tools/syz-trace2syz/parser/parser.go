@@ -72,8 +72,8 @@ func joinSplitValues(data []byte) []byte {
 		if !ok || line[start+5:end] != call.name {
 			continue
 		}
-		lines[call.line] = strings.TrimSuffix(lines[call.line], "<unfinished ...>") + line[end+9:]
-		removed[i] = true
+		lines[i] = strings.TrimSuffix(lines[call.line], "<unfinished ...>") + line[end+9:]
+		removed[call.line] = true
 		delete(pending, pid)
 	}
 	joined := lines[:0]

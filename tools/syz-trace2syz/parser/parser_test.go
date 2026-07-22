@@ -97,10 +97,14 @@ func TestParseSplitFieldValue(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			callIndex := 1
 			if splitThreads {
 				trace = tree.TraceMap[1]
+				callIndex = 0
+			} else if got := []string{trace.Calls[0].CallName, trace.Calls[1].CallName}; !reflect.DeepEqual(got, []string{"close", "bpf"}) {
+				t.Fatalf("calls: got %v, want [close bpf]", got)
 			}
-			call := trace.Calls[0]
+			call := trace.Calls[callIndex]
 			query := call.Args[1].(*GroupType).Elems[0].(*GroupType)
 			if call.CallName != "bpf" || len(query.Elems) != 6 {
 				t.Fatalf("split query parsed as %#v", call)
