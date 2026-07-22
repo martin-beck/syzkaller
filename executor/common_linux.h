@@ -185,40 +185,22 @@ static long UNIQUE_FUNC(syz_csb_rt_sigaction)(void)
 // Returning from a delivered signal asks the kernel to perform rt_sigreturn
 // with a valid, architecture-specific frame instead of a traced stack pointer.
 #if SYZ_EXECUTOR || __NR_syz_csb_rt_sigreturn
-static long UNIQUE_FUNC(syz_csb_rt_sigreturn)(void)
+static long UNIQUE_FUNC(csb_rt_sigreturn_lifecycle)(void)
 {
 	struct sigaction action;
 	struct sigaction old;
 	sigset_t helper_mask;
 	sigset_t old_mask;
-	sigset_t pending;
-	int is_pending;
 	long ret;
-	int err = pthread_mutex_lock(&CSB_SIGNAL_LOCK);
-	if (err) {
-		errno = err;
-		return -1;
-	}
-	if (sigpending(&pending) < 0)
-		goto fail;
-	is_pending = sigismember(&pending, SIGUSR1);
-	if (is_pending != 0) {
-		if (is_pending > 0)
-			errno = EAGAIN;
-		goto fail;
-	}
 	memset(&action, 0, sizeof(action));
 	action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
 	sigemptyset(&action.sa_mask);
-	if (sigaction(SIGUSR1, &action, &old) < 0) {
-		pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
+	if (sigaction(SIGUSR1, &action, &old) < 0)
 		return -1;
-	}
 	sigemptyset(&helper_mask);
 	sigaddset(&helper_mask, SIGUSR1);
 	if (sigprocmask(SIG_UNBLOCK, &helper_mask, &old_mask) < 0) {
 		sigaction(SIGUSR1, &old, 0);
-		pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 		return -1;
 	}
 	ret = raise(SIGUSR1);
@@ -226,11 +208,26 @@ static long UNIQUE_FUNC(syz_csb_rt_sigreturn)(void)
 		ret = -1;
 	if (sigaction(SIGUSR1, &old, 0) < 0)
 		ret = -1;
-	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 	return ret;
-fail:
-	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
-	return -1;
+}
+
+static long UNIQUE_FUNC(syz_csb_rt_sigreturn)(void)
+{
+#if defined(__NR_fork)
+	long pid = syscall(__NR_fork);
+#else
+	long pid = syscall(__NR_clone, SIGCHLD, 0, 0, 0, 0);
+#endif
+	if (pid < 0)
+		return -1;
+	if (pid == 0)
+		_exit(UNIQUE_FUNC(csb_rt_sigreturn_lifecycle)() == 0 ? 0 : 1);
+	int status = 0;
+	long ret;
+	do {
+		ret = syscall(__NR_wait4, pid, &status, 0, 0);
+	} while (ret < 0 && errno == EINTR);
+	return ret == pid && status == 0 ? 0 : -1;
 }
 #endif
 #endif
