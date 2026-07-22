@@ -159,7 +159,8 @@ func TestCSBProtectControlFDsIoUring(t *testing.T) {
 			t.Fatalf("CSB=%v: io_uring close guard present=%v", csb, got)
 		}
 		if csb {
-			assert.Contains(t, string(src), "+PTR_OFFSET) == 19")
+			assert.Contains(t, string(src), "memcpy(csb_sqe_0, (void*)(0x200000000000+PTR_OFFSET), 64)")
+			assert.Contains(t, string(src), "(intptr_t)csb_sqe_0")
 			assert.NotContains(t, string(src), " = if (")
 		}
 	}
@@ -171,7 +172,7 @@ func TestCSBProtectControlFDsIoUring(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Contains(t, string(src), "NONFAILING(if (*(uint8_t*)(0x0)")
+	assert.Contains(t, string(src), "NONFAILING(memcpy(csb_sqe_0, (void*)(0x0), 64))")
 	assert.Contains(t, string(src), "if (csb_sqe_ok_0)")
 	assert.NotContains(t, string(src), "0x0+PTR_OFFSET")
 }
@@ -258,6 +259,18 @@ func TestCSBProtectRawIoUringConstantFD(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Contains(t, string(src), "/*to_submit=*/0")
+	p, err = target.Deserialize([]byte("r0 = syz_io_uring_setup(0x1, &(0x7f0000000000), "+
+		"&(0x7f0000001000/0x1000)=nil, &(0x7f0000002000/0x1000)=nil)\n"+
+		"mmap(&(0x7f0000003000/0x1000)=nil, 0x1000, 0x3, 0x20, 0xffffffffffffffff, 0x0)\n"+
+		"io_uring_enter(r0, 0x1, 0x0, 0x0, 0x0, 0x0)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err = Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "/*to_submit=*/1")
 }
 
 func TestCSBProtectAliasedIoUring(t *testing.T) {

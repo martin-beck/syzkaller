@@ -455,7 +455,6 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		header += "#define MMAP_LENGTH " + fmt.Sprintf("0x%x", ctx.target.NumPages*ctx.target.PageSize) + "ul\n"
 		header += "const static uint64_t UNIQUE_VAR(maxWriteBufferSize) = " + fmt.Sprintf("%d", ctx.opts.MaxWriteSize) + "ul;\n"
 		header += "const static uint64_t UNIQUE_VAR(maxWriteBufferSizeAlignment) = " + fmt.Sprintf("%d", ctx.opts.MaxWriteSizeAlignment) + "ul;\n"
-		header += "static int UNIQUE_VAR(csb_sqe_lock);\n"
 
 		// Connect NetOps
 		opsSeq, err := toStringArray(NetOpsFDsConnect)
@@ -733,7 +732,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				sqesOffset /= ctx.target.PageSize
 			}
 			knownRingFD := (fdOK && fd.DivOp == 0 && fd.AddOp == 0 && ioUringFDs[fd.Index]) ||
-				(constantFD && constant.Value > 2 && constant.Value != ^uint64(0) && ioUringCreated)
+				(constantFD && constant.Value > 2 && constant.Value <= 1<<31-1 && ioUringCreated)
 			if knownRingFD && offsetOK &&
 				(offset.Value == sqRingOffset || offset.Value == sqesOffset) {
 				rawIOUring = true
@@ -743,12 +742,8 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	for ci, call := range p.Calls {
 		w := new(bytes.Buffer)
 		guardSQE := false
-		lockSQE := ctx.opts.CSB && call.Meta.Name == "syz_io_uring_submit"
 		if addComments {
 			w.WriteString(callComments[ci] + "\n")
-		}
-		if lockSQE {
-			fmt.Fprint(w, "\twhile (__atomic_exchange_n(&UNIQUE_VAR(csb_sqe_lock), 1, __ATOMIC_ACQUIRE)) {}\n")
 		}
 		// Copyin.
 		for _, copyin := range call.Copyin {
@@ -763,19 +758,22 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		}
 		if ctx.opts.CSB && call.Meta.Name == "syz_io_uring_submit" {
 			if sqe, ok := call.Args[2].(prog.ExecArgConst); ok {
-				// IORING_OP_CLOSE stores its fd at offset 4 in the SQE.
 				offset := ""
 				if valInMMapRange(ctx, sqe.Value) {
 					offset = "+PTR_OFFSET"
 				}
+				fmt.Fprintf(w, "\tuint8 csb_sqe_%d[64];\n", ci)
 				if ctx.opts.HandleSegv {
-					fmt.Fprintf(w, "\tint csb_sqe_ok_%d = NONFAILING(if (*(uint8*)(0x%x%s) == 19 && *(int32*)(0x%x%s) <= 2) *(int32*)(0x%x%s) = -1);\n",
-						ci, sqe.Value, offset, sqe.Value+4, offset, sqe.Value+4, offset)
-					guardSQE = true
+					fmt.Fprintf(w, "\tint csb_sqe_ok_%d = NONFAILING(memcpy(csb_sqe_%d, (void*)(0x%x%s), 64));\n",
+						ci, ci, sqe.Value, offset)
 				} else {
-					fmt.Fprintf(w, "\tif (*(uint8*)(0x%x%s) == 19 && *(int32*)(0x%x%s) <= 2) *(int32*)(0x%x%s) = -1;\n",
-						sqe.Value, offset, sqe.Value+4, offset, sqe.Value+4, offset)
+					fmt.Fprintf(w, "\tmemcpy(csb_sqe_%d, (void*)(0x%x%s), 64);\n\tint csb_sqe_ok_%d = 1;\n",
+						ci, sqe.Value, offset, ci)
 				}
+				// IORING_OP_CLOSE stores its fd at offset 4 in the SQE.
+				fmt.Fprintf(w, "\tif (csb_sqe_ok_%d && csb_sqe_%d[0] == 19 && *(int32*)(csb_sqe_%d + 4) <= 2) "+
+					"*(int32*)(csb_sqe_%d + 4) = -1;\n", ci, ci, ci, ci)
+				guardSQE = true
 			}
 		}
 
@@ -815,9 +813,6 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		}
 		if guardSQE {
 			fmt.Fprint(w, "\n\t}")
-		}
-		if lockSQE {
-			fmt.Fprint(w, "\t__atomic_store_n(&UNIQUE_VAR(csb_sqe_lock), 0, __ATOMIC_RELEASE);\n")
 		}
 		calls = append(calls, w.String())
 
@@ -975,7 +970,7 @@ func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCo
 	if haveCopyout || trace {
 		fmt.Fprintf(w, "res = ")
 	}
-	w.WriteString(ctx.fmtCallBody(call, initCall, dataMmap))
+	w.WriteString(ctx.fmtCallBody(call, initCall, dataMmap, ci))
 	if !native {
 		fmt.Fprintf(w, ")") // close NONFAILING macro
 	}
@@ -1008,7 +1003,7 @@ func valInMMapRange(ctx *context, val uint64) bool {
 	return val >= min && val < max
 }
 
-func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) string {
+func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool, ci int) string {
 	native := isNative(ctx.sysTarget, call.Meta.CallName)
 	callName, ok := ctx.sysTarget.SyscallTrampolines[call.Meta.CallName]
 	if !ok {
@@ -1036,6 +1031,13 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) str
 	}
 
 	for i, arg := range call.Args {
+		if ctx.opts.CSB && call.Meta.Name == "syz_io_uring_submit" && i == 2 {
+			if _, ok := arg.(prog.ExecArgConst); ok {
+				argsStrs = append(argsStrs, fmt.Sprintf("(intptr_t)csb_sqe_%d", ci))
+				continue
+			}
+		}
+
 		if ctx.opts.CSB {
 			switch i {
 			// argument index 0

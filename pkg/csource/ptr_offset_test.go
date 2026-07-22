@@ -70,7 +70,7 @@ func TestDataMmapProgOffsetsGuards(t *testing.T) {
 	ctx := &context{p: p, target: target, sysTarget: targets.Get(target.OS, target.Arch), opts: Options{CSB: true}}
 	var calls strings.Builder
 	for _, call := range decoded.Calls {
-		calls.WriteString(ctx.fmtCallBody(call, false, true))
+		calls.WriteString(ctx.fmtCallBody(call, false, true, 0))
 	}
 	if got := strings.Count(calls.String(), "+PTR_OFFSET"); got != 3 {
 		t.Fatalf("data mmap and guards are not all relocated: %d offsets", got)
