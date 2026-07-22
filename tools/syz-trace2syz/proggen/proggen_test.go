@@ -367,6 +367,16 @@ func TestGenBufferDeterministicOutSize(t *testing.T) {
 	}
 }
 
+func TestGenArrayDirectString(t *testing.T) {
+	elem := &prog.BufferType{TypeCommon: prog.TypeCommon{TypeName: "string", IsVarlen: true}, Kind: prog.BufferString}
+	array := &prog.ArrayType{TypeCommon: prog.TypeCommon{TypeName: "array", IsVarlen: true}, Elem: elem}
+	prog.RestoreLinks(nil, nil, []prog.Type{elem, array})
+	arg := (&context{}).genArray(array, prog.DirIn, &parser.BufferType{Val: "hat"})
+	if got := string(arg.(*prog.GroupArg).Inner[0].(*prog.DataArg).Data()); got != "hat\x00" {
+		t.Fatalf("got %q, want hat string", got)
+	}
+}
+
 func TestMadviseFromTrace(t *testing.T) {
 	p := parseSingleProg(t, `
 madvise(0xffff7fb57000, 8192, 0x4) = 0

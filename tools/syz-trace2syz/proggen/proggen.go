@@ -831,6 +831,10 @@ func (ctx *context) genArray(syzType *prog.ArrayType, dir prog.Dir, traceType pa
 			args = append(args, ctx.genArg(syzType.Elem, dir, a.Elems[i]))
 		}
 	case *parser.BufferType:
+		if _, ok := syzType.Elem.(*prog.BufferType); ok {
+			args = append(args, ctx.genArg(syzType.Elem, dir, a))
+			break
+		}
 		if ptr, ok := syzType.Elem.(*prog.PtrType); ok {
 			if _, ok := ptr.Elem.(*prog.BufferType); ok {
 				// The parser flattens a single-element string array to its buffer.
