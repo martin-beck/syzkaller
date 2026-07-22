@@ -476,6 +476,9 @@ func applyFrequencyWeights(original, reduced *prog.Prog, keep []bool, execKeys [
 	}
 	total := 0
 	for i, weight := range weights {
+		if len(producedResources(reduced.Calls[i])) != 0 {
+			weight = 1
+		}
 		// csource emits the call once, followed by Props.Rerun extra calls.
 		reduced.Calls[i].Props.Rerun = weight - 1
 		total += weight
