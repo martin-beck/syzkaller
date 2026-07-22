@@ -361,6 +361,7 @@ func TestSkipUnusableRecords(t *testing.T) {
 1 ????( <unfinished ...>
 1 <... ???? resumed>) = ?
 2 nanosleep({tv_sec=0}, <unfinished ...>) = ?
+2 nanosleep({tv_sec=0})   = ? ERESTART_RESTARTBLOCK (Interrupted by signal)
 1 close(3) = 0`))
 	if calls := tree.TraceMap[1].Calls; len(calls) != 2 {
 		t.Fatalf("got %d surrounding calls, want 2", len(calls))

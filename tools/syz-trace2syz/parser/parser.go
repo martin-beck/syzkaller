@@ -85,8 +85,20 @@ func shouldSkip(line string) bool {
 		}
 	}
 	unfinished := strings.LastIndex(record, "<unfinished ...>")
-	ret := strings.LastIndex(record, ") = ")
-	return (ret >= 0 && strings.Contains(record[ret:], "ERESTART")) ||
+	restart := false
+	for offset := 0; offset < len(record); {
+		ret := strings.IndexByte(record[offset:], ')')
+		if ret < 0 {
+			break
+		}
+		offset += ret + 1
+		result := strings.TrimLeft(record[offset:], " \t")
+		if strings.HasPrefix(result, "=") && strings.Contains(result, "ERESTART") {
+			restart = true
+			break
+		}
+	}
+	return restart ||
 		(unfinished > strings.LastIndex(record, "\"") && strings.HasSuffix(record, " = ?")) ||
 		strings.HasPrefix(record, "????(") ||
 		strings.HasPrefix(record, "<... ???? resumed") ||
