@@ -100,7 +100,7 @@ func joinSplitValues(data []byte) ([]byte, int64) {
 	var rootPid int64
 	for i, line := range lines {
 		fields := strings.Fields(line)
-		if rootPid == 0 && len(fields) != 0 && !shouldSkip(line) {
+		if rootPid == 0 && len(fields) != 0 {
 			rootPid = -1
 			if pid, err := strconv.ParseInt(fields[0], 10, 64); err == nil {
 				rootPid = pid

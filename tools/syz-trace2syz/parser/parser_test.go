@@ -242,6 +242,15 @@ func TestParseLoopPid(t *testing.T) {
 	}
 }
 
+func TestSkippedLeadingRecordPreservesRootPid(t *testing.T) {
+	tree := parseTestData(t, []byte(`1 --- SIGCHLD {si_signo=SIGCHLD} ---
+2 close(3) = 0
+1 getpid() = 1`))
+	if tree.RootPid != 1 || len(tree.TraceMap[1].Calls) != 1 {
+		t.Fatalf("root PID %d, root calls %v", tree.RootPid, tree.TraceMap[1])
+	}
+}
+
 func TestParseLoop1Child(t *testing.T) {
 	data1Child := `1 open() = 3
 				   1 clone() = 2
