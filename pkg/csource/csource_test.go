@@ -104,8 +104,9 @@ func TestCSBReappliesCurrentAffinity(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Contains(t, string(src), "UNIQUE_FUNC(syz_reapply_affinity)()")
-	assert.Contains(t, string(src), "static _Thread_local cpu_set_t mask")
-	assert.Contains(t, string(src), "sched_getaffinity(0, sizeof(mask), &mask)")
+	assert.Contains(t, string(src), "static __thread cpu_set_t* mask = NULL")
+	assert.Contains(t, string(src), "mask = CPU_ALLOC(cpus)")
+	assert.Contains(t, string(src), "sched_getaffinity(0, mask_size, mask)")
 }
 
 func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {
