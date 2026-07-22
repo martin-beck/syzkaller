@@ -99,6 +99,7 @@ static long UNIQUE_FUNC(syz_csb_exit_group)(void) { return UNIQUE_FUNC(csb_exit_
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction || __NR_syz_csb_rt_sigreturn || __NR_syz_csb_rt_sigqueueinfo || __NR_syz_csb_rt_sigsuspend
+#include <errno.h>
 #include <pthread.h>
 #include <signal.h>
 #include <string.h>
@@ -129,6 +130,7 @@ static void UNIQUE_FUNC(csb_noop_signal_handler)(int sig)
 }
 
 // Use a generated handler because executable addresses in strace are not portable.
+#if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction
 static long UNIQUE_FUNC(syz_csb_rt_sigaction)(void)
 {
 	struct sigaction action;
@@ -144,9 +146,11 @@ static long UNIQUE_FUNC(syz_csb_rt_sigaction)(void)
 	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 	return ret;
 }
+#endif
 
 // Returning from a delivered signal asks the kernel to perform rt_sigreturn
 // with a valid, architecture-specific frame instead of a traced stack pointer.
+#if SYZ_EXECUTOR || __NR_syz_csb_rt_sigreturn
 static long UNIQUE_FUNC(syz_csb_rt_sigreturn)(void)
 {
 	struct sigaction action;
@@ -177,7 +181,9 @@ static long UNIQUE_FUNC(syz_csb_rt_sigreturn)(void)
 	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 	return ret;
 }
+#endif
 
+#if SYZ_EXECUTOR || __NR_syz_csb_rt_sigqueueinfo || __NR_syz_csb_rt_sigsuspend
 static long UNIQUE_FUNC(csb_queue_owned_signal)(long tid)
 {
 	siginfo_t info;
@@ -190,8 +196,10 @@ static long UNIQUE_FUNC(csb_queue_owned_signal)(long tid)
 		return syscall(__NR_rt_tgsigqueueinfo, getpid(), tid, SIGUSR1, &info);
 	return syscall(__NR_rt_sigqueueinfo, getpid(), SIGUSR1, &info);
 }
+#endif
 
 // Queue only to this process after installing a generated handler.
+#if SYZ_EXECUTOR || __NR_syz_csb_rt_sigqueueinfo
 static long UNIQUE_FUNC(syz_csb_rt_sigqueueinfo)(void)
 {
 	struct sigaction action;
@@ -222,8 +230,10 @@ static long UNIQUE_FUNC(syz_csb_rt_sigqueueinfo)(void)
 	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 	return ret;
 }
+#endif
 
 // Queue SIGUSR1 before suspending so replay cannot wait indefinitely.
+#if SYZ_EXECUTOR || __NR_syz_csb_rt_sigsuspend
 static long UNIQUE_FUNC(syz_csb_rt_sigsuspend)(void)
 {
 	struct sigaction action;
@@ -261,6 +271,7 @@ static long UNIQUE_FUNC(syz_csb_rt_sigsuspend)(void)
 	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 	return ret;
 }
+#endif
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_execve || __NR_syz_csb_execveat || __NR_syz_csb_fexecve

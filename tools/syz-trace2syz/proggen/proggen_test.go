@@ -753,6 +753,15 @@ func TestRtSigreturnUsesDeliveredSignal(t *testing.T) {
 	if !strings.Contains(string(src), "SIG_UNBLOCK") || !strings.Contains(string(src), "SIG_SETMASK") {
 		t.Fatal("signal mask is not restored around delivery")
 	}
+	standalone, _, err := csource.Write(p, csource.Options{Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin, err := csource.Build(p.Target, standalone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(bin)
 }
 
 func TestRemainingRtSignalCallsUseOwnedSignals(t *testing.T) {
