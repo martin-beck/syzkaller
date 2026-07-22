@@ -72,7 +72,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
             '0x'xdigit+ => {out.val_uint, _ = strconv.ParseUint(string(lex.data[lex.ts:lex.te]), 0, 64); tok = UINT;fbreak;};
             string.['.']* => {out.data = ParseString(string(lex.data[lex.ts+1:lex.te-1])); tok = STRING_LITERAL;fbreak;};
             nullptr => {tok = NULL; fbreak;};
-            ('BPF_STMT'|'BPF_JUMP') => {tok = BPF_MACRO; fbreak;};
+            ('BPF_STMT'|'BPF_JUMP') => {out.data = string(lex.data[lex.ts:lex.te]); tok = BPF_MACRO; fbreak;};
             flag => {out.data = string(lex.data[lex.ts:lex.te]); tok = FLAG; fbreak;};
             '\"'.flag.'\"' => {out.data = string(lex.data[lex.ts+1:lex.te-1]); tok=FLAG; fbreak;};
             identifier => {out.data = string(lex.data[lex.ts:lex.te]); tok = IDENTIFIER;fbreak;};

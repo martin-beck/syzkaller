@@ -544,6 +544,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		case 8:
 			{
 				(lex.p) = (lex.te) - 1
+				out.data = string(lex.data[lex.ts:lex.te])
 				tok = BPF_MACRO
 				{
 					(lex.p)++

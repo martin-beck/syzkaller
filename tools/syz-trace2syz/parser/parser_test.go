@@ -271,4 +271,7 @@ func TestParseBPFFilterMacros(t *testing.T) {
 	if !ok || len(filter.Elems) != 2 {
 		t.Fatalf("filter parsed as %#v, want two instructions", filter)
 	}
+	if got, want := filter.String(), "[[0x20,0x0,0x0,0x4,],[0x15,0x0,0x1,0x1,],]"; got != want {
+		t.Fatalf("filter = %q, want %q", got, want)
+	}
 }

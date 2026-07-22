@@ -104,6 +104,15 @@ func newGroupType(elems []IrType) (typ *GroupType) {
 	return &GroupType{Elems: elems}
 }
 
+func newBPFGroupType(macro string, elems []IrType) *GroupType {
+	if macro == "BPF_STMT" && len(elems) == 2 {
+		elems = []IrType{elems[0], Constant(0), Constant(0), elems[1]}
+	} else if macro == "BPF_JUMP" && len(elems) == 4 {
+		elems = []IrType{elems[0], elems[2], elems[3], elems[1]}
+	}
+	return newGroupType(elems)
+}
+
 // String implements IrType String()
 func (a *GroupType) String() string {
 	var buf bytes.Buffer

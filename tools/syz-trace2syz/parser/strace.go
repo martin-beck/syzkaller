@@ -991,7 +991,7 @@ Stracedefault:
 		StraceDollar = StraceS[Stracept-4 : Stracept+1]
 //line strace.y:166
 		{
-			StraceVAL.val_group_type = newGroupType(StraceDollar[3].val_types)
+			StraceVAL.val_group_type = newBPFGroupType(StraceDollar[1].data, StraceDollar[3].val_types)
 		}
 	case 58:
 		StraceDollar = StraceS[Stracept-3 : Stracept+1]
