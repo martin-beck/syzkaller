@@ -773,6 +773,24 @@ func TestRemainingRtSignalCallsUseOwnedSignals(t *testing.T) {
 	}
 }
 
+func TestRtSigsuspendMIPS64MaskSize(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.MIPS64LE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("syz_csb_rt_sigsuspend()\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := csource.Write(p, csource.Options{Slowdown: 1, CSB: true, Trace: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "sigset_size = 16") {
+		t.Fatal("mips64le helper does not use a 16-byte kernel signal mask")
+	}
+}
+
 func TestShortSafeCallsAreDropped(t *testing.T) {
 	p := parseSingleProg(t, `
 madvise() = 0

@@ -192,7 +192,11 @@ static long UNIQUE_FUNC(syz_csb_rt_sigsuspend)(void)
 	if (ret >= 0) {
 		sigset_t suspend_mask = old_mask;
 		sigdelset(&suspend_mask, SIGUSR1);
-		ret = syscall(__NR_rt_sigsuspend, &suspend_mask, 8);
+		long sigset_size = 8;
+#if GOARCH_mips64le
+		sigset_size = 16;
+#endif
+		ret = syscall(__NR_rt_sigsuspend, &suspend_mask, sigset_size);
 	}
 	sigprocmask(SIG_SETMASK, &old_mask, 0);
 	sigaction(SIGUSR1, &old_action, 0);
