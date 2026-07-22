@@ -195,7 +195,7 @@ func ParseData(data []byte, splitThreads bool, numLines int) (*TraceTree, *Trace
 	var status string
 	data, rootPid := joinSplitValues(data)
 	tree := NewTraceTree()
-	trace := new(Trace)
+	trace := &Trace{RootPid: rootPid}
 	lastCalls := make(map[int64](*Syscall))
 	// Creating the process tree
 	scanner := bufio.NewScanner(bytes.NewReader(data))
@@ -220,9 +220,6 @@ func ParseData(data []byte, splitThreads bool, numLines int) (*TraceTree, *Trace
 		if splitThreads {
 			tree.add(call)
 		} else {
-			if trace.RootPid == 0 {
-				trace.RootPid = call.Pid
-			}
 			if !call.Resumed {
 				lastCalls[call.Pid] = call
 			} else {

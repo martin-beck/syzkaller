@@ -260,7 +260,8 @@ func TestSkippedOnlyRootRecordFallsBack(t *testing.T) {
 }
 
 func TestUnsplitRootPid(t *testing.T) {
-	_, trace, err := ParseData([]byte("7 getpid() = 7\n8 getpid() = 8\n"), false, -1)
+	data := []byte("7 read(3,  <unfinished ...>\n8 getpid() = 8\n7 <... read resumed>\"x\", 1) = 1\n")
+	_, trace, err := ParseData(data, false, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
