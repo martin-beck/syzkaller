@@ -11,7 +11,10 @@
 #if SYZ_EXECUTOR || __NR_syz_csb_io_setup || __NR_syz_csb_io_getevents || __NR_syz_csb_io_pgetevents || __NR_syz_csb_io_destroy || __NR_syz_csb_io_submit || __NR_syz_csb_io_cancel
 #include <fcntl.h>
 #include <linux/aio_abi.h>
+#include <poll.h>
 #include <string.h>
+#include <sys/eventfd.h>
+#include <time.h>
 
 enum UNIQUE_FUNC(csb_aio_op) {
 	UNIQUE_FUNC(CSB_AIO_SETUP),
@@ -42,13 +45,19 @@ static long UNIQUE_FUNC(csb_aio_lifecycle)(enum UNIQUE_FUNC(csb_aio_op) op)
 		char byte = 0;
 		struct iocb cb;
 		memset(&cb, 0, sizeof(cb));
-		cb.aio_lio_opcode = IOCB_CMD_PWRITE;
-		cb.aio_fildes = open("/dev/null", O_WRONLY);
-		cb.aio_buf = (uint64)&byte;
-		cb.aio_nbytes = 1;
+		if (op == UNIQUE_FUNC(CSB_AIO_CANCEL)) {
+			cb.aio_lio_opcode = IOCB_CMD_POLL;
+			cb.aio_fildes = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+			cb.aio_buf = POLLIN;
+		} else {
+			cb.aio_lio_opcode = IOCB_CMD_PWRITE;
+			cb.aio_fildes = open("/dev/null", O_WRONLY);
+			cb.aio_buf = (uint64)&byte;
+			cb.aio_nbytes = 1;
+		}
 		struct iocb* list[] = {&cb};
 		ret = syscall(__NR_io_submit, ctx, 1, list);
-		if (op == UNIQUE_FUNC(CSB_AIO_CANCEL))
+		if (op == UNIQUE_FUNC(CSB_AIO_CANCEL) && ret == 1)
 			ret = syscall(__NR_io_cancel, ctx, &cb, &event);
 		else if (ret == 1)
 			ret = syscall(__NR_io_getevents, ctx, 0, 1, &event, &timeout);

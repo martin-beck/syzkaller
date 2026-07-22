@@ -730,6 +730,13 @@ func TestAIOCallsUseBoundedLifecycles(t *testing.T) {
 			if helper := "UNIQUE_FUNC(syz_csb_" + name + ")()"; !strings.Contains(string(src), helper) {
 				t.Fatalf("generated CSB header missing %q", helper)
 			}
+			if name == "io_cancel" {
+				for _, want := range []string{"#include <time.h>", "IOCB_CMD_POLL", "eventfd(0"} {
+					if !strings.Contains(string(src), want) {
+						t.Fatalf("generated cancel lifecycle missing %q", want)
+					}
+				}
+			}
 		})
 	}
 }
