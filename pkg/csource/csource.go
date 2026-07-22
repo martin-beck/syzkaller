@@ -881,7 +881,7 @@ func localIOResources(p prog.ExecProg, target *prog.Target) map[uint64]bool {
 			for _, copyout := range call.Copyout {
 				local[copyout.Index] = true
 			}
-		case "eventfd", "eventfd2", "timerfd_create", "inotify_init", "inotify_init1", "fanotify_init":
+		case "eventfd", "eventfd2", "timerfd_create", "inotify_init", "inotify_init1", "fanotify_init", "userfaultfd":
 			if call.Index != prog.ExecNoCopyout {
 				local[call.Index] = true
 			}
@@ -930,7 +930,7 @@ func newLocalIOResources(call prog.ExecCall, local map[uint64]bool) []uint64 {
 			ret = append(ret, copyout.Index)
 		}
 		return ret
-	case "eventfd", "eventfd2", "timerfd_create", "signalfd", "signalfd4", "inotify_init", "inotify_init1", "fanotify_init",
+	case "eventfd", "eventfd2", "timerfd_create", "signalfd", "signalfd4", "inotify_init", "inotify_init1", "fanotify_init", "userfaultfd",
 		"dup", "dup2", "dup3", "fcntl":
 		if call.Index != prog.ExecNoCopyout && local[call.Index] {
 			return []uint64{call.Index}

@@ -128,6 +128,7 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 		"r0 = timerfd_create(0x0, 0x0)\nread(r0, &(0x7f0000000000), 0x8)\n",
 		"r0 = inotify_init()\nread(r0, &(0x7f0000000000), 0x10)\n",
 		"r0 = fanotify_init(0x0, 0x0)\nread(r0, &(0x7f0000000000), 0x10)\n",
+		"r0 = userfaultfd(0x0)\nread(r0, &(0x7f0000000000), 0x20)\n",
 		"r0 = signalfd(0xffffffffffffffff, &(0x7f0000000000)=0x0, 0x8)\n" +
 			"read(r0, &(0x7f0000000040), 0x80)\n",
 		"r0 = signalfd(0xffffffffffffffff, &(0x7f0000000000)=0x0, 0x8)\n" +
