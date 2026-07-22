@@ -17,6 +17,8 @@ var discriminatorArgs = map[string][]int{
 	"bpf":         {0},
 	"fcntl":       {1},
 	"ioprio_get":  {0},
+	"keyctl":      {0},
+	"prctl":       {0},
 	"socket":      {0, 1, 2},
 	"socketpair":  {0, 1, 2},
 	"ioctl":       {0, 1},
