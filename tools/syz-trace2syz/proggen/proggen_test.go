@@ -742,6 +742,17 @@ func TestAIOCallsUseBoundedLifecycles(t *testing.T) {
 	}
 }
 
+func TestAIOCallsNormalizeSyntheticResults(t *testing.T) {
+	p := parseSingleProg(t, "io_submit() = 3")
+	if got := strings.TrimSpace(string(p.Serialize())); got != "syz_csb_io_submit()[0]" {
+		t.Fatalf("got %q", got)
+	}
+	p = parseSingleProg(t, "io_getevents() = -1 EINVAL (Invalid argument)")
+	if len(p.Calls) != 0 {
+		t.Fatalf("failed AIO call was retained: %s", p.Serialize())
+	}
+}
+
 func TestShortSafeCallsAreDropped(t *testing.T) {
 	p := parseSingleProg(t, `
 madvise() = 0
