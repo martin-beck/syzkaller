@@ -731,6 +731,14 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				futureRawIOUringFDs[fd.Index] = true
 			}
 		}
+		if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
+			if dst, ok := call.Args[1].(prog.ExecArgResult); ok && dst.DivOp == 0 && dst.AddOp == 0 &&
+				futureRawIOUringFDs[dst.Index] {
+				if src, ok := call.Args[0].(prog.ExecArgResult); ok && src.DivOp == 0 && src.AddOp == 0 {
+					futureRawIOUringFDs[src.Index] = true
+				}
+			}
+		}
 	}
 	for ci, call := range p.Calls {
 		// Track raw rings in program order so later mappings don't suppress earlier submissions.
@@ -862,6 +870,12 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				rawRing = fds[fd.Index]
 			} else if fd, ok := call.Args[0].(prog.ExecArgConst); ok {
 				rawRing = constants[int32(fd.Value)]
+			}
+			if flags, ok := call.Args[3].(prog.ExecArgConst); ok &&
+				flags.Value&ctx.target.ConstMap["IORING_ENTER_REGISTERED_RING"] != 0 {
+				// A registered-ring enter carries an index rather than a descriptor, so block it
+				// whenever its execution window contains a raw ring.
+				rawRing = len(fds) != 0 || len(constants) != 0
 			}
 		}
 		if ctx.opts.CSB && rawRing {
