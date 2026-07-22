@@ -924,10 +924,14 @@ void UNIQUE_FUNC(loop)(void)
 #endif
 
 #if CSB
+static struct sigaction UNIQUE_VAR(previous_sigpipe_action);
+
 static inline int
 UNIQUE_FUNC(bm_target_reg)(thread_ctx_t* ctx)
 {
-	if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
+	struct sigaction ignore_sigpipe = {};
+	ignore_sigpipe.sa_handler = SIG_IGN;
+	if (sigaction(SIGPIPE, &ignore_sigpipe, &UNIQUE_VAR(previous_sigpipe_action))) {
 		return -1;
 	}
 	/*{{{SYSCALLS_NET_SRV_REG}}}*/
@@ -937,6 +941,9 @@ static inline int
 UNIQUE_FUNC(bm_target_dereg)(thread_ctx_t* ctx)
 {
 	/*{{{SYSCALLS_NET_SRV_DEREG}}}*/
+	if (sigaction(SIGPIPE, &UNIQUE_VAR(previous_sigpipe_action), 0)) {
+		return -1;
+	}
 	return 0;
 }
 #endif

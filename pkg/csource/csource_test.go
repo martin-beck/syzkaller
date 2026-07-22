@@ -529,11 +529,14 @@ func TestCSBIgnoresSIGPIPE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const setup = "if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) {\n\t\treturn -1;\n\t}"
-	if !strings.Contains(string(src), setup) {
+	const setup = "if (sigaction(SIGPIPE, &ignore_sigpipe, &UNIQUE_VAR(previous_sigpipe_action))) {\n\t\treturn -1;\n\t}"
+	const teardown = "if (sigaction(SIGPIPE, &UNIQUE_VAR(previous_sigpipe_action), 0)) {\n\t\treturn -1;\n\t}"
+	if !strings.Contains(string(src), setup) || !strings.Contains(string(src), teardown) {
 		t.Fatal("CSB registration does not safely ignore SIGPIPE")
 	}
-	probe := []byte("#include <signal.h>\nint main(void)\n{\n\t" + setup + "\n\treturn 0;\n}\n")
+	probe := []byte("#include <signal.h>\n#define UNIQUE_VAR(x) x\nstatic struct sigaction UNIQUE_VAR(previous_sigpipe_action);\n" +
+		"int main(void)\n{\n\tstruct sigaction ignore_sigpipe = {};\n\tignore_sigpipe.sa_handler = SIG_IGN;\n\t" +
+		setup + "\n\t" + teardown + "\n\treturn 0;\n}\n")
 	bin, err := Build(target, probe)
 	if err != nil {
 		t.Fatal(err)
