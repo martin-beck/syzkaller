@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -35,6 +36,7 @@ type reduceStats struct {
 	DroppedMotif      int
 	DroppedDependency int
 	DroppedResources  int
+	WeightedCalls     int
 }
 
 var (
@@ -72,17 +74,52 @@ func main() {
 		IncludeFilenames:  *flagIncludeFilenames,
 	}
 	reduced, stats := reduceProg(p, opts)
+	reduced.Comments = append([]string(nil), p.Comments...)
 	if err := os.MkdirAll(filepath.Dir(*flagOut), 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create output directory: %v\n", err)
 		os.Exit(1)
 	}
-	if err := osutil.WriteFile(*flagOut, reduced.Serialize()); err != nil {
+	if err := osutil.WriteFile(*flagOut, serializeWithComments(reduced)); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to write reduced program: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "Reduced %d -> %d calls across %d motifs (budget=%d motif=%d dependency=%d resources=%d)\n",
-		stats.InputCalls, stats.OutputCalls, stats.Motifs, stats.DroppedBudget, stats.DroppedMotif,
+	fmt.Fprintf(os.Stderr, "Reduced %d -> %d calls (%d frequency-weighted) across %d motifs "+
+		"(budget=%d motif=%d dependency=%d resources=%d)\n",
+		stats.InputCalls, stats.OutputCalls, stats.WeightedCalls, stats.Motifs, stats.DroppedBudget, stats.DroppedMotif,
 		stats.DroppedDependency, stats.DroppedResources)
+}
+
+// serializeWithComments restores trace metadata after CloneFilter serializes only the syz program.
+func serializeWithComments(p *prog.Prog) []byte {
+	data := p.Serialize()
+	comments := csbComments(p)
+	if len(comments) == 0 {
+		return data
+	}
+	var b strings.Builder
+	for _, comment := range comments {
+		fmt.Fprintf(&b, "# %s\n", comment)
+	}
+	b.Write(data)
+	return []byte(b.String())
+}
+
+func csbComments(p *prog.Prog) []string {
+	var ret []string
+	seen := make(map[string]bool)
+	add := func(comment string) {
+		if strings.HasPrefix(comment, "csb.trace.") && !seen[comment] {
+			ret = append(ret, comment)
+			seen[comment] = true
+		}
+	}
+	for _, comment := range p.Comments {
+		add(comment)
+	}
+	for _, call := range p.Calls {
+		add(call.Comment)
+	}
+	return ret
 }
 
 func readProg(path string) (*prog.Prog, error) {
@@ -94,6 +131,7 @@ func readProg(path string) (*prog.Prog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read %s: %w", path, err)
 	}
+	comments := csbCommentsFromData(data)
 	p, err := target.Deserialize(data, prog.NonStrict)
 	if err != nil {
 		p, err = target.Deserialize(data, prog.NonStrictUnsafe)
@@ -106,7 +144,23 @@ func readProg(path string) (*prog.Prog, error) {
 			return nil, fmt.Errorf("failed to deserialize sanitized %s: %w", path, err)
 		}
 	}
+	p.Comments = comments
 	return p, nil
+}
+
+func csbCommentsFromData(data []byte) []string {
+	var ret []string
+	seen := make(map[string]bool)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "#")
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "csb.trace.") && !seen[line] {
+			ret = append(ret, line)
+			seen[line] = true
+		}
+	}
+	return ret
 }
 
 func sanitizeFilenames(p *prog.Prog) {
@@ -154,6 +208,7 @@ func escapingFilename(file string) bool {
 func reduceProg(p *prog.Prog, opts reduceOptions) (*prog.Prog, reduceStats) {
 	stats := reduceStats{InputCalls: len(p.Calls)}
 	motifKeys := make([]string, len(p.Calls))
+	execKeys := executableCallKeys(p)
 	motifRanks := make([]int, len(p.Calls))
 	motifCounts := make(map[string]int)
 	for i, call := range p.Calls {
@@ -164,12 +219,28 @@ func reduceProg(p *prog.Prog, opts reduceOptions) (*prog.Prog, reduceStats) {
 	}
 	stats.Motifs = len(motifCounts)
 
+	// Every syscall variant must survive reduction. Select the representative
+	// with the smallest dependency closure so that the invariant costs as few
+	// calls as possible. Mandatory calls override the configured size and live
+	// resource caps: silently losing a syscall variant is worse than exceeding a
+	// soft reduction target.
+	mandatory := mandatoryExecutableCalls(p, execKeys)
 	keep := make([]bool, len(p.Calls))
 	available := make(map[*prog.ResultArg]bool)
 	liveResources := make(map[*prog.ResultArg]bool)
+	keptMotifs := make(map[string]int)
 	for i, call := range p.Calls {
+		if mandatory[i] {
+			keepCall(call, i, keep, available, liveResources, &stats)
+			keptMotifs[motifKeys[i]]++
+			continue
+		}
 		if opts.MaxCalls > 0 && stats.OutputCalls >= opts.MaxCalls {
 			stats.DroppedBudget++
+			continue
+		}
+		if opts.MaxMotifInstances > 0 && keptMotifs[motifKeys[i]] >= opts.MaxMotifInstances {
+			stats.DroppedMotif++
 			continue
 		}
 		if !sampleMotif(motifRanks[i], motifCounts[motifKeys[i]], opts) {
@@ -191,15 +262,8 @@ func reduceProg(p *prog.Prog, opts reduceOptions) (*prog.Prog, reduceStats) {
 			stats.DroppedResources++
 			continue
 		}
-		keep[i] = true
-		stats.OutputCalls++
-		for _, res := range produced {
-			available[res] = true
-			liveResources[res] = true
-		}
-		for _, res := range closedResources(call) {
-			delete(liveResources, res)
-		}
+		keepCall(call, i, keep, available, liveResources, &stats)
+		keptMotifs[motifKeys[i]]++
 	}
 
 	if stats.OutputCalls == 0 && len(p.Calls) != 0 {
@@ -207,7 +271,230 @@ func reduceProg(p *prog.Prog, opts reduceOptions) (*prog.Prog, reduceStats) {
 		stats.OutputCalls = 1
 	}
 	reduced := p.CloneFilter(keep)
+	stats.WeightedCalls = applyFrequencyWeights(p, reduced, keep, execKeys)
 	return reduced, stats
+}
+
+func keepCall(call *prog.Call, index int, keep []bool, available, liveResources map[*prog.ResultArg]bool,
+	stats *reduceStats) {
+	keep[index] = true
+	stats.OutputCalls++
+	for _, res := range producedResources(call) {
+		available[res] = true
+		liveResources[res] = true
+	}
+	for _, res := range closedResources(call) {
+		delete(liveResources, res)
+	}
+}
+
+// executableCallKeys identifies calls that rerun can safely combine. Pointer
+// addresses, copied-in data, and resource identities are executable arguments;
+// differing in any of them requires retaining a separate structural call.
+func executableCallKeys(p *prog.Prog) []string {
+	resourceIDs := make(map[*prog.ResultArg]int)
+	for _, call := range p.Calls {
+		for _, res := range producedResources(call) {
+			if _, ok := resourceIDs[res]; !ok {
+				resourceIDs[res] = len(resourceIDs)
+			}
+		}
+	}
+	keys := make([]string, len(p.Calls))
+	for i, call := range p.Calls {
+		var b strings.Builder
+		b.WriteString(call.Meta.Name)
+		for _, arg := range call.Args {
+			b.WriteByte('|')
+			writeExecutableArgKey(&b, arg, resourceIDs)
+		}
+		keys[i] = b.String()
+	}
+	return keys
+}
+
+// canFrequencyWeight reports whether csource can repeat a call without losing
+// per-invocation behavior. Copyins run only once before a rerun loop.
+func canFrequencyWeight(call *prog.Call) bool {
+	return call.Props.FailNth == 0 && !call.Props.Async && !hasCopyin(call)
+}
+
+func hasCopyin(call *prog.Call) bool {
+	found := false
+	prog.ForeachArg(call, func(arg prog.Arg, ctx *prog.ArgCtx) {
+		if found || ctx.Base == nil {
+			return
+		}
+		switch arg.(type) {
+		case *prog.GroupArg, *prog.UnionArg:
+			return
+		}
+		typ := arg.Type()
+		found = arg.Dir() != prog.DirOut && !prog.IsPad(typ) &&
+			(arg.Size() != 0 || typ.IsBitfield())
+	})
+	return found
+}
+
+func writeExecutableArgKey(b *strings.Builder, arg prog.Arg, resourceIDs map[*prog.ResultArg]int) {
+	switch arg := arg.(type) {
+	case *prog.ConstArg:
+		fmt.Fprintf(b, "c:%x", arg.Val)
+	case *prog.ResultArg:
+		if arg.Res == nil {
+			fmt.Fprintf(b, "r:v%x", arg.Val)
+		} else {
+			fmt.Fprintf(b, "r:%d/%x+%x", resourceIDs[arg.Res], arg.OpDiv, arg.OpAdd)
+		}
+	case *prog.PointerArg:
+		fmt.Fprintf(b, "p:%x:%x(", arg.Address, arg.VmaSize)
+		if arg.Res != nil {
+			writeExecutableArgKey(b, arg.Res, resourceIDs)
+		}
+		b.WriteByte(')')
+	case *prog.DataArg:
+		if arg.Dir() == prog.DirOut {
+			fmt.Fprintf(b, "d:out:%x", arg.Size())
+		} else {
+			fmt.Fprintf(b, "d:in:%x", arg.Data())
+		}
+	case *prog.GroupArg:
+		b.WriteString("g[")
+		for _, inner := range arg.Inner {
+			writeExecutableArgKey(b, inner, resourceIDs)
+			b.WriteByte(';')
+		}
+		b.WriteByte(']')
+	case *prog.UnionArg:
+		fmt.Fprintf(b, "u:%d(", arg.Index)
+		writeExecutableArgKey(b, arg.Option, resourceIDs)
+		b.WriteByte(')')
+	default:
+		panic(fmt.Sprintf("unsupported executable argument type %T", arg))
+	}
+}
+
+func mandatoryExecutableCalls(p *prog.Prog, execKeys []string) []bool {
+	producer := make(map[*prog.ResultArg]int)
+	for i, call := range p.Calls {
+		for _, res := range producedResources(call) {
+			producer[res] = i
+		}
+	}
+	closures := make([][]int, len(p.Calls))
+	for i := range p.Calls {
+		seen := make(map[int]bool)
+		var visit func(int)
+		visit = func(index int) {
+			if seen[index] {
+				return
+			}
+			seen[index] = true
+			for _, res := range usedResources(p.Calls[index]) {
+				if res.Res != nil {
+					if dep, ok := producer[res.Res]; ok {
+						visit(dep)
+					}
+				}
+			}
+		}
+		visit(i)
+		for index := range seen {
+			closures[i] = append(closures[i], index)
+		}
+		sort.Ints(closures[i])
+	}
+
+	best := make(map[string]int)
+	bestRerunnable := make(map[string]int)
+	for i, call := range p.Calls {
+		key := execKeys[i]
+		previous, ok := best[key]
+		if !ok || len(closures[i]) < len(closures[previous]) {
+			best[key] = i
+		}
+		if canFrequencyWeight(call) {
+			previous, ok := bestRerunnable[key]
+			if !ok || len(closures[i]) < len(closures[previous]) {
+				bestRerunnable[key] = i
+			}
+		}
+	}
+	mandatory := make([]bool, len(p.Calls))
+	addClosure := func(representative int) {
+		for _, index := range closures[representative] {
+			mandatory[index] = true
+		}
+	}
+	for name, representative := range best {
+		if rerunnable, ok := bestRerunnable[name]; ok {
+			representative = rerunnable
+		}
+		addClosure(representative)
+	}
+	// Retain calls that cannot safely use rerun and their dependencies.
+	for i, call := range p.Calls {
+		if !canFrequencyWeight(call) {
+			addClosure(i)
+		}
+	}
+	return mandatory
+}
+
+// applyFrequencyWeights accounts for every original invocation in the reduced
+// program. Only calls with identical executable arguments share a weight:
+// csource performs copyins once and rerun repeats the retained call verbatim.
+// mandatoryExecutableCalls guarantees a retained representative for every key.
+func applyFrequencyWeights(original, reduced *prog.Prog, keep []bool, execKeys []string) int {
+	byExecutableCall := make(map[string][]int)
+	originalToReduced := make([]int, len(original.Calls))
+	for i := range originalToReduced {
+		originalToReduced[i] = -1
+	}
+	for originalIndex, reducedIndex := 0, 0; originalIndex < len(keep); originalIndex++ {
+		if !keep[originalIndex] {
+			continue
+		}
+		originalToReduced[originalIndex] = reducedIndex
+		if canFrequencyWeight(original.Calls[originalIndex]) {
+			key := execKeys[originalIndex]
+			byExecutableCall[key] = append(byExecutableCall[key], originalIndex)
+		}
+		reducedIndex++
+	}
+
+	weights := make([]int, len(reduced.Calls))
+	for originalIndex, call := range original.Calls {
+		if !canFrequencyWeight(call) {
+			weights[originalToReduced[originalIndex]] += 1 + call.Props.Rerun
+			continue
+		}
+		candidates := byExecutableCall[execKeys[originalIndex]]
+		representative := nearestIndex(candidates, originalIndex)
+		weight := 1 + call.Props.Rerun
+		weights[originalToReduced[representative]] += weight
+	}
+	total := 0
+	for i, weight := range weights {
+		// csource emits the call once, followed by Props.Rerun extra calls.
+		reduced.Calls[i].Props.Rerun = weight - 1
+		total += weight
+	}
+	return total
+}
+
+func nearestIndex(indices []int, target int) int {
+	pos := sort.SearchInts(indices, target)
+	if pos == 0 {
+		return indices[0]
+	}
+	if pos == len(indices) {
+		return indices[len(indices)-1]
+	}
+	if target-indices[pos-1] <= indices[pos]-target {
+		return indices[pos-1]
+	}
+	return indices[pos]
 }
 
 // sampleMotif preserves boundary instances and spreads the remaining samples across the motif.
