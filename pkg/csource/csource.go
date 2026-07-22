@@ -687,9 +687,21 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	var calls []string
 	csumSeq := 0
 	rawIOUring := false
+	ioUringFDs := make(map[uint64]bool)
 	for _, call := range p.Calls {
+		if call.Meta.CallName == "io_uring_setup" && call.Index != prog.ExecNoCopyout {
+			ioUringFDs[call.Index] = true
+		}
 		if call.Meta.Name == "mmap$IORING_OFF_SQ_RING" || call.Meta.Name == "mmap$IORING_OFF_SQES" {
 			rawIOUring = true
+		} else if call.Meta.CallName == "mmap" && len(call.Args) > 5 {
+			fd, fdOK := call.Args[4].(prog.ExecArgResult)
+			offset, offsetOK := call.Args[5].(prog.ExecArgConst)
+			if fdOK && offsetOK && ioUringFDs[fd.Index] &&
+				(offset.Value == ctx.target.ConstMap["IORING_OFF_SQ_RING"] ||
+					offset.Value == ctx.target.ConstMap["IORING_OFF_SQES"]) {
+				rawIOUring = true
+			}
 		}
 	}
 	for ci, call := range p.Calls {
@@ -700,6 +712,16 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		// Copyin.
 		for _, copyin := range call.Copyin {
 			ctx.copyin(w, &csumSeq, copyin)
+		}
+		if ctx.opts.CSB && call.Meta.CallName == "io_uring_setup" {
+			if params, ok := call.Args[1].(prog.ExecArgConst); ok {
+				offset := ""
+				if valInMMapRange(ctx, params.Value) {
+					offset = "+PTR_OFFSET"
+				}
+				fmt.Fprintf(w, "\tNONFAILING(*(uint32*)(0x%x%s) &= ~%d);\n", params.Value+8, offset,
+					ctx.target.ConstMap["IORING_SETUP_SQPOLL"])
+			}
 		}
 		if ctx.opts.CSB && call.Meta.Name == "syz_io_uring_submit" {
 			if sqe, ok := call.Args[2].(prog.ExecArgConst); ok {

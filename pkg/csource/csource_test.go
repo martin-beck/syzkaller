@@ -170,8 +170,8 @@ func TestCSBProtectRawIoUring(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := target.Deserialize([]byte("r0 = io_uring_setup(0x1, &(0x7f0000000000))\n"+
-		"mmap$IORING_OFF_SQES(&(0x7f0000001000/0x1000)=nil, 0x1000, 0x3, 0x1, r0, 0x10000000)\n"+
+	p, err := target.Deserialize([]byte("r0 = io_uring_setup(0x1, &(0x7f0000000000)={0x0, 0x0, 0x2})\n"+
+		"mmap(&(0x7f0000001000/0x1000)=nil, 0x1000, 0x3, 0x1, r0, 0x10000000)\n"+
 		"io_uring_enter(r0, 0x1, 0x0, 0x0, 0x0, 0x0)\n"), prog.NonStrict)
 	if err != nil {
 		t.Fatal(err)
@@ -189,6 +189,9 @@ func TestCSBProtectRawIoUring(t *testing.T) {
 		guarded := strings.Contains(string(src)[at:], "/*to_submit=*/0")
 		if guarded != csb {
 			t.Fatalf("CSB=%v: raw submission guarded=%v", csb, guarded)
+		}
+		if got := strings.Contains(string(src), "&= ~2"); got != csb {
+			t.Fatalf("CSB=%v: SQPOLL disabled=%v", csb, got)
 		}
 	}
 }
