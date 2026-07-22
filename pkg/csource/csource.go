@@ -691,6 +691,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	callComments []string, msgSizes []uint64, initIndices []int, dataMmap bool) ([]string, []uint64) {
 	var calls []string
 	csumSeq := 0
+	localIO := localIOResources(p)
 	for ci, call := range p.Calls {
 		w := new(bytes.Buffer)
 		if addComments {
@@ -699,6 +700,14 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		// Copyin.
 		for _, copyin := range call.Copyin {
 			ctx.copyin(w, &csumSeq, copyin)
+		}
+		if ctx.opts.CSB && (call.Meta.Name == "ioctl$int_in" || call.Meta.Name == "ioctl$auto_FIONBIO") &&
+			localIOArg(call, localIO) {
+			cmd, cmdOK := call.Args[1].(prog.ExecArgConst)
+			value, valueOK := call.Args[2].(prog.ExecArgConst)
+			if cmdOK && valueOK && cmd.Value == ctx.target.ConstMap["FIONBIO"] && valInMMapRange(ctx, value.Value) {
+				fmt.Fprintf(w, "\tNONFAILING(*(uint64*)(0x%x+PTR_OFFSET) = 1);\n", value.Value)
+			}
 		}
 
 		if call.Props.FailNth > 0 {
@@ -712,6 +721,30 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		if slices.Contains(initIndices, ci) {
 			initCall = true
 		}
+		if ctx.opts.CSB && call.Meta.Name == "fcntl$setstatus" && localIOArg(call, localIO) {
+			args := append([]prog.ExecArg(nil), call.Args...)
+			flags := args[2].(prog.ExecArgConst)
+			flags.Value |= ctx.target.ConstMap["O_NONBLOCK"]
+			args[2] = flags
+			call.Args = args
+		}
+		if ctx.opts.CSB && ctx.target.OS == targets.Linux {
+			// Opening a FIFO for one end only must not stall a generated workload.
+			flagArg := -1
+			switch call.Meta.CallName {
+			case "open":
+				flagArg = 1
+			case "openat":
+				flagArg = 2
+			}
+			if flagArg != -1 {
+				args := append([]prog.ExecArg(nil), call.Args...)
+				flags := args[flagArg].(prog.ExecArgConst)
+				flags.Value |= ctx.target.ConstMap["O_NONBLOCK"]
+				args[flagArg] = flags
+				call.Args = args
+			}
+		}
 
 		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall, dataMmap)
 
@@ -724,6 +757,13 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		// Copyout.
 		if resCopyout || argCopyout {
 			ctx.copyout(w, call, resCopyout)
+		}
+		if ctx.opts.CSB && ctx.target.OS == targets.Linux {
+			for _, index := range newLocalIOResources(call, localIO) {
+				fd := fmt.Sprintf("%v[%v]", ctx.resultArrayName(), index)
+				// Duplicates share flags, so keep local descriptors nonblocking for their lifetime.
+				fmt.Fprintf(w, "\t{ int flags = fcntl(%[1]s, F_GETFL); if (flags != -1) fcntl(%[1]s, F_SETFL, flags | O_NONBLOCK); }\n", fd)
+			}
 		}
 		calls = append(calls, w.String())
 
@@ -819,6 +859,56 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	NetOpsFDsAccept = tmpOps
 
 	return calls, p.Vars
+}
+
+func localIOResources(p prog.ExecProg) map[uint64]bool {
+	local := make(map[uint64]bool)
+	for _, call := range p.Calls {
+		switch call.Meta.CallName {
+		case "pipe", "pipe2", "socketpair":
+			for _, copyout := range call.Copyout {
+				local[copyout.Index] = true
+			}
+		case "eventfd", "eventfd2":
+			if call.Index != prog.ExecNoCopyout {
+				local[call.Index] = true
+			}
+		case "dup", "dup2", "dup3":
+			if call.Index != prog.ExecNoCopyout && localIOArg(call, local) {
+				local[call.Index] = true
+			}
+		case "fcntl":
+			if strings.HasPrefix(call.Meta.Name, "fcntl$dupfd") &&
+				call.Index != prog.ExecNoCopyout && localIOArg(call, local) {
+				local[call.Index] = true
+			}
+		}
+	}
+	return local
+}
+
+func localIOArg(call prog.ExecCall, local map[uint64]bool) bool {
+	if len(call.Args) == 0 {
+		return false
+	}
+	arg, ok := call.Args[0].(prog.ExecArgResult)
+	return ok && local[arg.Index]
+}
+
+func newLocalIOResources(call prog.ExecCall, local map[uint64]bool) []uint64 {
+	switch call.Meta.CallName {
+	case "pipe", "pipe2", "socketpair":
+		var ret []uint64
+		for _, copyout := range call.Copyout {
+			ret = append(ret, copyout.Index)
+		}
+		return ret
+	case "eventfd", "eventfd2", "dup", "dup2", "dup3", "fcntl":
+		if call.Index != prog.ExecNoCopyout && local[call.Index] {
+			return []uint64{call.Index}
+		}
+	}
+	return nil
 }
 
 func loopIdenticalCalls(calls []string, minRun int) []string {

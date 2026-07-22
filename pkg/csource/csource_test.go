@@ -12,7 +12,9 @@ import (
 	"runtime"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/google/syzkaller/executor"
 	"github.com/google/syzkaller/pkg/testutil"
@@ -107,6 +109,100 @@ func TestCSBReappliesCurrentAffinity(t *testing.T) {
 	assert.Contains(t, string(src), "static __thread cpu_set_t* mask = NULL")
 	assert.Contains(t, string(src), "mask = CPU_ALLOC(cpus)")
 	assert.Contains(t, string(src), "sched_getaffinity(0, mask_size, mask)")
+}
+
+func TestCSBBoundsLocalIO(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []string{
+		"openat(0xffffffffffffff9c, &(0x7f0000000000)='./fifo\\x00', 0x0, 0x0)\n",
+		"socketpair$unix(0x1, 0x1, 0x0, &(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n" +
+			"fcntl$setstatus(r0, 0x4, 0x0)\n" +
+			"read(r0, &(0x7f0000000040), 0x1)\n",
+		"pipe(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n" +
+			"r2 = dup(r1)\nwrite(r2, &(0x7f0000000040)=\"00\", 0x1)\n",
+		"r0 = eventfd(0x0)\nread$eventfd(r0, &(0x7f0000000000), 0x8)\n",
+		"pipe(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n" +
+			"ioctl$int_in(r0, 0x5421, &(0x7f0000000040)=0x0)\nread(r0, &(0x7f0000000080), 0x1)\n",
+		"pipe(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n" +
+			"ioctl$auto_FIONBIO(r0, 0x5421, 0x200000000040)\nread(r0, &(0x7f0000000080), 0x1)\n",
+	}
+	for _, input := range tests {
+		p, err := target.Deserialize([]byte(input), prog.NonStrict)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src, _, err := Write(p, Options{CSB: true, HandleSegv: true, Slowdown: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"F_GETFL", "O_NONBLOCK", "F_SETFL"} {
+			if !strings.HasPrefix(input, "openat") {
+				assert.Contains(t, string(src), want)
+			}
+		}
+		assert.Contains(t, string(src), "O_NONBLOCK")
+		assert.NotContains(t, string(src), "csb_io_errno_")
+		if strings.Contains(input, "fcntl$setstatus") {
+			assert.Contains(t, string(src), "/*flags=O_NONBLOCK*/0x800")
+		}
+		if strings.Contains(input, "FIONBIO") {
+			assert.Contains(t, string(src), "NONFAILING(*(uint64_t*)")
+			assert.Contains(t, string(src), "+PTR_OFFSET) = 1")
+		}
+		src, _, err = Write(p, Options{Slowdown: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.NotContains(t, string(src), "F_SETFL")
+	}
+}
+
+func TestCSBFIONBIOInvalidPointer(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("pipe(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\nioctl$int_in(r0, 0x5421, 0x0)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, HandleSegv: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.NotContains(t, string(src), "uint64_t*)(0x0")
+}
+
+func TestLocalIONonblockingLifetime(t *testing.T) {
+	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Close(fds[0])
+	defer syscall.Close(fds[1])
+	if err := syscall.SetNonblock(fds[0], true); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 8)
+	for range 8 {
+		go func() {
+			_, err := syscall.Read(fds[0], make([]byte, 1))
+			done <- err
+		}()
+	}
+	for range 8 {
+		select {
+		case err := <-done:
+			if err != syscall.EAGAIN {
+				t.Fatalf("read returned %v, want EAGAIN", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("concurrent read blocked")
+		}
+	}
 }
 
 func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {
