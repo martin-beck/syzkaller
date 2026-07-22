@@ -15,10 +15,18 @@ import (
 	"github.com/google/syzkaller/pkg/log"
 )
 
-func parseSyscall(scanner *bufio.Scanner) (int, *Syscall) {
-	lex := newStraceLexer(scanner.Bytes())
+func parseSyscall(data []byte) (int, *Syscall) {
+	lex := newStraceLexer(data)
 	ret := StraceParse(lex)
 	return ret, lex.result
+}
+
+func normalizeStraceLine(line string) string {
+	// strace marks a truncated CPU list with a trailing ellipsis.
+	if strings.Contains(line, " sched_setaffinity(") || strings.HasPrefix(line, "sched_setaffinity(") {
+		return strings.Replace(line, ", ...]", "]", 1)
+	}
+	return line
 }
 
 func shouldSkip(line string) bool {
@@ -41,8 +49,9 @@ func ParseData(data []byte, splitThreads bool) (*TraceTree, *Trace, error) {
 		if shouldSkip(line) {
 			continue
 		}
+		line = normalizeStraceLine(line)
 		log.Logf(4, "scanning call: %s", line)
-		ret, call := parseSyscall(scanner)
+		ret, call := parseSyscall([]byte(line))
 		if call == nil || ret != 0 {
 			return nil, nil, fmt.Errorf("failed to parse line: %v", line)
 		}
