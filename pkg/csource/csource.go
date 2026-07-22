@@ -698,7 +698,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		if ctx.opts.CSB && call.Meta.Name == "syz_io_uring_submit" {
 			if sqe, ok := call.Args[2].(prog.ExecArgConst); ok {
 				// IORING_OP_CLOSE stores its fd at offset 4 in the SQE.
-				fmt.Fprintf(w, "\tif (*(uint8_t*)0x%x == 19 && *(int32_t*)0x%x <= 2) *(int32_t*)0x%x = -1;\n",
+				fmt.Fprintf(w, "\tif (*(uint8*)(0x%x+PTR_OFFSET) == 19 && *(int32*)(0x%x+PTR_OFFSET) <= 2) *(int32*)(0x%x+PTR_OFFSET) = -1;\n",
 					sqe.Value, sqe.Value+4, sqe.Value+4)
 			}
 		}

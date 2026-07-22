@@ -149,6 +149,9 @@ func TestCSBProtectControlFDsIoUring(t *testing.T) {
 		if got := strings.Contains(string(src), "== 19 &&"); got != csb {
 			t.Fatalf("CSB=%v: io_uring close guard present=%v", csb, got)
 		}
+		if csb {
+			assert.Contains(t, string(src), "+PTR_OFFSET) == 19")
+		}
 	}
 }
 
