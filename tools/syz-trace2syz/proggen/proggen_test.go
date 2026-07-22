@@ -643,8 +643,9 @@ func TestTaskCreationLifecycleFromTrace(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(src), test.want) {
-				t.Fatalf("generated CSB header missing %q:\n%s", test.want, src)
+			helper := "UNIQUE_FUNC(" + strings.TrimSuffix(test.want, "()") + ")()"
+			if !strings.Contains(string(src), helper) {
+				t.Fatalf("generated CSB header missing %q:\n%s", helper, src)
 			}
 		})
 	}
@@ -719,7 +720,7 @@ func TestAIOCallsUseBoundedLifecycles(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if helper := "syz_csb_" + name + "()"; !strings.Contains(string(src), helper) {
+			if helper := "UNIQUE_FUNC(syz_csb_" + name + ")()"; !strings.Contains(string(src), helper) {
 				t.Fatalf("generated CSB header missing %q", helper)
 			}
 		})
@@ -738,7 +739,7 @@ func TestRtSigactionUsesGeneratedHandler(t *testing.T) {
 	if want := "UNIQUE_FUNC(syz_csb_rt_sigaction)"; !strings.Contains(string(src), want) {
 		t.Fatalf("generated CSB header missing %q", want)
 	}
-	for _, want := range []string{"pthread_mutex_lock", "pthread_mutex_unlock"} {
+	for _, want := range []string{"#ifndef CSB_SIGNAL_LOCK_DEFINED", "pthread_mutex_lock", "pthread_mutex_unlock"} {
 		if !strings.Contains(string(src), want) {
 			t.Fatalf("generated helper missing %q", want)
 		}
@@ -910,7 +911,7 @@ func TestExitCallsUseBoundedLifecycles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"syz_csb_exit()", "syz_csb_exit_group()"} {
+	for _, want := range []string{"UNIQUE_FUNC(syz_csb_exit)", "UNIQUE_FUNC(syz_csb_exit_group)"} {
 		if !strings.Contains(string(src), want) {
 			t.Fatalf("generated CSB header missing %q", want)
 		}
