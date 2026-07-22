@@ -847,8 +847,18 @@ func (ctx *context) genArray(syzType *prog.ArrayType, dir prog.Dir, traceType pa
 			// byte would change the layout of arrays with wider elements.
 			return syzType.DefaultArg(dir)
 		}
-		for _, val := range []byte(a.Val) {
+		vals := []byte(a.Val)
+		if syzType.Kind == prog.ArrayRangeLen && syzType.RangeBegin == syzType.RangeEnd &&
+			uint64(len(vals)) > syzType.RangeBegin {
+			vals = vals[:syzType.RangeBegin]
+		}
+		for _, val := range vals {
 			args = append(args, ctx.genArg(syzType.Elem, dir, parser.Constant(val)))
+		}
+		if syzType.Kind == prog.ArrayRangeLen && syzType.RangeBegin == syzType.RangeEnd {
+			for uint64(len(args)) < syzType.RangeBegin {
+				args = append(args, syzType.Elem.DefaultArg(dir))
+			}
 		}
 	default:
 		log.Fatalf("unsupported type for array: %#v", traceType)
