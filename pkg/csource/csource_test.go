@@ -127,8 +127,8 @@ func TestCSBInvalidatesResultsBeforeCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"UNIQUE_VAR(ctx->r)[0] = -1;\n\tres = syscall(__NR_openat",
-		"UNIQUE_VAR(ctx->r)[1] = -1;\n\tUNIQUE_VAR(ctx->r)[2] = -1;\n\tres = syscall(__NR_pipe",
+		"UNIQUE_VAR(ctx->r)[0] = 0xffffffffffffffff;\n\tres = syscall(__NR_openat",
+		"UNIQUE_VAR(ctx->r)[1] = 0xffffffffffffffff;\n\tUNIQUE_VAR(ctx->r)[2] = 0xffffffffffffffff;\n\tres = syscall(__NR_pipe",
 	} {
 		assert.Contains(t, string(src), want)
 	}
@@ -137,6 +137,15 @@ func TestCSBInvalidatesResultsBeforeCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.NotContains(t, string(src), "r[0] = -1;")
+	p, err = target.Deserialize([]byte("r0 = add_key(0x0, 0x0, 0x0, 0x0, 0x0)\nkeyctl$revoke(0x3, r0)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err = Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "UNIQUE_VAR(ctx->r)[0] = 0x0;\n\tres = syscall(__NR_add_key")
 }
 
 func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {

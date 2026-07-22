@@ -707,7 +707,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		if slices.Contains(initIndices, ci) {
 			initCall = true
 		}
-		ctx.invalidateCSBResults(w, call, resCopyout)
+		ctx.invalidateCSBResults(w, call, resCopyout, p.Vars)
 
 		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall, dataMmap)
 
@@ -817,15 +817,15 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	return calls, p.Vars
 }
 
-func (ctx *context) invalidateCSBResults(w *bytes.Buffer, call prog.ExecCall, resCopyout bool) {
+func (ctx *context) invalidateCSBResults(w *bytes.Buffer, call prog.ExecCall, resCopyout bool, defaults []uint64) {
 	if !ctx.opts.CSB {
 		return
 	}
 	if resCopyout {
-		fmt.Fprintf(w, "\t%v[%v] = -1;\n", ctx.resultArrayName(), call.Index)
+		fmt.Fprintf(w, "\t%v[%v] = 0x%x;\n", ctx.resultArrayName(), call.Index, defaults[call.Index])
 	}
 	for _, copyout := range call.Copyout {
-		fmt.Fprintf(w, "\t%v[%v] = -1;\n", ctx.resultArrayName(), copyout.Index)
+		fmt.Fprintf(w, "\t%v[%v] = 0x%x;\n", ctx.resultArrayName(), copyout.Index, defaults[copyout.Index])
 	}
 }
 
