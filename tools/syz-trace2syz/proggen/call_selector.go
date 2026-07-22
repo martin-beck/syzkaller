@@ -17,6 +17,8 @@ var discriminatorArgs = map[string][]int{
 	"bpf":         {0},
 	"fcntl":       {1},
 	"ioprio_get":  {0},
+	"keyctl":      {0},
+	"prctl":       {0},
 	"socket":      {0, 1, 2},
 	"socketpair":  {0, 1, 2},
 	"ioctl":       {0, 1},
@@ -31,6 +33,21 @@ var discriminatorArgs = map[string][]int{
 	"sendmsg":     {0},
 	"getsockname": {0},
 	"openat":      {1},
+}
+
+func (cs *defaultCallSelector) callDiscriminators(call *parser.Syscall) []int {
+	discriminators := discriminatorArgs[call.CallName]
+	if len(call.Args) > 1 {
+		option, ok := call.Args[0].(parser.Constant)
+		if call.CallName == "keyctl" && ok && option.Val() == cs.target.ConstMap["KEYCTL_RESTRICT_KEYRING"] {
+			return []int{0, 3}
+		}
+		if call.CallName == "prctl" && ok && (option.Val() == cs.target.ConstMap["PR_SET_MM"] ||
+			option.Val() == cs.target.ConstMap["PR_SET_SYSCALL_USER_DISPATCH"]) {
+			return []int{0, 1}
+		}
+	}
+	return discriminators
 }
 
 var openDiscriminatorArgs = map[string]int{
@@ -176,7 +193,7 @@ type defaultCallSelector struct {
 // Select returns the best matching descrimination for this syscall.
 func (cs *defaultCallSelector) Select(call *parser.Syscall) *prog.Syscall {
 	var match *prog.Syscall
-	discriminators := discriminatorArgs[call.CallName]
+	discriminators := cs.callDiscriminators(call)
 	if len(discriminators) == 0 {
 		return nil
 	}
@@ -295,6 +312,9 @@ func (cs *defaultCallSelector) matchCall(meta *prog.Syscall, call *parser.Syscal
 				return -1
 			}
 		case *prog.PtrType:
+			if constant, ok := arg.(parser.Constant); ok && constant.Val() == 0 {
+				continue
+			}
 			switch r := t.Elem.(type) {
 			case *prog.BufferType:
 				matched := false
@@ -304,6 +324,10 @@ func (cs *defaultCallSelector) matchCall(meta *prog.Syscall, call *parser.Syscal
 				}
 				if r.Kind != prog.BufferString {
 					return -1
+				}
+				if len(r.Values) == 0 {
+					score++
+					break
 				}
 				for _, val := range r.Values {
 					matched, _ = cs.matchFilename([]byte(val), []byte(buffer.Val))
