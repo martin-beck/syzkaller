@@ -765,6 +765,10 @@ func TestRemainingRtSignalCallsUseOwnedSignals(t *testing.T) {
 			if name == "rt_sigsuspend" && !strings.Contains(string(src), "__NR_rt_tgsigqueueinfo") {
 				t.Fatal("suspend wake-up is not thread-directed")
 			}
+			if name == "rt_sigqueueinfo" &&
+				(!strings.Contains(string(src), "SIG_UNBLOCK") || !strings.Contains(string(src), "SIG_SETMASK")) {
+				t.Fatal("queued signal mask is not restored")
+			}
 		})
 	}
 }
@@ -804,7 +808,7 @@ func TestExecLifecycleCall(t *testing.T) {
 	}
 }
 
-func TestSkipOnlyRootBootstrapExec(t *testing.T) {
+func TestSkipOnlyLeadingBootstrapExec(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {
 		t.Fatal(err)
@@ -821,8 +825,8 @@ func TestSkipOnlyRootBootstrapExec(t *testing.T) {
 	if got := strings.Count(root, "syz_csb_execve"); got != 1 {
 		t.Fatalf("root contains %d exec lifecycles, want 1:\n%s", got, root)
 	}
-	if !strings.Contains(root, "getppid") {
-		t.Fatalf("root lost calls after its skipped bootstrap exec:\n%s", root)
+	if strings.Contains(root, "getppid") {
+		t.Fatalf("root retained calls after its workload exec:\n%s", root)
 	}
 	child := string(genProg(trace, target, false, false, false, false).Serialize())
 	if got := strings.Count(child, "syz_csb_execve"); got != 1 {
@@ -830,6 +834,14 @@ func TestSkipOnlyRootBootstrapExec(t *testing.T) {
 	}
 	if strings.Contains(child, "getppid") {
 		t.Fatalf("child retained calls after its successful workload exec:\n%s", child)
+	}
+	leading := &parser.Trace{Calls: []*parser.Syscall{
+		parser.NewSyscall(1, "execve", nil, 0, false, false),
+		parser.NewSyscall(1, "getpid", nil, 1, false, false),
+	}}
+	got := string(genProg(leading, target, false, false, false, true).Serialize())
+	if strings.Contains(got, "syz_csb_execve") || !strings.Contains(got, "getpid") {
+		t.Fatalf("leading bootstrap handling failed:\n%s", got)
 	}
 }
 
