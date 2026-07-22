@@ -689,7 +689,8 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	rawIOUring := false
 	ioUringCreated := false
 	ioUringFDs := make(map[uint64]bool)
-	for _, call := range p.Calls {
+	for ci, call := range p.Calls {
+		// Track raw rings in program order so later mappings don't suppress earlier submissions.
 		if call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup" {
 			ioUringCreated = true
 			if call.Meta.CallName == "io_uring_setup" {
@@ -739,8 +740,6 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				rawIOUring = true
 			}
 		}
-	}
-	for ci, call := range p.Calls {
 		w := new(bytes.Buffer)
 		guardSQE := false
 		if addComments {
