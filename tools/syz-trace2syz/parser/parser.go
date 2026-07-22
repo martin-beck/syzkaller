@@ -138,9 +138,6 @@ func ParseData(data []byte, splitThreads bool, numLines int) (*TraceTree, *Trace
 	var status string
 	data, rootPid := joinSplitValues(data)
 	tree := NewTraceTree()
-	if splitThreads {
-		tree.RootPid = rootPid
-	}
 	trace := new(Trace)
 	lastCalls := make(map[int64](*Syscall))
 	// Creating the process tree
@@ -190,6 +187,9 @@ func ParseData(data []byte, splitThreads bool, numLines int) (*TraceTree, *Trace
 	fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 	if err := scanner.Err(); err != nil {
 		return nil, nil, err
+	}
+	if splitThreads && tree.TraceMap[rootPid] != nil {
+		tree.RootPid = rootPid
 	}
 	if splitThreads && len(tree.TraceMap) == 0 {
 		return nil, nil, nil

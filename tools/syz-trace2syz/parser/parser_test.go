@@ -251,6 +251,14 @@ func TestSkippedLeadingRecordPreservesRootPid(t *testing.T) {
 	}
 }
 
+func TestSkippedOnlyRootRecordFallsBack(t *testing.T) {
+	tree := parseTestData(t, []byte(`1 +++ exited with 0 +++
+2 getpid() = 2`))
+	if tree.RootPid != 2 {
+		t.Fatalf("root PID %d, want 2", tree.RootPid)
+	}
+}
+
 func TestParseLoop1Child(t *testing.T) {
 	data1Child := `1 open() = 3
 				   1 clone() = 2
