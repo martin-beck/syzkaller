@@ -99,13 +99,39 @@ static long UNIQUE_FUNC(syz_csb_exit_group)(void) { return UNIQUE_FUNC(csb_exit_
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction
+#include <errno.h>
 #include <signal.h>
+#include <string.h>
+#include <sys/wait.h>
 
-// Query a disposition so the kernel path is replayed without changing process state.
+static void UNIQUE_FUNC(csb_noop_signal_handler)(int sig)
+{
+	(void)sig;
+}
+
+// Isolate the process-wide disposition change from concurrent benchmark workers.
 static long UNIQUE_FUNC(syz_csb_rt_sigaction)(void)
 {
-	struct sigaction old;
-	return sigaction(SIGUSR1, 0, &old);
+	long pid = fork();
+	if (pid < 0)
+		return -1;
+	if (pid == 0) {
+		struct sigaction action;
+		struct sigaction old;
+		memset(&action, 0, sizeof(action));
+		action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
+		sigemptyset(&action.sa_mask);
+		long ret = sigaction(SIGUSR1, &action, &old);
+		if (ret == 0)
+			ret = sigaction(SIGUSR1, &old, 0);
+		_exit(ret == 0 ? 0 : 1);
+	}
+	int status;
+	long ret;
+	do {
+		ret = waitpid(pid, &status, 0);
+	} while (ret < 0 && errno == EINTR);
+	return ret == pid && WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1;
 }
 #endif
 

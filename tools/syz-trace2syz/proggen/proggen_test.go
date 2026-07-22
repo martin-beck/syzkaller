@@ -727,7 +727,7 @@ func TestAIOCallsUseBoundedLifecycles(t *testing.T) {
 	}
 }
 
-func TestRtSigactionQueriesDisposition(t *testing.T) {
+func TestRtSigactionIsolatesDispositionChange(t *testing.T) {
 	p := parseSingleProg(t, `rt_sigaction(10, {sa_handler=0x1234}, NULL, 8) = 0`)
 	if got := strings.TrimSpace(string(p.Serialize())); got != "syz_csb_rt_sigaction()[0]" {
 		t.Fatalf("got %q", got)
@@ -739,8 +739,10 @@ func TestRtSigactionQueriesDisposition(t *testing.T) {
 	if want := "UNIQUE_FUNC(syz_csb_rt_sigaction)"; !strings.Contains(string(src), want) {
 		t.Fatalf("generated CSB header missing %q", want)
 	}
-	if want := "sigaction(SIGUSR1, 0, &old)"; !strings.Contains(string(src), want) {
-		t.Fatalf("generated helper missing %q", want)
+	for _, want := range []string{"fork()", "sigaction(SIGUSR1, &action, &old)", "sigaction(SIGUSR1, &old, 0)"} {
+		if !strings.Contains(string(src), want) {
+			t.Fatalf("generated helper missing %q", want)
+		}
 	}
 }
 
