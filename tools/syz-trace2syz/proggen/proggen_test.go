@@ -735,8 +735,13 @@ func TestRtSigactionUsesGeneratedHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "syz_csb_rt_sigaction()"; !strings.Contains(string(src), want) {
+	if want := "UNIQUE_FUNC(syz_csb_rt_sigaction)"; !strings.Contains(string(src), want) {
 		t.Fatalf("generated CSB header missing %q", want)
+	}
+	for _, want := range []string{"pthread_mutex_lock", "pthread_mutex_unlock"} {
+		if !strings.Contains(string(src), want) {
+			t.Fatalf("generated helper missing %q", want)
+		}
 	}
 }
 
