@@ -75,7 +75,9 @@ func (*csbDialect) traceEpilogue(w *bytes.Buffer, _ int, _ string) {
 }
 
 func (*csbDialect) pseudoCallName(name string) string {
-	if strings.HasPrefix(name, "syz_csb_") {
+	// CSB-only helpers are header-local because several generated benchmarks
+	// share one translation unit. Affinity replay follows the same contract.
+	if strings.HasPrefix(name, "syz_csb_") || name == "syz_reapply_affinity" {
 		return fmt.Sprintf("UNIQUE_FUNC(%v)", name)
 	}
 	return name

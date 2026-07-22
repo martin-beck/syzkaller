@@ -245,6 +245,8 @@ func (ctx *context) genCalls() []*prog.Call {
 		return singleCall(ctx.genSetRobustListCall())
 	case "set_tid_address":
 		return singleCall(ctx.genDefaultSafeCall("set_tid_address"))
+	case "sched_setaffinity":
+		return singleCall(ctx.genDefaultSafeCall("syz_reapply_affinity"))
 	case "wait", "wait4":
 		return singleCall(ctx.genWait4Call())
 	case "clone", "clone3":
