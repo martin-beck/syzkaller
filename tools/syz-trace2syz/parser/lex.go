@@ -20,7 +20,7 @@ const strace_start int = 157
 const strace_first_final int = 157
 const strace_error int = 0
 
-const strace_en_comment int = 207
+const strace_en_comment int = 217
 const strace_en_main int = 157
 
 //line straceLex.rl:22
@@ -470,14 +470,34 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto st_case_204
 		case 205:
 			goto st_case_205
-		case 156:
-			goto st_case_156
 		case 206:
 			goto st_case_206
 		case 207:
 			goto st_case_207
 		case 208:
 			goto st_case_208
+		case 209:
+			goto st_case_209
+		case 210:
+			goto st_case_210
+		case 211:
+			goto st_case_211
+		case 212:
+			goto st_case_212
+		case 213:
+			goto st_case_213
+		case 214:
+			goto st_case_214
+		case 215:
+			goto st_case_215
+		case 156:
+			goto st_case_156
+		case 216:
+			goto st_case_216
+		case 217:
+			goto st_case_217
+		case 218:
+			goto st_case_218
 		}
 		goto st_out
 	tr9:
@@ -524,6 +544,16 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		case 8:
 			{
 				(lex.p) = (lex.te) - 1
+				tok = BPF_MACRO
+				{
+					(lex.p)++
+					lex.cs = 157
+					goto _out
+				}
+			}
+		case 9:
+			{
+				(lex.p) = (lex.te) - 1
 				out.data = string(lex.data[lex.ts:lex.te])
 				tok = FLAG
 				{
@@ -532,7 +562,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 					goto _out
 				}
 			}
-		case 10:
+		case 11:
 			{
 				(lex.p) = (lex.te) - 1
 				out.data = string(lex.data[lex.ts:lex.te])
@@ -543,7 +573,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 					goto _out
 				}
 			}
-		case 32:
+		case 33:
 			{
 				(lex.p) = (lex.te) - 1
 				tok = COMMA
@@ -557,7 +587,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 
 		goto st157
 	tr11:
-//line straceLex.rl:99
+//line straceLex.rl:100
 		(lex.p) = (lex.te) - 1
 		{
 			tok = COMMA
@@ -569,7 +599,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 		goto st157
 	tr28:
-//line straceLex.rl:78
+//line straceLex.rl:79
 		lex.te = (lex.p) + 1
 		{
 			tok = UNFINISHED
@@ -581,7 +611,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 		goto st157
 	tr30:
-//line straceLex.rl:89
+//line straceLex.rl:90
 		lex.te = (lex.p) + 1
 		{
 			tok = RBRACKET
@@ -606,7 +636,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 		goto st157
 	tr55:
-//line straceLex.rl:103
+//line straceLex.rl:104
 		(lex.p) = (lex.te) - 1
 		{
 			out.data = string(lex.data[lex.ts:lex.te])
@@ -619,7 +649,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 		goto st157
 	tr74:
-//line straceLex.rl:80
+//line straceLex.rl:81
 		lex.te = (lex.p) + 1
 		{
 			out.data = string(lex.data[lex.ts:lex.te])
@@ -632,7 +662,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 		goto st157
 	tr78:
-//line straceLex.rl:95
+//line straceLex.rl:96
 		lex.te = (lex.p) + 1
 		{
 			tok = LSHIFT
@@ -644,7 +674,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 		goto st157
 	tr94:
-//line straceLex.rl:79
+//line straceLex.rl:80
 		(lex.p) = (lex.te) - 1
 		{
 			tok = RESUMED
@@ -656,7 +686,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 		goto st157
 	tr95:
-//line straceLex.rl:79
+//line straceLex.rl:80
 		lex.te = (lex.p) + 1
 		{
 			tok = RESUMED
@@ -668,7 +698,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 		goto st157
 	tr162:
-//line straceLex.rl:96
+//line straceLex.rl:97
 		lex.te = (lex.p) + 1
 		{
 			tok = RSHIFT
@@ -680,12 +710,12 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 		goto st157
 	tr165:
-//line straceLex.rl:106
+//line straceLex.rl:107
 		lex.te = (lex.p) + 1
 
 		goto st157
 	tr166:
-//line straceLex.rl:93
+//line straceLex.rl:94
 		lex.te = (lex.p) + 1
 		{
 			tok = NOT
@@ -697,7 +727,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 		goto st157
 	tr168:
-//line straceLex.rl:92
+//line straceLex.rl:93
 		lex.te = (lex.p) + 1
 		{
 			tok = AND
@@ -709,7 +739,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 		goto st157
 	tr170:
-//line straceLex.rl:82
+//line straceLex.rl:83
 		lex.te = (lex.p) + 1
 		{
 			tok = LPAREN
@@ -721,7 +751,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 		goto st157
 	tr171:
-//line straceLex.rl:84
+//line straceLex.rl:85
 		lex.te = (lex.p) + 1
 		{
 			tok = RPAREN
@@ -733,7 +763,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 		goto st157
 	tr172:
-//line straceLex.rl:87
+//line straceLex.rl:88
 		lex.te = (lex.p) + 1
 		{
 			tok = TIMES
@@ -745,7 +775,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 		goto st157
 	tr173:
-//line straceLex.rl:101
+//line straceLex.rl:102
 		lex.te = (lex.p) + 1
 		{
 			tok = PLUS
@@ -757,22 +787,10 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 		goto st157
 	tr183:
-//line straceLex.rl:105
+//line straceLex.rl:106
 		lex.te = (lex.p) + 1
 		{
 			tok = QUESTION
-			{
-				(lex.p)++
-				lex.cs = 157
-				goto _out
-			}
-		}
-		goto st157
-	tr187:
-//line straceLex.rl:85
-		lex.te = (lex.p) + 1
-		{
-			tok = LBRACKET_SQUARE
 			{
 				(lex.p)++
 				lex.cs = 157
@@ -784,6 +802,18 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 //line straceLex.rl:86
 		lex.te = (lex.p) + 1
 		{
+			tok = LBRACKET_SQUARE
+			{
+				(lex.p)++
+				lex.cs = 157
+				goto _out
+			}
+		}
+		goto st157
+	tr189:
+//line straceLex.rl:87
+		lex.te = (lex.p) + 1
+		{
 			tok = RBRACKET_SQUARE
 			{
 				(lex.p)++
@@ -792,8 +822,8 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr190:
-//line straceLex.rl:88
+	tr191:
+//line straceLex.rl:89
 		lex.te = (lex.p) + 1
 		{
 			tok = LBRACKET
@@ -804,8 +834,8 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr191:
-//line straceLex.rl:90
+	tr192:
+//line straceLex.rl:91
 		lex.te = (lex.p) + 1
 		{
 			tok = OR
@@ -816,8 +846,8 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr192:
-//line straceLex.rl:94
+	tr193:
+//line straceLex.rl:95
 		lex.te = (lex.p) + 1
 		{
 			tok = ONESCOMP
@@ -828,7 +858,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr193:
+	tr194:
 //line straceLex.rl:73
 		lex.te = (lex.p)
 		(lex.p)--
@@ -842,8 +872,8 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr194:
-//line straceLex.rl:77
+	tr195:
+//line straceLex.rl:78
 		lex.te = (lex.p)
 		(lex.p)--
 		{
@@ -856,8 +886,8 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr195:
-//line straceLex.rl:99
+	tr196:
+//line straceLex.rl:100
 		lex.te = (lex.p)
 		(lex.p)--
 		{
@@ -869,8 +899,8 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr197:
-//line straceLex.rl:100
+	tr198:
+//line straceLex.rl:101
 		lex.te = (lex.p)
 		(lex.p)--
 		{
@@ -882,8 +912,8 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr198:
-//line straceLex.rl:97
+	tr199:
+//line straceLex.rl:98
 		lex.te = (lex.p) + 1
 		{
 			tok = ARROW
@@ -894,8 +924,8 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr199:
-//line straceLex.rl:102
+	tr200:
+//line straceLex.rl:103
 		lex.te = (lex.p)
 		(lex.p)--
 		{
@@ -907,16 +937,16 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr200:
-//line straceLex.rl:104
+	tr201:
+//line straceLex.rl:105
 		lex.te = (lex.p) + 1
 		{
 			{
-				goto st207
+				goto st217
 			}
 		}
 		goto st157
-	tr201:
+	tr202:
 //line straceLex.rl:70
 		lex.te = (lex.p)
 		(lex.p)--
@@ -930,7 +960,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr206:
+	tr207:
 //line straceLex.rl:71
 		lex.te = (lex.p)
 		(lex.p)--
@@ -944,8 +974,8 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr210:
-//line straceLex.rl:77
+	tr211:
+//line straceLex.rl:78
 		lex.te = (lex.p) + 1
 		{
 			out.data = string(lex.data[lex.ts:lex.te])
@@ -957,8 +987,8 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr218:
-//line straceLex.rl:103
+	tr219:
+//line straceLex.rl:104
 		lex.te = (lex.p)
 		(lex.p)--
 		{
@@ -971,7 +1001,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr221:
+	tr222:
 //line straceLex.rl:72
 		lex.te = (lex.p)
 		(lex.p)--
@@ -985,8 +1015,8 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr222:
-//line straceLex.rl:79
+	tr223:
+//line straceLex.rl:80
 		lex.te = (lex.p)
 		(lex.p)--
 		{
@@ -998,8 +1028,8 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr224:
-//line straceLex.rl:81
+	tr225:
+//line straceLex.rl:82
 		lex.te = (lex.p)
 		(lex.p)--
 		{
@@ -1011,8 +1041,8 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr225:
-//line straceLex.rl:98
+	tr226:
+//line straceLex.rl:99
 		lex.te = (lex.p) + 1
 		{
 			tok = ARROW
@@ -1023,8 +1053,8 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr226:
-//line straceLex.rl:83
+	tr227:
+//line straceLex.rl:84
 		lex.te = (lex.p) + 1
 		{
 			tok = EQUALAT
@@ -1035,8 +1065,8 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			}
 		}
 		goto st157
-	tr231:
-//line straceLex.rl:75
+	tr232:
+//line straceLex.rl:76
 		lex.te = (lex.p)
 		(lex.p)--
 		{
@@ -1063,7 +1093,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 //line NONE:1
 		lex.ts = (lex.p)
 
-//line lex.go:734
+//line lex.go:757
 		switch lex.data[(lex.p)] {
 		case 32:
 			goto tr165
@@ -1103,22 +1133,24 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto st155
 		case 63:
 			goto tr183
-		case 78:
+		case 66:
 			goto st203
+		case 78:
+			goto st213
 		case 91:
-			goto tr187
-		case 93:
 			goto tr188
+		case 93:
+			goto tr189
 		case 95:
 			goto st156
 		case 123:
-			goto tr190
-		case 124:
 			goto tr191
+		case 124:
+			goto tr192
 		case 125:
 			goto tr30
 		case 126:
-			goto tr192
+			goto tr193
 		}
 		switch {
 		case lex.data[(lex.p)] < 65:
@@ -1134,14 +1166,14 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			switch {
 			case lex.data[(lex.p)] < 97:
 				if 71 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 90 {
-					goto tr185
+					goto tr186
 				}
 			case lex.data[(lex.p)] > 102:
 				if 103 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 122 {
 					goto st160
 				}
 			default:
-				goto tr189
+				goto tr190
 			}
 		default:
 			goto st184
@@ -1236,7 +1268,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		case 46:
 			goto st158
 		}
-		goto tr193
+		goto tr194
 	st3:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof3
@@ -1504,15 +1536,15 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 //line NONE:1
 		lex.te = (lex.p) + 1
 
-//line straceLex.rl:77
-		lex.act = 10
+//line straceLex.rl:78
+		lex.act = 11
 		goto st159
 	st159:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof159
 		}
 	st_case_159:
-//line lex.go:1183
+//line lex.go:1208
 		switch lex.data[(lex.p)] {
 		case 39:
 			goto tr169
@@ -1538,7 +1570,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		default:
 			goto st160
 		}
-		goto tr194
+		goto tr195
 	st160:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof160
@@ -1564,7 +1596,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		default:
 			goto st160
 		}
-		goto tr194
+		goto tr195
 	st9:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof9
@@ -1589,10 +1621,17 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 //line NONE:1
 		lex.te = (lex.p) + 1
 
+//line straceLex.rl:76
+		lex.act = 9
+		goto st161
+	tr254:
+//line NONE:1
+		lex.te = (lex.p) + 1
+
 //line straceLex.rl:75
 		lex.act = 8
 		goto st161
-	tr248:
+	tr259:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
@@ -1604,7 +1643,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto _test_eof161
 		}
 	st_case_161:
-//line lex.go:1275
+//line lex.go:1307
 		switch lex.data[(lex.p)] {
 		case 39:
 			goto tr10
@@ -1624,19 +1663,19 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 //line NONE:1
 		lex.te = (lex.p) + 1
 
-//line straceLex.rl:99
-		lex.act = 32
+//line straceLex.rl:100
+		lex.act = 33
 		goto st162
 	st162:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof162
 		}
 	st_case_162:
-//line lex.go:1303
+//line lex.go:1335
 		if lex.data[(lex.p)] == 32 {
 			goto st10
 		}
-		goto tr195
+		goto tr196
 	st10:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof10
@@ -1796,9 +1835,9 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 	st_case_163:
 		if lex.data[(lex.p)] == 62 {
-			goto tr198
+			goto tr199
 		}
-		goto tr197
+		goto tr198
 	st27:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof27
@@ -1817,9 +1856,9 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 	st_case_164:
 		if lex.data[(lex.p)] == 42 {
-			goto tr200
+			goto tr201
 		}
-		goto tr199
+		goto tr200
 	tr177:
 //line NONE:1
 		lex.te = (lex.p) + 1
@@ -1832,7 +1871,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto _test_eof165
 		}
 	st_case_165:
-//line lex.go:1503
+//line lex.go:1535
 		switch lex.data[(lex.p)] {
 		case 46:
 			goto st166
@@ -1842,7 +1881,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		switch {
 		case lex.data[(lex.p)] < 65:
 			if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
-				goto tr203
+				goto tr204
 			}
 		case lex.data[(lex.p)] > 70:
 			if 97 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 102 {
@@ -1851,17 +1890,17 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		default:
 			goto st70
 		}
-		goto tr201
+		goto tr202
 	st166:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof166
 		}
 	st_case_166:
 		if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
-			goto tr207
+			goto tr208
 		}
-		goto tr206
-	tr207:
+		goto tr207
+	tr208:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
@@ -1873,14 +1912,14 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto _test_eof167
 		}
 	st_case_167:
-//line lex.go:1544
+//line lex.go:1576
 		if lex.data[(lex.p)] == 46 {
 			goto st28
 		}
 		if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
-			goto tr208
+			goto tr209
 		}
-		goto tr206
+		goto tr207
 	st28:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof28
@@ -1919,16 +1958,16 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
 			goto st169
 		}
-		goto tr194
+		goto tr195
 	st169:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof169
 		}
 	st_case_169:
 		if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
-			goto tr210
+			goto tr211
 		}
-		goto tr194
+		goto tr195
 	st31:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof31
@@ -1950,7 +1989,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto st30
 		}
 		goto tr9
-	tr208:
+	tr209:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
@@ -1962,15 +2001,15 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto _test_eof170
 		}
 	st_case_170:
-//line lex.go:1633
+//line lex.go:1665
 		if lex.data[(lex.p)] == 46 {
 			goto st28
 		}
 		if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
-			goto tr211
+			goto tr212
 		}
-		goto tr206
-	tr211:
+		goto tr207
+	tr212:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
@@ -1982,14 +2021,14 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto _test_eof171
 		}
 	st_case_171:
-//line lex.go:1653
+//line lex.go:1685
 		if lex.data[(lex.p)] == 46 {
 			goto st28
 		}
 		if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
 			goto st172
 		}
-		goto tr206
+		goto tr207
 	st172:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof172
@@ -1998,8 +2037,8 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
 			goto st172
 		}
-		goto tr206
-	tr203:
+		goto tr207
+	tr204:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
@@ -2011,7 +2050,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto _test_eof173
 		}
 	st_case_173:
-//line lex.go:1682
+//line lex.go:1714
 		switch lex.data[(lex.p)] {
 		case 46:
 			goto st33
@@ -2019,9 +2058,9 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto st56
 		}
 		if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
-			goto tr214
+			goto tr215
 		}
-		goto tr201
+		goto tr202
 	st33:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof33
@@ -2064,7 +2103,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto st28
 		}
 		goto tr36
-	tr214:
+	tr215:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
@@ -2076,15 +2115,15 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto _test_eof174
 		}
 	st_case_174:
-//line lex.go:1747
+//line lex.go:1779
 		if lex.data[(lex.p)] == 46 {
 			goto st33
 		}
 		if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
-			goto tr215
+			goto tr216
 		}
-		goto tr201
-	tr215:
+		goto tr202
+	tr216:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
@@ -2094,7 +2133,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto _test_eof175
 		}
 	st_case_175:
-//line lex.go:1765
+//line lex.go:1797
 		switch lex.data[(lex.p)] {
 		case 45:
 			goto st37
@@ -2104,7 +2143,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
 			goto st179
 		}
-		goto tr201
+		goto tr202
 	st37:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof37
@@ -2247,7 +2286,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto _test_eof176
 		}
 	st_case_176:
-//line lex.go:1918
+//line lex.go:1950
 		switch lex.data[(lex.p)] {
 		case 43:
 			goto st51
@@ -2256,7 +2295,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		case 46:
 			goto st55
 		}
-		goto tr218
+		goto tr219
 	st51:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof51
@@ -2303,11 +2342,11 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto _test_eof177
 		}
 	st_case_177:
-//line lex.go:1974
+//line lex.go:2006
 		if lex.data[(lex.p)] == 46 {
 			goto st55
 		}
-		goto tr218
+		goto tr219
 	st55:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof55
@@ -2325,7 +2364,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
 			goto st178
 		}
-		goto tr218
+		goto tr219
 	st179:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof179
@@ -2334,7 +2373,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
 			goto st179
 		}
-		goto tr201
+		goto tr202
 	st56:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof56
@@ -2595,7 +2634,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		default:
 			goto st180
 		}
-		goto tr221
+		goto tr222
 	tr178:
 //line NONE:1
 		lex.te = (lex.p) + 1
@@ -2608,14 +2647,14 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto _test_eof181
 		}
 	st_case_181:
-//line lex.go:2279
+//line lex.go:2311
 		if lex.data[(lex.p)] == 46 {
 			goto st166
 		}
 		switch {
 		case lex.data[(lex.p)] < 65:
 			if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
-				goto tr203
+				goto tr204
 			}
 		case lex.data[(lex.p)] > 70:
 			if 97 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 102 {
@@ -2624,7 +2663,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		default:
 			goto st70
 		}
-		goto tr201
+		goto tr202
 	st72:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof72
@@ -2807,11 +2846,11 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto _test_eof182
 		}
 	st_case_182:
-//line lex.go:2478
+//line lex.go:2510
 		if lex.data[(lex.p)] == 32 {
 			goto st86
 		}
-		goto tr222
+		goto tr223
 	st86:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof86
@@ -3984,11 +4023,11 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 	st_case_183:
 		switch lex.data[(lex.p)] {
 		case 62:
-			goto tr225
-		case 64:
 			goto tr226
+		case 64:
+			goto tr227
 		}
-		goto tr224
+		goto tr225
 	st155:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof155
@@ -4005,13 +4044,13 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 	st_case_184:
 		switch lex.data[(lex.p)] {
 		case 39:
-			goto tr227
+			goto tr228
 		case 42:
 			goto st160
 		case 58:
 			goto st160
 		case 95:
-			goto tr227
+			goto tr228
 		}
 		switch {
 		case lex.data[(lex.p)] < 65:
@@ -4037,38 +4076,38 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 				goto st202
 			}
 		default:
-			goto tr229
+			goto tr230
 		}
-		goto tr194
-	tr227:
+		goto tr195
+	tr228:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
-//line straceLex.rl:75
-		lex.act = 8
+//line straceLex.rl:76
+		lex.act = 9
 		goto st185
-	tr185:
+	tr186:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
-//line straceLex.rl:77
-		lex.act = 10
+//line straceLex.rl:78
+		lex.act = 11
 		goto st185
 	st185:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof185
 		}
 	st_case_185:
-//line lex.go:3730
+//line lex.go:3762
 		switch lex.data[(lex.p)] {
 		case 39:
-			goto tr227
+			goto tr228
 		case 42:
 			goto st160
 		case 58:
 			goto st160
 		case 95:
-			goto tr227
+			goto tr228
 		}
 		switch {
 		case lex.data[(lex.p)] < 48:
@@ -4085,7 +4124,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 				goto tr10
 			}
 		default:
-			goto tr227
+			goto tr228
 		}
 		goto tr9
 	st186:
@@ -4095,13 +4134,13 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 	st_case_186:
 		switch lex.data[(lex.p)] {
 		case 39:
-			goto tr227
+			goto tr228
 		case 42:
 			goto st160
 		case 58:
-			goto tr232
+			goto tr233
 		case 95:
-			goto tr227
+			goto tr228
 		}
 		switch {
 		case lex.data[(lex.p)] < 48:
@@ -4118,22 +4157,22 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 				goto tr10
 			}
 		default:
-			goto tr227
+			goto tr228
 		}
-		goto tr231
-	tr232:
+		goto tr232
+	tr233:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
-//line straceLex.rl:77
-		lex.act = 10
+//line straceLex.rl:78
+		lex.act = 11
 		goto st187
 	st187:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof187
 		}
 	st_case_187:
-//line lex.go:3804
+//line lex.go:3836
 		switch lex.data[(lex.p)] {
 		case 39:
 			goto st160
@@ -4149,7 +4188,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			switch {
 			case lex.data[(lex.p)] > 46:
 				if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
-					goto tr233
+					goto tr234
 				}
 			case lex.data[(lex.p)] >= 45:
 				goto st160
@@ -4161,25 +4200,25 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 					goto st160
 				}
 			case lex.data[(lex.p)] >= 97:
-				goto tr233
+				goto tr234
 			}
 		default:
 			goto st57
 		}
-		goto tr194
-	tr233:
+		goto tr195
+	tr234:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
-//line straceLex.rl:77
-		lex.act = 10
+//line straceLex.rl:78
+		lex.act = 11
 		goto st188
 	st188:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof188
 		}
 	st_case_188:
-//line lex.go:3850
+//line lex.go:3882
 		switch lex.data[(lex.p)] {
 		case 39:
 			goto st160
@@ -4212,7 +4251,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		default:
 			goto st58
 		}
-		goto tr194
+		goto tr195
 	st189:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof189
@@ -4224,7 +4263,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		case 42:
 			goto st160
 		case 58:
-			goto tr235
+			goto tr236
 		case 95:
 			goto st160
 		}
@@ -4240,20 +4279,20 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		default:
 			goto st160
 		}
-		goto tr194
-	tr235:
+		goto tr195
+	tr236:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
-//line straceLex.rl:77
-		lex.act = 10
+//line straceLex.rl:78
+		lex.act = 11
 		goto st190
 	st190:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof190
 		}
 	st_case_190:
-//line lex.go:3924
+//line lex.go:3956
 		switch lex.data[(lex.p)] {
 		case 39:
 			goto st160
@@ -4269,7 +4308,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			switch {
 			case lex.data[(lex.p)] > 46:
 				if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
-					goto tr236
+					goto tr237
 				}
 			case lex.data[(lex.p)] >= 45:
 				goto st160
@@ -4281,25 +4320,25 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 					goto st160
 				}
 			case lex.data[(lex.p)] >= 97:
-				goto tr236
+				goto tr237
 			}
 		default:
 			goto st60
 		}
-		goto tr194
-	tr236:
+		goto tr195
+	tr237:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
-//line straceLex.rl:77
-		lex.act = 10
+//line straceLex.rl:78
+		lex.act = 11
 		goto st191
 	st191:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof191
 		}
 	st_case_191:
-//line lex.go:3970
+//line lex.go:4002
 		switch lex.data[(lex.p)] {
 		case 39:
 			goto st160
@@ -4332,7 +4371,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		default:
 			goto st61
 		}
-		goto tr194
+		goto tr195
 	st192:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof192
@@ -4344,7 +4383,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		case 42:
 			goto st160
 		case 58:
-			goto tr238
+			goto tr239
 		case 95:
 			goto st160
 		}
@@ -4360,20 +4399,20 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		default:
 			goto st160
 		}
-		goto tr194
-	tr238:
+		goto tr195
+	tr239:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
-//line straceLex.rl:77
-		lex.act = 10
+//line straceLex.rl:78
+		lex.act = 11
 		goto st193
 	st193:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof193
 		}
 	st_case_193:
-//line lex.go:4044
+//line lex.go:4076
 		switch lex.data[(lex.p)] {
 		case 39:
 			goto st160
@@ -4389,7 +4428,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			switch {
 			case lex.data[(lex.p)] > 46:
 				if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
-					goto tr239
+					goto tr240
 				}
 			case lex.data[(lex.p)] >= 45:
 				goto st160
@@ -4401,25 +4440,25 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 					goto st160
 				}
 			case lex.data[(lex.p)] >= 97:
-				goto tr239
+				goto tr240
 			}
 		default:
 			goto st63
 		}
-		goto tr194
-	tr239:
+		goto tr195
+	tr240:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
-//line straceLex.rl:77
-		lex.act = 10
+//line straceLex.rl:78
+		lex.act = 11
 		goto st194
 	st194:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof194
 		}
 	st_case_194:
-//line lex.go:4090
+//line lex.go:4122
 		switch lex.data[(lex.p)] {
 		case 39:
 			goto st160
@@ -4452,7 +4491,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		default:
 			goto st64
 		}
-		goto tr194
+		goto tr195
 	st195:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof195
@@ -4464,7 +4503,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		case 42:
 			goto st160
 		case 58:
-			goto tr241
+			goto tr242
 		case 95:
 			goto st160
 		}
@@ -4480,20 +4519,20 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		default:
 			goto st160
 		}
-		goto tr194
-	tr241:
+		goto tr195
+	tr242:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
-//line straceLex.rl:77
-		lex.act = 10
+//line straceLex.rl:78
+		lex.act = 11
 		goto st196
 	st196:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof196
 		}
 	st_case_196:
-//line lex.go:4164
+//line lex.go:4196
 		switch lex.data[(lex.p)] {
 		case 39:
 			goto st160
@@ -4509,7 +4548,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			switch {
 			case lex.data[(lex.p)] > 46:
 				if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
-					goto tr242
+					goto tr243
 				}
 			case lex.data[(lex.p)] >= 45:
 				goto st160
@@ -4521,25 +4560,25 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 					goto st160
 				}
 			case lex.data[(lex.p)] >= 97:
-				goto tr242
+				goto tr243
 			}
 		default:
 			goto st66
 		}
-		goto tr194
-	tr242:
+		goto tr195
+	tr243:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
-//line straceLex.rl:77
-		lex.act = 10
+//line straceLex.rl:78
+		lex.act = 11
 		goto st197
 	st197:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof197
 		}
 	st_case_197:
-//line lex.go:4210
+//line lex.go:4242
 		switch lex.data[(lex.p)] {
 		case 39:
 			goto st160
@@ -4572,7 +4611,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		default:
 			goto st67
 		}
-		goto tr194
+		goto tr195
 	st198:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof198
@@ -4584,7 +4623,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		case 42:
 			goto st160
 		case 58:
-			goto tr244
+			goto tr245
 		case 95:
 			goto st160
 		}
@@ -4600,20 +4639,20 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		default:
 			goto st160
 		}
-		goto tr194
-	tr244:
+		goto tr195
+	tr245:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
-//line straceLex.rl:77
-		lex.act = 10
+//line straceLex.rl:78
+		lex.act = 11
 		goto st199
 	st199:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof199
 		}
 	st_case_199:
-//line lex.go:4284
+//line lex.go:4316
 		switch lex.data[(lex.p)] {
 		case 39:
 			goto st160
@@ -4646,7 +4685,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		default:
 			goto st69
 		}
-		goto tr194
+		goto tr195
 	st200:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof200
@@ -4677,20 +4716,20 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		default:
 			goto st160
 		}
-		goto tr194
-	tr229:
+		goto tr195
+	tr230:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
-//line straceLex.rl:75
-		lex.act = 8
+//line straceLex.rl:76
+		lex.act = 9
 		goto st201
 	st201:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof201
 		}
 	st_case_201:
-//line lex.go:4361
+//line lex.go:4393
 		switch lex.data[(lex.p)] {
 		case 39:
 			goto tr10
@@ -4707,7 +4746,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		case lex.data[(lex.p)] >= 48:
 			goto tr10
 		}
-		goto tr231
+		goto tr232
 	st202:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof202
@@ -4719,7 +4758,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		case 42:
 			goto st160
 		case 58:
-			goto tr232
+			goto tr233
 		case 95:
 			goto st160
 		}
@@ -4735,7 +4774,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		default:
 			goto st160
 		}
-		goto tr194
+		goto tr195
 	st203:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof203
@@ -4743,15 +4782,257 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 	st_case_203:
 		switch lex.data[(lex.p)] {
 		case 39:
-			goto tr227
+			goto tr228
+		case 42:
+			goto st160
+		case 58:
+			goto st160
+		case 80:
+			goto st204
+		case 95:
+			goto tr228
+		}
+		switch {
+		case lex.data[(lex.p)] < 65:
+			switch {
+			case lex.data[(lex.p)] > 46:
+				if 48 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 57 {
+					goto st186
+				}
+			case lex.data[(lex.p)] >= 45:
+				goto st160
+			}
+		case lex.data[(lex.p)] > 70:
+			switch {
+			case lex.data[(lex.p)] < 97:
+				if 71 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 90 {
+					goto tr10
+				}
+			case lex.data[(lex.p)] > 102:
+				if 103 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 122 {
+					goto st160
+				}
+			default:
+				goto st202
+			}
+		default:
+			goto tr230
+		}
+		goto tr195
+	st204:
+		if (lex.p)++; (lex.p) == (lex.pe) {
+			goto _test_eof204
+		}
+	st_case_204:
+		switch lex.data[(lex.p)] {
+		case 39:
+			goto tr10
+		case 70:
+			goto st205
+		case 95:
+			goto tr10
+		}
+		switch {
+		case lex.data[(lex.p)] > 57:
+			if 65 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 90 {
+				goto tr10
+			}
+		case lex.data[(lex.p)] >= 48:
+			goto tr10
+		}
+		goto tr232
+	st205:
+		if (lex.p)++; (lex.p) == (lex.pe) {
+			goto _test_eof205
+		}
+	st_case_205:
+		switch lex.data[(lex.p)] {
+		case 39:
+			goto tr10
+		case 95:
+			goto st206
+		}
+		switch {
+		case lex.data[(lex.p)] > 57:
+			if 65 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 90 {
+				goto tr10
+			}
+		case lex.data[(lex.p)] >= 48:
+			goto tr10
+		}
+		goto tr232
+	st206:
+		if (lex.p)++; (lex.p) == (lex.pe) {
+			goto _test_eof206
+		}
+	st_case_206:
+		switch lex.data[(lex.p)] {
+		case 39:
+			goto tr10
+		case 74:
+			goto st207
+		case 83:
+			goto st210
+		case 95:
+			goto tr10
+		}
+		switch {
+		case lex.data[(lex.p)] > 57:
+			if 65 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 90 {
+				goto tr10
+			}
+		case lex.data[(lex.p)] >= 48:
+			goto tr10
+		}
+		goto tr232
+	st207:
+		if (lex.p)++; (lex.p) == (lex.pe) {
+			goto _test_eof207
+		}
+	st_case_207:
+		switch lex.data[(lex.p)] {
+		case 39:
+			goto tr10
+		case 85:
+			goto st208
+		case 95:
+			goto tr10
+		}
+		switch {
+		case lex.data[(lex.p)] > 57:
+			if 65 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 90 {
+				goto tr10
+			}
+		case lex.data[(lex.p)] >= 48:
+			goto tr10
+		}
+		goto tr232
+	st208:
+		if (lex.p)++; (lex.p) == (lex.pe) {
+			goto _test_eof208
+		}
+	st_case_208:
+		switch lex.data[(lex.p)] {
+		case 39:
+			goto tr10
+		case 77:
+			goto st209
+		case 95:
+			goto tr10
+		}
+		switch {
+		case lex.data[(lex.p)] > 57:
+			if 65 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 90 {
+				goto tr10
+			}
+		case lex.data[(lex.p)] >= 48:
+			goto tr10
+		}
+		goto tr232
+	st209:
+		if (lex.p)++; (lex.p) == (lex.pe) {
+			goto _test_eof209
+		}
+	st_case_209:
+		switch lex.data[(lex.p)] {
+		case 39:
+			goto tr10
+		case 80:
+			goto tr254
+		case 95:
+			goto tr10
+		}
+		switch {
+		case lex.data[(lex.p)] > 57:
+			if 65 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 90 {
+				goto tr10
+			}
+		case lex.data[(lex.p)] >= 48:
+			goto tr10
+		}
+		goto tr232
+	st210:
+		if (lex.p)++; (lex.p) == (lex.pe) {
+			goto _test_eof210
+		}
+	st_case_210:
+		switch lex.data[(lex.p)] {
+		case 39:
+			goto tr10
+		case 84:
+			goto st211
+		case 95:
+			goto tr10
+		}
+		switch {
+		case lex.data[(lex.p)] > 57:
+			if 65 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 90 {
+				goto tr10
+			}
+		case lex.data[(lex.p)] >= 48:
+			goto tr10
+		}
+		goto tr232
+	st211:
+		if (lex.p)++; (lex.p) == (lex.pe) {
+			goto _test_eof211
+		}
+	st_case_211:
+		switch lex.data[(lex.p)] {
+		case 39:
+			goto tr10
+		case 77:
+			goto st212
+		case 95:
+			goto tr10
+		}
+		switch {
+		case lex.data[(lex.p)] > 57:
+			if 65 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 90 {
+				goto tr10
+			}
+		case lex.data[(lex.p)] >= 48:
+			goto tr10
+		}
+		goto tr232
+	st212:
+		if (lex.p)++; (lex.p) == (lex.pe) {
+			goto _test_eof212
+		}
+	st_case_212:
+		switch lex.data[(lex.p)] {
+		case 39:
+			goto tr10
+		case 84:
+			goto tr254
+		case 95:
+			goto tr10
+		}
+		switch {
+		case lex.data[(lex.p)] > 57:
+			if 65 <= lex.data[(lex.p)] && lex.data[(lex.p)] <= 90 {
+				goto tr10
+			}
+		case lex.data[(lex.p)] >= 48:
+			goto tr10
+		}
+		goto tr232
+	st213:
+		if (lex.p)++; (lex.p) == (lex.pe) {
+			goto _test_eof213
+		}
+	st_case_213:
+		switch lex.data[(lex.p)] {
+		case 39:
+			goto tr228
 		case 42:
 			goto st160
 		case 58:
 			goto st160
 		case 85:
-			goto st204
+			goto st214
 		case 95:
-			goto tr227
+			goto tr228
 		}
 		switch {
 		case lex.data[(lex.p)] < 48:
@@ -4768,19 +5049,19 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 				goto tr10
 			}
 		default:
-			goto tr227
+			goto tr228
 		}
-		goto tr194
-	st204:
+		goto tr195
+	st214:
 		if (lex.p)++; (lex.p) == (lex.pe) {
-			goto _test_eof204
+			goto _test_eof214
 		}
-	st_case_204:
+	st_case_214:
 		switch lex.data[(lex.p)] {
 		case 39:
 			goto tr10
 		case 76:
-			goto st205
+			goto st215
 		case 95:
 			goto tr10
 		}
@@ -4792,17 +5073,17 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		case lex.data[(lex.p)] >= 48:
 			goto tr10
 		}
-		goto tr231
-	st205:
+		goto tr232
+	st215:
 		if (lex.p)++; (lex.p) == (lex.pe) {
-			goto _test_eof205
+			goto _test_eof215
 		}
-	st_case_205:
+	st_case_215:
 		switch lex.data[(lex.p)] {
 		case 39:
 			goto tr10
 		case 76:
-			goto tr248
+			goto tr259
 		case 95:
 			goto tr10
 		}
@@ -4814,7 +5095,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		case lex.data[(lex.p)] >= 48:
 			goto tr10
 		}
-		goto tr231
+		goto tr232
 	st156:
 		if (lex.p)++; (lex.p) == (lex.pe) {
 			goto _test_eof156
@@ -4830,19 +5111,19 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			goto st9
 		}
 		goto st0
-	tr189:
+	tr190:
 //line NONE:1
 		lex.te = (lex.p) + 1
 
-//line straceLex.rl:77
-		lex.act = 10
-		goto st206
-	st206:
+//line straceLex.rl:78
+		lex.act = 11
+		goto st216
+	st216:
 		if (lex.p)++; (lex.p) == (lex.pe) {
-			goto _test_eof206
+			goto _test_eof216
 		}
-	st_case_206:
-//line lex.go:4513
+	st_case_216:
+//line lex.go:4787
 		switch lex.data[(lex.p)] {
 		case 39:
 			goto st160
@@ -4875,19 +5156,19 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		default:
 			goto st70
 		}
-		goto tr194
-	tr249:
+		goto tr195
+	tr260:
 //line straceLex.rl:65
 		lex.te = (lex.p) + 1
 
-		goto st207
-	tr251:
+		goto st217
+	tr262:
 //line straceLex.rl:65
 		lex.te = (lex.p)
 		(lex.p)--
 
-		goto st207
-	tr252:
+		goto st217
+	tr263:
 //line straceLex.rl:66
 		lex.te = (lex.p) + 1
 		{
@@ -4895,32 +5176,32 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 				goto st157
 			}
 		}
-		goto st207
-	st207:
+		goto st217
+	st217:
 //line NONE:1
 		lex.ts = 0
 
 		if (lex.p)++; (lex.p) == (lex.pe) {
-			goto _test_eof207
+			goto _test_eof217
 		}
-	st_case_207:
+	st_case_217:
 //line NONE:1
 		lex.ts = (lex.p)
 
-//line lex.go:4574
+//line lex.go:4848
 		if lex.data[(lex.p)] == 42 {
-			goto st208
+			goto st218
 		}
-		goto tr249
-	st208:
+		goto tr260
+	st218:
 		if (lex.p)++; (lex.p) == (lex.pe) {
-			goto _test_eof208
+			goto _test_eof218
 		}
-	st_case_208:
+	st_case_218:
 		if lex.data[(lex.p)] == 47 {
-			goto tr252
+			goto tr263
 		}
-		goto tr251
+		goto tr262
 	st_out:
 	_test_eof157:
 		lex.cs = 157
@@ -5534,9 +5815,6 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 	_test_eof205:
 		lex.cs = 205
 		goto _test_eof
-	_test_eof156:
-		lex.cs = 156
-		goto _test_eof
 	_test_eof206:
 		lex.cs = 206
 		goto _test_eof
@@ -5546,6 +5824,39 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 	_test_eof208:
 		lex.cs = 208
 		goto _test_eof
+	_test_eof209:
+		lex.cs = 209
+		goto _test_eof
+	_test_eof210:
+		lex.cs = 210
+		goto _test_eof
+	_test_eof211:
+		lex.cs = 211
+		goto _test_eof
+	_test_eof212:
+		lex.cs = 212
+		goto _test_eof
+	_test_eof213:
+		lex.cs = 213
+		goto _test_eof
+	_test_eof214:
+		lex.cs = 214
+		goto _test_eof
+	_test_eof215:
+		lex.cs = 215
+		goto _test_eof
+	_test_eof156:
+		lex.cs = 156
+		goto _test_eof
+	_test_eof216:
+		lex.cs = 216
+		goto _test_eof
+	_test_eof217:
+		lex.cs = 217
+		goto _test_eof
+	_test_eof218:
+		lex.cs = 218
+		goto _test_eof
 
 	_test_eof:
 		{
@@ -5553,17 +5864,17 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		if (lex.p) == eof {
 			switch lex.cs {
 			case 158:
-				goto tr193
+				goto tr194
 			case 159:
-				goto tr194
+				goto tr195
 			case 160:
-				goto tr194
+				goto tr195
 			case 9:
 				goto tr9
 			case 161:
 				goto tr9
 			case 162:
-				goto tr195
+				goto tr196
 			case 10:
 				goto tr11
 			case 11:
@@ -5599,15 +5910,15 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			case 26:
 				goto tr9
 			case 163:
-				goto tr197
+				goto tr198
 			case 164:
-				goto tr199
+				goto tr200
 			case 165:
-				goto tr201
+				goto tr202
 			case 166:
-				goto tr206
+				goto tr207
 			case 167:
-				goto tr206
+				goto tr207
 			case 28:
 				goto tr9
 			case 29:
@@ -5615,21 +5926,21 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			case 30:
 				goto tr9
 			case 168:
-				goto tr194
+				goto tr195
 			case 169:
-				goto tr194
+				goto tr195
 			case 31:
 				goto tr9
 			case 32:
 				goto tr9
 			case 170:
-				goto tr206
+				goto tr207
 			case 171:
-				goto tr206
+				goto tr207
 			case 172:
-				goto tr206
+				goto tr207
 			case 173:
-				goto tr201
+				goto tr202
 			case 33:
 				goto tr36
 			case 34:
@@ -5639,9 +5950,9 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			case 36:
 				goto tr36
 			case 174:
-				goto tr201
+				goto tr202
 			case 175:
-				goto tr201
+				goto tr202
 			case 37:
 				goto tr36
 			case 38:
@@ -5671,7 +5982,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			case 50:
 				goto tr36
 			case 176:
-				goto tr218
+				goto tr219
 			case 51:
 				goto tr55
 			case 52:
@@ -5681,13 +5992,13 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			case 54:
 				goto tr55
 			case 177:
-				goto tr218
+				goto tr219
 			case 55:
 				goto tr55
 			case 178:
-				goto tr218
+				goto tr219
 			case 179:
-				goto tr201
+				goto tr202
 			case 56:
 				goto tr9
 			case 57:
@@ -5721,63 +6032,83 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 			case 71:
 				goto tr36
 			case 180:
-				goto tr221
-			case 181:
-				goto tr201
-			case 182:
 				goto tr222
+			case 181:
+				goto tr202
+			case 182:
+				goto tr223
 			case 86:
 				goto tr94
 			case 183:
-				goto tr224
+				goto tr225
 			case 184:
-				goto tr194
+				goto tr195
 			case 185:
 				goto tr9
 			case 186:
-				goto tr231
+				goto tr232
 			case 187:
-				goto tr194
+				goto tr195
 			case 188:
-				goto tr194
+				goto tr195
 			case 189:
-				goto tr194
+				goto tr195
 			case 190:
-				goto tr194
+				goto tr195
 			case 191:
-				goto tr194
+				goto tr195
 			case 192:
-				goto tr194
+				goto tr195
 			case 193:
-				goto tr194
+				goto tr195
 			case 194:
-				goto tr194
+				goto tr195
 			case 195:
-				goto tr194
+				goto tr195
 			case 196:
-				goto tr194
+				goto tr195
 			case 197:
-				goto tr194
+				goto tr195
 			case 198:
-				goto tr194
+				goto tr195
 			case 199:
-				goto tr194
+				goto tr195
 			case 200:
-				goto tr194
+				goto tr195
 			case 201:
-				goto tr231
+				goto tr232
 			case 202:
-				goto tr194
+				goto tr195
 			case 203:
-				goto tr194
+				goto tr195
 			case 204:
-				goto tr231
+				goto tr232
 			case 205:
-				goto tr231
+				goto tr232
 			case 206:
-				goto tr194
+				goto tr232
+			case 207:
+				goto tr232
 			case 208:
-				goto tr251
+				goto tr232
+			case 209:
+				goto tr232
+			case 210:
+				goto tr232
+			case 211:
+				goto tr232
+			case 212:
+				goto tr232
+			case 213:
+				goto tr195
+			case 214:
+				goto tr232
+			case 215:
+				goto tr232
+			case 216:
+				goto tr195
+			case 218:
+				goto tr262
 			}
 		}
 
@@ -5786,7 +6117,7 @@ func (lex *Stracelexer) Lex(out *StraceSymType) int {
 		}
 	}
 
-//line straceLex.rl:110
+//line straceLex.rl:111
 
 	return tok
 }
