@@ -41,16 +41,14 @@ var (
 	flagArgLength    = flag.Bool("argLength", false, "trim the length syscall arguments to the actual data size")
 	flagMadviseSetup = flag.Bool("madviseSetup", false,
 		"map a dedicated VMA before destructive madvise calls instead of using MADV_NORMAL")
-)
-
-const (
-	goos = targets.Linux // Target OS
-	arch = targets.AMD64 // Target architecture
+	flagOS = flag.String("os", targets.Linux, "target OS")
+	// Preserve the converter's historical amd64 behavior unless the trace architecture is explicit.
+	flagArch = flag.String("arch", targets.AMD64, "target architecture")
 )
 
 func main() {
 	flag.Parse()
-	target := initializeTarget(goos, arch)
+	target := initializeTarget(*flagOS, *flagArch)
 	progs := parseTraces(target)
 	if !*flagSkipCorpus {
 		log.Logf(0, "successfully converted traces; generating corpus.db")
@@ -63,6 +61,7 @@ func initializeTarget(os, arch string) *prog.Target {
 	if err != nil {
 		log.Fatalf("failed to load target: %s", err)
 	}
+	// ConstMap exposes ABI values for the selected trace target, not the host running conversion.
 	target.ConstMap = make(map[string]uint64)
 	for _, c := range target.Consts {
 		target.ConstMap[c.Name] = c.Value
@@ -134,13 +133,23 @@ func parseTraces(target *prog.Target) []*prog.Prog {
 			outPrefixesIdx[outPrefix]++
 		}
 		progName := filepath.Join(deserializeDir, outDescr+"_"+outPrefix+"_"+strconv.Itoa(outPrefixesIdx[outPrefix])+".prog")
-		if err := osutil.WriteFile(progName, p.Serialize()); err != nil {
+		data := appendProgMetadata(p.Serialize(), target.OS, target.Arch)
+		if err := osutil.WriteFile(progName, data); err != nil {
 			log.Fatalf("failed to output file: %v", err)
 		}
 		log.Logf(0, "Stored program %s", progName)
 		i++
 	}
 	return ret
+}
+
+// appendProgMetadata records target identity in namespaced comments understood by downstream tools.
+func appendProgMetadata(data []byte, os, arch string) []byte {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# csb.trace.os=%s\n", os)
+	fmt.Fprintf(&b, "# csb.trace.arch=%s\n", arch)
+	b.Write(data)
+	return []byte(b.String())
 }
 
 func getTraceFiles(dir string) []string {

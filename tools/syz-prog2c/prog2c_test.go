@@ -4,10 +4,10 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
-	"syscall"
 	"testing"
 
 	"github.com/google/syzkaller/prog"
@@ -17,7 +17,12 @@ import (
 
 func deserializeTestProg(t *testing.T, data string) *prog.Prog {
 	t.Helper()
-	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	return deserializeTestProgForArch(t, targets.AMD64, data)
+}
+
+func deserializeTestProgForArch(t *testing.T, arch, data string) *prog.Prog {
+	t.Helper()
+	target, err := prog.GetTarget(targets.Linux, arch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,45 +104,110 @@ func TestGenerateUniqueFileName(t *testing.T) {
 }
 
 func TestSanitizeProgramOpenAndPwrite(t *testing.T) {
+	for _, arch := range []string{targets.AMD64, targets.ARM64} {
+		t.Run(arch, func(t *testing.T) {
+			p, subdirs, filesizes, filemap, maxWriteSize, alignment := sanitizeRecordedOpenWithGenerationArch(t, arch, arch)
+			openFlags := targetOpenFlagConsts(p.Target)
+
+			if got := string(p.Calls[0].Args[1].(*prog.PointerArg).Res.(*prog.DataArg).Data()); got != "./tmp/file" {
+				t.Fatalf("sanitized path = %q, want %q", got, "./tmp/file")
+			}
+			flags := p.Calls[0].Args[2].(*prog.ConstArg).Val
+			if flags&openFlags.Creat == 0 {
+				t.Fatalf("openat flags %#x do not include O_CREAT %#x", flags, openFlags.Creat)
+			}
+			if flags&openFlags.Excl != 0 {
+				t.Fatalf("openat flags %#x still include O_EXCL %#x", flags, openFlags.Excl)
+			}
+			if flags&openFlags.Direct != 0 {
+				t.Fatalf("openat flags %#x still include O_DIRECT %#x", flags, openFlags.Direct)
+			}
+			if got := p.Calls[0].Args[3].(*prog.ConstArg).Val; got != 0777 {
+				t.Fatalf("openat mode %#o, want 0777", got)
+			}
+
+			if !subdirs["tmp"] {
+				t.Fatalf("subdirs %v do not contain tmp", subdirs)
+			}
+			if got := filemap[0]; got != "./tmp/file" {
+				t.Fatalf("filemap[0] = %q, want ./tmp/file", got)
+			}
+			if got := filesizes[0]; got != 0x1003 {
+				t.Fatalf("filesizes[0] = %#x, want 0x1003", got)
+			}
+			if maxWriteSize != 4096 || alignment != 4096 {
+				t.Fatalf("max write/alignment = %d/%d, want 4096/4096", maxWriteSize, alignment)
+			}
+			if got := string(p.Calls[1].Args[1].(*prog.PointerArg).Res.(*prog.DataArg).Data()); got != "" {
+				t.Fatalf("pwrite64 buffer = %q, want empty", got)
+			}
+		})
+	}
+}
+
+func TestSanitizeProgramOpenFlagsRecordedArchMatrix(t *testing.T) {
+	for _, recordedArch := range []string{targets.AMD64, targets.ARM64} {
+		for _, generationArch := range []string{targets.AMD64, targets.ARM64} {
+			name := recordedArch + "_recorded_" + generationArch + "_generation"
+			t.Run(name, func(t *testing.T) {
+				p, _, _, _, _, _ := sanitizeRecordedOpenWithGenerationArch(t, recordedArch, generationArch)
+				flags := p.Calls[0].Args[2].(*prog.ConstArg).Val
+				recordedTarget, err := prog.GetTarget(targets.Linux, recordedArch)
+				if err != nil {
+					t.Fatal(err)
+				}
+				expectedForRecordedArch := recordedTarget.ConstMap["O_CREAT"]
+
+				if recordedArch == generationArch {
+					if flags != expectedForRecordedArch {
+						t.Fatalf("flags after %s generation = %#x, want recorded-arch sanitized value %#x",
+							generationArch, flags, expectedForRecordedArch)
+					}
+					return
+				}
+
+				if flags == expectedForRecordedArch {
+					t.Fatalf("wrong generation arch %s accidentally produced recorded-arch sanitized flags %#x",
+						generationArch, flags)
+				}
+			})
+		}
+	}
+}
+
+func TestSanitizeOpenWithoutDirectoryFlag(t *testing.T) {
 	p := deserializeTestProg(t, `
-r0 = openat(0xffffffffffffff9c, &(0x7f0000000000)='/tmp/file\x00', 0x4080, 0x0)
-pwrite64(r0, &(0x7f0000000040)='abc', 0x3, 0x1000)
+r0 = openat(0xffffffffffffff9c, &(0x7f0000000000)='/tmp/file\x00', 0x0, 0x0)
 `)
+	flags := targetOpenFlagConsts(p.Target)
+	flags.Directory = 0
+	flags.HasDirectory = false
+	subdirs, _ := sanitizeOpenAt(p.Calls[0], flags, make(map[string]bool), make(map[uint64]string))
 
+	gotFlags := p.Calls[0].Args[2].(*prog.ConstArg).Val
+	if gotFlags&flags.Creat == 0 {
+		t.Fatalf("openat flags %#x do not include O_CREAT %#x", gotFlags, flags.Creat)
+	}
+	if subdirs["./tmp/file"] {
+		t.Fatalf("file path was registered as a directory: %v", subdirs)
+	}
+}
+
+func sanitizeRecordedOpenWithGenerationArch(t *testing.T, recordedArch, generationArch string) (
+	*prog.Prog, map[string]bool, map[uint64]uint64, map[uint64]string, uint64, uint64,
+) {
+	t.Helper()
+	recordedTarget, err := prog.GetTarget(targets.Linux, recordedArch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialFlags := recordedTarget.ConstMap["O_EXCL"] | recordedTarget.ConstMap["O_DIRECT"]
+	p := deserializeTestProgForArch(t, generationArch, fmt.Sprintf(`
+r0 = openat(0xffffffffffffff9c, &(0x7f0000000000)='/tmp/file\x00', 0x%x, 0x0)
+pwrite64(r0, &(0x7f0000000040)='abc', 0x3, 0x1000)
+`, initialFlags))
 	_, subdirs, filesizes, filemap, maxWriteSize, alignment := sanitizeProgram(p, "test.prog")
-
-	if got := string(p.Calls[0].Args[1].(*prog.PointerArg).Res.(*prog.DataArg).Data()); got != "./tmp/file" {
-		t.Fatalf("sanitized path = %q, want %q", got, "./tmp/file")
-	}
-	flags := p.Calls[0].Args[2].(*prog.ConstArg).Val
-	if flags&syscall.O_CREAT == 0 {
-		t.Fatalf("openat flags %#x do not include O_CREAT", flags)
-	}
-	if flags&syscall.O_EXCL != 0 {
-		t.Fatalf("openat flags %#x still include O_EXCL", flags)
-	}
-	if flags&syscall.O_DIRECT != 0 {
-		t.Fatalf("openat flags %#x still include O_DIRECT", flags)
-	}
-	if got := p.Calls[0].Args[3].(*prog.ConstArg).Val; got != 0777 {
-		t.Fatalf("openat mode %#o, want 0777", got)
-	}
-
-	if !subdirs["tmp"] {
-		t.Fatalf("subdirs %v do not contain tmp", subdirs)
-	}
-	if got := filemap[0]; got != "./tmp/file" {
-		t.Fatalf("filemap[0] = %q, want ./tmp/file", got)
-	}
-	if got := filesizes[0]; got != 0x1003 {
-		t.Fatalf("filesizes[0] = %#x, want 0x1003", got)
-	}
-	if maxWriteSize != 4096 || alignment != 4096 {
-		t.Fatalf("max write/alignment = %d/%d, want 4096/4096", maxWriteSize, alignment)
-	}
-	if got := string(p.Calls[1].Args[1].(*prog.PointerArg).Res.(*prog.DataArg).Data()); got != "" {
-		t.Fatalf("pwrite64 buffer = %q, want empty", got)
-	}
+	return p, subdirs, filesizes, filemap, maxWriteSize, alignment
 }
 
 func TestSanitizeReadlinkatSetsDefaultBufferSize(t *testing.T) {
