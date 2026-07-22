@@ -127,11 +127,21 @@ func TestCSBInvalidatesResultsBeforeCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"UNIQUE_VAR(ctx->r)[0] = 0xffffffffffffffff;\n\tres = syscall(__NR_openat",
-		"UNIQUE_VAR(ctx->r)[1] = 0xffffffffffffffff;\n\tUNIQUE_VAR(ctx->r)[2] = 0xffffffffffffffff;\n\tres = syscall(__NR_pipe",
+		"UNIQUE_VAR(ctx->r)[0] = 0xffffffffffffffff;",
+		"UNIQUE_VAR(ctx->r)[1] = 0xffffffffffffffff;",
+		"UNIQUE_VAR(ctx->r)[2] = 0xffffffffffffffff;",
 	} {
 		assert.Contains(t, string(src), want)
 	}
+	assert.Less(t, strings.Index(string(src), "UNIQUE_VAR(ctx->r)[0] = 0xffffffffffffffff;"),
+		strings.Index(string(src), "res = syscall(__NR_openat"))
+	p.Calls[0].Props.Async = true
+	src, _, err = Write(p, Options{CSB: true, Threaded: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Less(t, strings.Index(string(src), "UNIQUE_VAR(ctx->r)[0] = 0xffffffffffffffff;"),
+		strings.Index(string(src), "UNIQUE_FUNC(event_set)(&th->ready)"))
 	src, _, err = Write(p, Options{Slowdown: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -145,7 +155,7 @@ func TestCSBInvalidatesResultsBeforeCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Contains(t, string(src), "UNIQUE_VAR(ctx->r)[0] = 0x0;\n\tres = syscall(__NR_add_key")
+	assert.Contains(t, string(src), "UNIQUE_VAR(ctx->r)[0] = 0x0;")
 }
 
 func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {

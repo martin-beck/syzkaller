@@ -327,6 +327,14 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	sandboxFunc := generateSandboxFunctionSignature(ctx.opts.Sandbox, ctx.opts.SandboxArg, ctx)
 
 	results := varsBuf.String()
+	resultResets := ""
+	if ctx.opts.CSB {
+		resetBuf := new(bytes.Buffer)
+		for i, value := range vars {
+			fmt.Fprintf(resetBuf, "\tUNIQUE_VAR(ctx->r)[%d] = 0x%x;\n", i, value)
+		}
+		resultResets = resetBuf.String()
+	}
 
 	// initialization of resource array in reg function
 	var callsNetSrvReg []string
@@ -391,6 +399,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		"SYSCALL_DEFINES":        ctx.generateSyscallDefines(),
 		"SANDBOX_FUNC":           sandboxFunc,
 		"RESULTS":                results,
+		"RESULT_RESETS":          resultResets,
 		"SYSCALLS":               syscalls,
 		"SYSCALLS_NET_SRV_REG":   syscallsNetSrvReg,
 		"SYSCALLS_NET_SRV_DEREG": syscallsNetSrvDereg,
@@ -707,9 +716,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		if slices.Contains(initIndices, ci) {
 			initCall = true
 		}
-		ctx.invalidateCSBResults(w, call, resCopyout, p.Vars)
-
-		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall, dataMmap)
+		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall)
 
 		if call.Props.Rerun > 0 {
 			fmt.Fprintf(w, "\tfor (int i = 0; i < %v; i++) {\n", call.Props.Rerun)
@@ -815,18 +822,6 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	NetOpsFDsAccept = tmpOps
 
 	return calls, p.Vars
-}
-
-func (ctx *context) invalidateCSBResults(w *bytes.Buffer, call prog.ExecCall, resCopyout bool, defaults []uint64) {
-	if !ctx.opts.CSB {
-		return
-	}
-	if resCopyout {
-		fmt.Fprintf(w, "\t%v[%v] = 0x%x;\n", ctx.resultArrayName(), call.Index, defaults[call.Index])
-	}
-	for _, copyout := range call.Copyout {
-		fmt.Fprintf(w, "\t%v[%v] = 0x%x;\n", ctx.resultArrayName(), copyout.Index, defaults[copyout.Index])
-	}
 }
 
 func loopIdenticalCalls(calls []string, minRun int) []string {

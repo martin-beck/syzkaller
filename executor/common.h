@@ -663,6 +663,9 @@ static void UNIQUE_FUNC(loop)(void)
 #if SYZ_TRACE
 	fprintf(stderr, "### start\n");
 #endif
+#if CSB
+/*{{{RESULT_RESETS}}}*/
+#endif
 	int i, call, thread;
 	for (call = 0; call < /*{{{NUM_CALLS}}}*/; call++) {
 		for (thread = 0; thread < (int)(sizeof(threads) / sizeof(threads[0])); thread++) {
