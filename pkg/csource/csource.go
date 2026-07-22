@@ -306,7 +306,11 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		// only close file descriptors that are not part if the reg init function
 		// TODO: check the potential usage of initFDs below, and in the whole file.
 		if _, ok := listenFDs[fdRes]; !ok {
-			fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(ctx->r)[%v]);\n", fdRes)
+			if ctx.opts.CSB {
+				fmt.Fprintf(closeBuf, "\tif ((uint32)UNIQUE_VAR(ctx->r)[%[1]v] > 2) close(UNIQUE_VAR(ctx->r)[%[1]v]);\n", fdRes)
+			} else {
+				fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(ctx->r)[%v]);\n", fdRes)
+			}
 		}
 	}
 
@@ -774,6 +778,12 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				futureRawIOUringFDs[src.Index] = true
 			}
 		}
+		if call.Meta.CallName == "pidfd_getfd" && call.Index != prog.ExecNoCopyout && len(call.Args) > 1 {
+			if src, ok := call.Args[1].(prog.ExecArgConst); ok &&
+				(futureRawIOUringConstants[int32(src.Value)] || futureRawUnknownIOUring) {
+				futureRawIOUringFDs[call.Index] = true
+			}
+		}
 	}
 	for ci, call := range p.Calls {
 		// Track raw rings in program order so later mappings don't suppress earlier submissions.
@@ -842,6 +852,10 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		if call.Meta.CallName == "pidfd_getfd" && call.Index != prog.ExecNoCopyout && len(call.Args) > 1 {
 			if src, ok := call.Args[1].(prog.ExecArgResult); ok && src.DivOp <= 1 && uint32(src.AddOp) == 0 &&
 				rawIOUringFDs[src.Index] {
+				rawIOUringFDs[call.Index] = true
+			}
+			if src, ok := call.Args[1].(prog.ExecArgConst); ok &&
+				(rawIOUringConstants[int32(src.Value)] || rawUnknownIOUring) {
 				rawIOUringFDs[call.Index] = true
 			}
 		}
