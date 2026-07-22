@@ -228,6 +228,45 @@ func TestCSBProtectRawIoUringInProgramOrder(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(string(src), "/*to_submit=*/0"))
 }
 
+func TestCSBProtectRawIoUringPerDescriptor(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("r0 = io_uring_setup(0x1, &(0x7f0000000000))\n"+
+		"mmap(&(0x7f0000001000/0x1000)=nil, 0x1000, 0x3, 0x1, r0, 0x10000000)\n"+
+		"r1 = syz_io_uring_setup(0x1, &(0x7f0000002000), &(0x7f0000003000/0x1000)=nil, &(0x7f0000004000/0x1000)=nil)\n"+
+		"io_uring_enter(r0, 0x1, 0x0, 0x0, 0x0, 0x0)\n"+
+		"io_uring_enter(r1, 0x1, 0x0, 0x0, 0x0, 0x0)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, 1, strings.Count(string(src), "/*to_submit=*/0"))
+	assert.Contains(t, string(src), "/*to_submit=*/1")
+}
+
+func TestCSBProtectAsyncRawIoUring(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("r0 = io_uring_setup(0x1, &(0x7f0000000000))\n"+
+		"io_uring_enter(r0, 0x1, 0x0, 0x0, 0x0, 0x0) (async)\n"+
+		"mmap(&(0x7f0000001000/0x1000)=nil, 0x1000, 0x3, 0x1, r0, 0x10000000)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Threaded: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "/*to_submit=*/0")
+}
+
 func TestCSBProtectRawIoUringMmap2(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.I386)
 	if err != nil {
