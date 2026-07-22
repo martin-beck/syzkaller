@@ -693,11 +693,18 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			call.Index != prog.ExecNoCopyout {
 			ioUringFDs[call.Index] = true
 		}
-		if call.Index != prog.ExecNoCopyout && ioUringResultArg(call, ioUringFDs) &&
-			(call.Meta.CallName == "dup" || call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3" ||
-				fcntlCommand(call, ctx.target.ConstMap["F_DUPFD"]) ||
-				fcntlCommand(call, ctx.target.ConstMap["F_DUPFD_CLOEXEC"])) {
-			ioUringFDs[call.Index] = true
+		duplicate := call.Meta.CallName == "dup" || call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3" ||
+			fcntlCommand(call, ctx.target.ConstMap["F_DUPFD"]) ||
+			fcntlCommand(call, ctx.target.ConstMap["F_DUPFD_CLOEXEC"])
+		if duplicate && ioUringResultArg(call, ioUringFDs) {
+			if call.Index != prog.ExecNoCopyout {
+				ioUringFDs[call.Index] = true
+			}
+			if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
+				if fd, ok := call.Args[1].(prog.ExecArgResult); ok && fd.DivOp == 0 && fd.AddOp == 0 {
+					ioUringFDs[fd.Index] = true
+				}
+			}
 		}
 		if call.Meta.Name == "mmap$IORING_OFF_SQ_RING" || call.Meta.Name == "mmap$IORING_OFF_SQES" {
 			rawIOUring = true
