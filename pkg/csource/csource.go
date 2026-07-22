@@ -711,8 +711,8 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		}
 		if ctx.opts.CSB && call.Meta.CallName == "openat2" {
 			if how, ok := call.Args[2].(prog.ExecArgConst); ok && valInMMapRange(ctx, how.Value) {
-				fmt.Fprintf(w, "\tNONFAILING(*(uint64*)(0x%x+PTR_OFFSET) |= %d);\n", how.Value,
-					ctx.target.ConstMap["O_NONBLOCK"])
+				fmt.Fprintf(w, "\tNONFAILING(if (!(*(uint64*)(0x%x+PTR_OFFSET) & %d)) *(uint64*)(0x%x+PTR_OFFSET) |= %d);\n",
+					how.Value, ctx.target.ConstMap["O_PATH"], how.Value, ctx.target.ConstMap["O_NONBLOCK"])
 			}
 		}
 
@@ -877,6 +877,10 @@ func localIOResources(p prog.ExecProg, target *prog.Target) map[uint64]bool {
 	local := make(map[uint64]bool)
 	for _, call := range p.Calls {
 		switch call.Meta.CallName {
+		case "open", "openat", "openat2", "creat":
+			if call.Index != prog.ExecNoCopyout {
+				local[call.Index] = true
+			}
 		case "pipe", "pipe2", "socketpair":
 			for _, copyout := range call.Copyout {
 				local[copyout.Index] = true

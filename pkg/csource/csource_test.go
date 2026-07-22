@@ -187,6 +187,40 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 	}
 }
 
+func TestCSBPreservesOpenat2OPath(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("openat2(0xffffffffffffff9c, &(0x7f0000000000)='./file\\x00', "+
+		"&(0x7f0000000040)={0x200000, 0x0, 0x0}, 0x18)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, HandleSegv: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "& 2097152")
+}
+
+func TestCSBPreservesNonblockAfterOpen(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("r0 = openat(0xffffffffffffff9c, &(0x7f0000000000)='./fifo\\x00', 0x2, 0x0)\n"+
+		"fcntl$setstatus(r0, 0x4, 0x0)\nread(r0, &(0x7f0000000040), 0x1)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "/*flags=O_NONBLOCK*/0x800")
+}
+
 func TestLocalIOArgRejectsTransforms(t *testing.T) {
 	local := map[uint64]bool{1: true}
 	for _, arg := range []prog.ExecArgResult{{Index: 1, DivOp: 2}, {Index: 1, AddOp: 1}} {
