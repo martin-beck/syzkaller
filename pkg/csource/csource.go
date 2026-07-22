@@ -845,6 +845,14 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				rawIOUringFDs[call.Index] = true
 			}
 		}
+		if call.Meta.Name == "recvmsg$unix" &&
+			(len(rawIOUringFDs) != 0 || len(rawIOUringConstants) != 0 || rawUnknownIOUring) {
+			// SCM_RIGHTS descriptors arrive through nested copyouts rather than the return value.
+			for _, copyout := range call.Copyout {
+				rawIOUringFDs[copyout.Index] = true
+				futureRawIOUringFDs[copyout.Index] = true
+			}
+		}
 		if call.Meta.Name == "mmap$IORING_OFF_SQ_RING" || call.Meta.Name == "mmap$IORING_OFF_SQES" {
 			if fd, ok := call.Args[4].(prog.ExecArgResult); ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
 				rawIOUringFDs[fd.Index] = true
