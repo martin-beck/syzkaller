@@ -686,6 +686,12 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	callComments []string, msgSizes []uint64, initIndices []int, dataMmap bool) ([]string, []uint64) {
 	var calls []string
 	csumSeq := 0
+	rawIOUring := false
+	for _, call := range p.Calls {
+		if call.Meta.Name == "mmap$IORING_OFF_SQ_RING" || call.Meta.Name == "mmap$IORING_OFF_SQES" {
+			rawIOUring = true
+		}
+	}
 	for ci, call := range p.Calls {
 		w := new(bytes.Buffer)
 		if addComments {
@@ -717,6 +723,13 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		initCall := false
 		if slices.Contains(initIndices, ci) {
 			initCall = true
+		}
+		if ctx.opts.CSB && rawIOUring && call.Meta.CallName == "io_uring_enter" {
+			args := append([]prog.ExecArg(nil), call.Args...)
+			toSubmit := args[1].(prog.ExecArgConst)
+			toSubmit.Value = 0
+			args[1] = toSubmit
+			call.Args = args
 		}
 
 		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall, dataMmap)
