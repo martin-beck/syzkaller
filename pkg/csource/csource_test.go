@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"os/exec"
 	"regexp"
 	"runtime"
 	"strings"
@@ -529,17 +530,63 @@ func TestCSBIgnoresSIGPIPE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const setup = "if (sigaction(SIGPIPE, &ignore_sigpipe, &UNIQUE_VAR(previous_sigpipe_action))) {\n\t\treturn -1;\n\t}"
-	const teardown = "if (sigaction(SIGPIPE, &UNIQUE_VAR(previous_sigpipe_action), 0)) {\n\t\treturn -1;\n\t}"
+	const setup = "if (syz_csb_ignore_sigpipe()) {\n\t\treturn -1;\n\t}"
+	const teardown = "if (syz_csb_restore_sigpipe()) {\n\t\treturn -1;\n\t}"
 	if !strings.Contains(string(src), setup) || !strings.Contains(string(src), teardown) {
 		t.Fatal("CSB registration does not safely ignore SIGPIPE")
 	}
-	probe := []byte("#include <signal.h>\n#define UNIQUE_VAR(x) x\nstatic struct sigaction UNIQUE_VAR(previous_sigpipe_action);\n" +
-		"int main(void)\n{\n\tstruct sigaction ignore_sigpipe = {};\n\tignore_sigpipe.sa_handler = SIG_IGN;\n\t" +
-		setup + "\n\t" + teardown + "\n\treturn 0;\n}\n")
+	if strings.Contains(string(src), "UNIQUE_VAR(previous_sigpipe_action)") ||
+		!strings.Contains(string(src), "static size_t syz_csb_sigpipe_users;") {
+		t.Fatal("SIGPIPE ownership is not shared by generated CSB targets")
+	}
+	probe := []byte(`#include <pthread.h>
+#include <signal.h>
+#include <stddef.h>
+static struct sigaction syz_csb_previous_sigpipe_action;
+static size_t syz_csb_sigpipe_users;
+static pthread_mutex_t syz_csb_sigpipe_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int syz_csb_ignore_sigpipe(void)
+{
+	if (pthread_mutex_lock(&syz_csb_sigpipe_mutex))
+		return -1;
+	if (syz_csb_sigpipe_users == 0) {
+		struct sigaction ignore_sigpipe = {};
+		ignore_sigpipe.sa_handler = SIG_IGN;
+		if (sigaction(SIGPIPE, &ignore_sigpipe, &syz_csb_previous_sigpipe_action)) {
+			pthread_mutex_unlock(&syz_csb_sigpipe_mutex);
+			return -1;
+		}
+	}
+	syz_csb_sigpipe_users++;
+	return pthread_mutex_unlock(&syz_csb_sigpipe_mutex) ? -1 : 0;
+}
+static int syz_csb_restore_sigpipe(void)
+{
+	if (pthread_mutex_lock(&syz_csb_sigpipe_mutex))
+		return -1;
+	if (syz_csb_sigpipe_users == 0 ||
+	    (syz_csb_sigpipe_users == 1 && sigaction(SIGPIPE, &syz_csb_previous_sigpipe_action, 0))) {
+		pthread_mutex_unlock(&syz_csb_sigpipe_mutex);
+		return -1;
+	}
+	syz_csb_sigpipe_users--;
+	return pthread_mutex_unlock(&syz_csb_sigpipe_mutex) ? -1 : 0;
+}
+int main(void)
+{
+	if (syz_csb_ignore_sigpipe() || syz_csb_ignore_sigpipe())
+		return 1;
+	if (syz_csb_restore_sigpipe() || syz_csb_restore_sigpipe())
+		return 1;
+	return 0;
+}
+`)
 	bin, err := Build(target, probe)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Remove(bin) })
+	if output, err := exec.Command(bin).CombinedOutput(); err != nil {
+		t.Fatalf("SIGPIPE ownership probe failed: %v\n%s", err, output)
+	}
 }

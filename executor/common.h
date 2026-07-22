@@ -924,14 +924,46 @@ void UNIQUE_FUNC(loop)(void)
 #endif
 
 #if CSB
-static struct sigaction UNIQUE_VAR(previous_sigpipe_action);
+#ifndef SYZ_CSB_SIGPIPE_STATE
+#define SYZ_CSB_SIGPIPE_STATE
+static struct sigaction syz_csb_previous_sigpipe_action;
+static size_t syz_csb_sigpipe_users;
+static pthread_mutex_t syz_csb_sigpipe_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static int syz_csb_ignore_sigpipe(void)
+{
+	if (pthread_mutex_lock(&syz_csb_sigpipe_mutex))
+		return -1;
+	if (syz_csb_sigpipe_users == 0) {
+		struct sigaction ignore_sigpipe = {};
+		ignore_sigpipe.sa_handler = SIG_IGN;
+		if (sigaction(SIGPIPE, &ignore_sigpipe, &syz_csb_previous_sigpipe_action)) {
+			pthread_mutex_unlock(&syz_csb_sigpipe_mutex);
+			return -1;
+		}
+	}
+	syz_csb_sigpipe_users++;
+	return pthread_mutex_unlock(&syz_csb_sigpipe_mutex) ? -1 : 0;
+}
+
+static int syz_csb_restore_sigpipe(void)
+{
+	if (pthread_mutex_lock(&syz_csb_sigpipe_mutex))
+		return -1;
+	if (syz_csb_sigpipe_users == 0 ||
+	    (syz_csb_sigpipe_users == 1 && sigaction(SIGPIPE, &syz_csb_previous_sigpipe_action, 0))) {
+		pthread_mutex_unlock(&syz_csb_sigpipe_mutex);
+		return -1;
+	}
+	syz_csb_sigpipe_users--;
+	return pthread_mutex_unlock(&syz_csb_sigpipe_mutex) ? -1 : 0;
+}
+#endif
 
 static inline int
 UNIQUE_FUNC(bm_target_reg)(thread_ctx_t* ctx)
 {
-	struct sigaction ignore_sigpipe = {};
-	ignore_sigpipe.sa_handler = SIG_IGN;
-	if (sigaction(SIGPIPE, &ignore_sigpipe, &UNIQUE_VAR(previous_sigpipe_action))) {
+	if (syz_csb_ignore_sigpipe()) {
 		return -1;
 	}
 	/*{{{SYSCALLS_NET_SRV_REG}}}*/
@@ -941,7 +973,7 @@ static inline int
 UNIQUE_FUNC(bm_target_dereg)(thread_ctx_t* ctx)
 {
 	/*{{{SYSCALLS_NET_SRV_DEREG}}}*/
-	if (sigaction(SIGPIPE, &UNIQUE_VAR(previous_sigpipe_action), 0)) {
+	if (syz_csb_restore_sigpipe()) {
 		return -1;
 	}
 	return 0;
