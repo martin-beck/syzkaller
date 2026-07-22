@@ -6014,6 +6014,23 @@ static long syz_csb_vfork_wait(void)
 }
 #endif
 
+#if SYZ_EXECUTOR || __NR_syz_reapply_affinity
+#include <sched.h>
+
+static long UNIQUE_FUNC(syz_reapply_affinity)(void)
+{
+	// Each worker snapshots the affinity inherited from its launcher.
+	static _Thread_local cpu_set_t mask;
+	static _Thread_local int initialized;
+	if (!initialized) {
+		if (sched_getaffinity(0, sizeof(mask), &mask))
+			return -1;
+		initialized = 1;
+	}
+	return sched_setaffinity(0, sizeof(mask), &mask);
+}
+#endif
+
 #if SYZ_EXECUTOR || __NR_syz_pkey_set
 #include <errno.h>
 #define RESERVED_PKEY 15
