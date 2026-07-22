@@ -127,6 +127,22 @@ func TestDefaultSelectorDeclinesUnsafeCacheKeys(t *testing.T) {
 	}
 }
 
+func TestKeyctlRestrictionSelection(t *testing.T) {
+	target := testTarget(t)
+	selector := newSelectors(target, newRCache())[0].(*defaultCallSelector)
+	args := []parser.IrType{
+		parser.Constant(target.ConstMap["KEYCTL_RESTRICT_KEYRING"]), parser.Constant(0),
+		&parser.BufferType{Val: "asymmetric"}, &parser.BufferType{Val: "builtin_trusted"},
+	}
+	if got := selector.Select(parser.NewSyscall(1, "keyctl", args, 0, false, false)); got == nil || got.Name != "keyctl$restrict_keyring" {
+		t.Fatalf("generic restriction selected %v", got)
+	}
+	args[3] = &parser.GroupType{}
+	if got := selector.Select(parser.NewSyscall(1, "keyctl", args, 0, false, false)); got == nil || got.Name != "keyctl$KEYCTL_RESTRICT_KEYRING" {
+		t.Fatalf("structured restriction selected %v", got)
+	}
+}
+
 func TestDefaultSelectorCacheKeyIsUnambiguous(t *testing.T) {
 	selector := newSelectors(testTarget(t), newRCache())[0].(*defaultCallSelector)
 	key := func(args ...parser.IrType) string {

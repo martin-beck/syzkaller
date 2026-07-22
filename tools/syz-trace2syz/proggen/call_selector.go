@@ -37,9 +37,12 @@ var discriminatorArgs = map[string][]int{
 
 func (cs *defaultCallSelector) callDiscriminators(call *parser.Syscall) []int {
 	discriminators := discriminatorArgs[call.CallName]
-	if call.CallName == "prctl" && len(call.Args) > 1 {
+	if len(call.Args) > 1 {
 		option, ok := call.Args[0].(parser.Constant)
-		if ok && (option.Val() == cs.target.ConstMap["PR_SET_MM"] ||
+		if call.CallName == "keyctl" && ok && option.Val() == cs.target.ConstMap["KEYCTL_RESTRICT_KEYRING"] {
+			return []int{0, 3}
+		}
+		if call.CallName == "prctl" && ok && (option.Val() == cs.target.ConstMap["PR_SET_MM"] ||
 			option.Val() == cs.target.ConstMap["PR_SET_SYSCALL_USER_DISPATCH"]) {
 			return []int{0, 1}
 		}
@@ -309,6 +312,9 @@ func (cs *defaultCallSelector) matchCall(meta *prog.Syscall, call *parser.Syscal
 				return -1
 			}
 		case *prog.PtrType:
+			if constant, ok := arg.(parser.Constant); ok && constant.Val() == 0 {
+				continue
+			}
 			switch r := t.Elem.(type) {
 			case *prog.BufferType:
 				matched := false
@@ -318,6 +324,10 @@ func (cs *defaultCallSelector) matchCall(meta *prog.Syscall, call *parser.Syscal
 				}
 				if r.Kind != prog.BufferString {
 					return -1
+				}
+				if len(r.Values) == 0 {
+					score++
+					break
 				}
 				for _, val := range r.Values {
 					matched, _ = cs.matchFilename([]byte(val), []byte(buffer.Val))
