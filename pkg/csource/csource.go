@@ -698,8 +698,12 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		if ctx.opts.CSB && call.Meta.Name == "syz_io_uring_submit" {
 			if sqe, ok := call.Args[2].(prog.ExecArgConst); ok {
 				// IORING_OP_CLOSE stores its fd at offset 4 in the SQE.
-				fmt.Fprintf(w, "\tif (*(uint8*)(0x%x+PTR_OFFSET) == 19 && *(int32*)(0x%x+PTR_OFFSET) <= 2) *(int32*)(0x%x+PTR_OFFSET) = -1;\n",
-					sqe.Value, sqe.Value+4, sqe.Value+4)
+				offset := ""
+				if valInMMapRange(ctx, sqe.Value) {
+					offset = "+PTR_OFFSET"
+				}
+				fmt.Fprintf(w, "\tNONFAILING(if (*(uint8*)(0x%x%s) == 19 && *(int32*)(0x%x%s) <= 2) *(int32*)(0x%x%s) = -1);\n",
+					sqe.Value, offset, sqe.Value+4, offset, sqe.Value+4, offset)
 			}
 		}
 
@@ -1054,10 +1058,10 @@ func (ctx *context) protectCSBControlFD(callName string, arg int, val string) st
 	}
 	// CSB uses stdin/stdout/stderr to control and report benchmark operations.
 	if (callName == "close" && arg == 0) || ((callName == "dup2" || callName == "dup3") && arg == 1) {
-		return fmt.Sprintf("((%s) <= 2 ? -1 : (%s))", val, val)
+		return fmt.Sprintf("((uint32)(%s) <= 2 ? -1 : (%s))", val, val)
 	}
 	if callName == "close_range" && arg == 0 {
-		return fmt.Sprintf("((%s) <= 2 ? 3 : (%s))", val, val)
+		return fmt.Sprintf("((uint32)(%s) <= 2 ? 3 : (%s))", val, val)
 	}
 	return val
 }

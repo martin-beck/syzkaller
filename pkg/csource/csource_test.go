@@ -126,7 +126,7 @@ func TestCSBProtectControlFDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"<= 2 ? -1", "<= 2 ? 3"} {
+	for _, want := range []string{"(uint32_t)(", "<= 2 ? -1", "<= 2 ? 3"} {
 		assert.Contains(t, string(csb), want)
 		assert.NotContains(t, string(normal), want)
 	}
@@ -153,6 +153,16 @@ func TestCSBProtectControlFDsIoUring(t *testing.T) {
 			assert.Contains(t, string(src), "+PTR_OFFSET) == 19")
 		}
 	}
+	p, err = target.Deserialize([]byte("syz_io_uring_submit(0x0, 0x0, 0x0)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, HandleSegv: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "NONFAILING(if (*(uint8_t*)(0x0)")
+	assert.NotContains(t, string(src), "0x0+PTR_OFFSET")
 }
 
 func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {
