@@ -224,6 +224,24 @@ func TestCSBProtectRawIoUringMmap2(t *testing.T) {
 	assert.Contains(t, string(src), "/*to_submit=*/0")
 }
 
+func TestCSBProtectRawIoUringConstantFD(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("io_uring_setup(0x1, &(0x7f0000000000))\n"+
+		"mmap(&(0x7f0000001000/0x1000)=nil, 0x1000, 0x3, 0x1, 0x3, 0x10000000)\n"+
+		"io_uring_enter(0x3, 0x1, 0x0, 0x0, 0x0, 0x0)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "/*to_submit=*/0")
+}
+
 func TestCSBProtectAliasedIoUring(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {

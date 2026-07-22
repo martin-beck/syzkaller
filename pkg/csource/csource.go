@@ -687,11 +687,14 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	var calls []string
 	csumSeq := 0
 	rawIOUring := false
+	ioUringCreated := false
 	ioUringFDs := make(map[uint64]bool)
 	for _, call := range p.Calls {
-		if (call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup") &&
-			call.Index != prog.ExecNoCopyout {
-			ioUringFDs[call.Index] = true
+		if call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup" {
+			ioUringCreated = true
+			if call.Index != prog.ExecNoCopyout {
+				ioUringFDs[call.Index] = true
+			}
 		}
 		duplicate := call.Meta.CallName == "dup" || call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3" ||
 			fcntlCommand(call, ctx.target.ConstMap["F_DUPFD"]) ||
@@ -710,6 +713,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			rawIOUring = true
 		} else if (call.Meta.CallName == "mmap" || call.Meta.CallName == "mmap2") && len(call.Args) > 5 {
 			fd, fdOK := call.Args[4].(prog.ExecArgResult)
+			_, constantFD := call.Args[4].(prog.ExecArgConst)
 			offset, offsetOK := call.Args[5].(prog.ExecArgConst)
 			sqRingOffset := ctx.target.ConstMap["IORING_OFF_SQ_RING"]
 			sqesOffset := ctx.target.ConstMap["IORING_OFF_SQES"]
@@ -717,7 +721,9 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				sqRingOffset /= ctx.target.PageSize
 				sqesOffset /= ctx.target.PageSize
 			}
-			if fdOK && fd.DivOp == 0 && fd.AddOp == 0 && offsetOK && ioUringFDs[fd.Index] &&
+			knownRingFD := (fdOK && fd.DivOp == 0 && fd.AddOp == 0 && ioUringFDs[fd.Index]) ||
+				(constantFD && ioUringCreated)
+			if knownRingFD && offsetOK &&
 				(offset.Value == sqRingOffset || offset.Value == sqesOffset) {
 				rawIOUring = true
 			}
