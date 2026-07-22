@@ -304,3 +304,17 @@ func TestParseBPFFilterMacros(t *testing.T) {
 		t.Fatalf("filter parsed as %#v, want two instructions", filter)
 	}
 }
+
+func TestSkipUnusableRecords(t *testing.T) {
+	tree := parseTestData(t, []byte(`1 open() = 3
+1 ????( <unfinished ...>
+1 <... ???? resumed>) = ?
+2 nanosleep({tv_sec=0}, <unfinished ...>) = ?
+1 close(3) = 0`))
+	if calls := tree.TraceMap[1].Calls; len(calls) != 2 {
+		t.Fatalf("got %d surrounding calls, want 2", len(calls))
+	}
+	if _, ok := tree.TraceMap[2]; ok {
+		t.Fatal("terminal unfinished call was not skipped")
+	}
+}
