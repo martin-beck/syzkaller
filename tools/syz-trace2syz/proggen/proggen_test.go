@@ -719,8 +719,11 @@ func TestAIOCallsUseBoundedLifecycles(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if helper := "syz_csb_" + name + "()"; !strings.Contains(string(src), helper) {
+			if helper := "UNIQUE_FUNC(syz_csb_" + name + ")"; !strings.Contains(string(src), helper) {
 				t.Fatalf("generated CSB header missing %q", helper)
+			}
+			if name == "io_pgetevents" && !strings.Contains(string(src), "syscall(__NR_io_pgetevents") {
+				t.Fatal("generated helper omits io_pgetevents")
 			}
 		})
 	}
@@ -861,11 +864,25 @@ func TestExitCallsUseBoundedLifecycles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"syz_csb_exit()", "syz_csb_exit_group()"} {
+	if strings.Contains(string(src), "doexit_thread") {
+		t.Fatal("generated exit helper references executor-only code")
+	}
+	for _, want := range []string{"UNIQUE_FUNC(syz_csb_exit)", "UNIQUE_FUNC(syz_csb_exit_group)"} {
 		if !strings.Contains(string(src), want) {
 			t.Fatalf("generated CSB header missing %q", want)
 		}
 	}
+	exitTrace := &parser.Trace{Calls: trace.Calls[1:]}
+	standalone, _, err := csource.Write(genProg(exitTrace, target, false, false, false, false),
+		csource.Options{Slowdown: 1, Trace: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin, err := csource.Build(target, standalone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(bin)
 }
 
 func parseSingleProg(t *testing.T, input string) *prog.Prog {
