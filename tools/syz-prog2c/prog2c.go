@@ -125,7 +125,27 @@ func sanitizePathArg(call *prog.Call, argnum int) string {
 	return subdirPath
 }
 
-func sanitizeOpenAt(call *prog.Call, subdirs map[string](bool), filemap map[uint64](string)) (map[string](bool), map[uint64](string)) {
+type openFlagConsts struct {
+	Creat        uint64
+	Excl         uint64
+	Direct       uint64
+	Directory    uint64
+	HasDirectory bool
+}
+
+// targetOpenFlagConsts avoids applying host or amd64 flag values to cross-architecture programs.
+func targetOpenFlagConsts(target *prog.Target) openFlagConsts {
+	directory, hasDirectory := target.ConstMap["O_DIRECTORY"]
+	return openFlagConsts{
+		Creat:        target.ConstMap["O_CREAT"],
+		Excl:         target.ConstMap["O_EXCL"],
+		Direct:       target.ConstMap["O_DIRECT"],
+		Directory:    directory,
+		HasDirectory: hasDirectory,
+	}
+}
+
+func sanitizeOpenAt(call *prog.Call, flags openFlagConsts, subdirs map[string](bool), filemap map[uint64](string)) (map[string](bool), map[uint64](string)) {
 	// get result fd to track paths and filesizes
 	r := call.Ret
 	for r.Res != nil {
@@ -155,20 +175,20 @@ func sanitizeOpenAt(call *prog.Call, subdirs map[string](bool), filemap map[uint
 
 	// adds O_CREAT if O_DIRECTORY is not specified (include O_TMPFILE)
 	a2 := call.Args[2].(*prog.ConstArg)
-	if (a2.Val & syscall.O_DIRECTORY) != syscall.O_DIRECTORY {
-		a2.Val |= syscall.O_CREAT
+	if !flags.HasDirectory || (a2.Val&flags.Directory) != flags.Directory {
+		a2.Val |= flags.Creat
 	}
 
 	// if it wants to open a directory, put the complete path into the list of created directories
-	if (a2.Val & syscall.O_DIRECTORY) == syscall.O_DIRECTORY {
+	if flags.HasDirectory && (a2.Val&flags.Directory) == flags.Directory {
 		subdirs[d1_str] = true
 	}
 
 	// removes O_EXCL
-	a2.Val &= ^uint64(syscall.O_EXCL)
+	a2.Val &= ^flags.Excl
 
 	// removes O_DIRECT
-	a2.Val &= ^uint64(syscall.O_DIRECT)
+	a2.Val &= ^flags.Direct
 
 	// d2 := a2.Val
 
@@ -325,11 +345,12 @@ func sanitizeProgram(p *prog.Prog, progName string) (*prog.Prog, map[string](boo
 	filesizes := make(map[uint64](uint64))
 	filemap := make(map[uint64](string))
 	maxWriteSize := uint64(0)
+	openFlags := targetOpenFlagConsts(p.Target)
 	for idx, call := range p.Calls {
 		p.AnnotateResources(idx)
 		switch call.Meta.Name {
 		case "openat":
-			subdirs, filemap = sanitizeOpenAt(call, subdirs, filemap)
+			subdirs, filemap = sanitizeOpenAt(call, openFlags, subdirs, filemap)
 		case "pwrite64":
 			filesizes = sanitizePwrite64(call, filesizes)
 			maxWriteSize = sanitizeMaxWriteSize(call, 1, 2, maxWriteSize)
