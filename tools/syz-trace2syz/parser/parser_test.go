@@ -99,6 +99,9 @@ func TestParseSplitFieldValue(t *testing.T) {
 			}
 			callIndex := 1
 			if splitThreads {
+				if tree.RootPid != 1 {
+					t.Fatalf("root PID: got %d, want 1", tree.RootPid)
+				}
 				trace = tree.TraceMap[1]
 				callIndex = 0
 			} else if got := []string{trace.Calls[0].CallName, trace.Calls[1].CallName}; !reflect.DeepEqual(got, []string{"close", "bpf"}) {
