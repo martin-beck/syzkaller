@@ -925,7 +925,7 @@ void UNIQUE_FUNC(loop)(void)
 #endif
 
 #if CSB
-#ifndef SYZ_CSB_SIGPIPE_STATE
+/*#ifndef*/ SYZ_CSB_SIGPIPE_STATE
 #define SYZ_CSB_SIGPIPE_STATE
 static struct sigaction syz_csb_previous_sigpipe_action;
 static size_t syz_csb_sigpipe_users;
@@ -959,7 +959,7 @@ static int syz_csb_restore_sigpipe(void)
 	syz_csb_sigpipe_users--;
 	return pthread_mutex_unlock(&syz_csb_sigpipe_mutex) ? -1 : 0;
 }
-#endif
+/*#endif*/
 
 static inline int
 UNIQUE_FUNC(bm_target_reg)(thread_ctx_t* ctx)
