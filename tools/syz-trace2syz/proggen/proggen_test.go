@@ -795,18 +795,18 @@ func TestSkipOnlyInitialBootstrapExec(t *testing.T) {
 	}}
 
 	root := string(genProg(trace, target, false, false, false, true).Serialize())
-	if got := strings.Count(root, "syz_csb_execve"); got != 1 {
-		t.Fatalf("root contains %d exec lifecycles, want 1:\n%s", got, root)
+	if got := strings.Count(root, "syz_csb_execve"); got != 2 {
+		t.Fatalf("root contains %d exec lifecycles, want 2:\n%s", got, root)
 	}
-	if strings.Contains(root, "getppid") {
-		t.Fatalf("root retained calls after its workload exec:\n%s", root)
+	if !strings.Contains(root, "getppid") {
+		t.Fatalf("root lost replacement-image workload:\n%s", root)
 	}
 	child := string(genProg(trace, target, false, false, false, false).Serialize())
-	if got := strings.Count(child, "syz_csb_execve"); got != 1 {
-		t.Fatalf("child contains %d exec lifecycles, want 1:\n%s", got, child)
+	if got := strings.Count(child, "syz_csb_execve"); got != 2 {
+		t.Fatalf("child contains %d exec lifecycles, want 2:\n%s", got, child)
 	}
-	if strings.Contains(child, "getppid") {
-		t.Fatalf("child retained calls after its successful workload exec:\n%s", child)
+	if !strings.Contains(child, "getppid") {
+		t.Fatalf("child lost replacement-image workload:\n%s", child)
 	}
 	initial := &parser.Trace{Calls: []*parser.Syscall{
 		parser.NewSyscall(1, "execve", nil, -1, false, false),
@@ -835,12 +835,12 @@ func TestBootstrapExecIsRootSpecific(t *testing.T) {
 	if lifecycles := strings.Count(got, "syz_csb_execve"); lifecycles != 2 {
 		t.Fatalf("got %d exec lifecycles, want child and workload execs:\n%s", lifecycles, got)
 	}
-	if strings.Contains(got, "getppid") {
-		t.Fatalf("root calls after its workload exec remained:\n%s", got)
+	if !strings.Contains(got, "getppid") {
+		t.Fatalf("root lost replacement-image workload:\n%s", got)
 	}
 }
 
-func TestSuccessfulExecTerminatesOnlyItsTID(t *testing.T) {
+func TestSuccessfulExecKeepsReplacementWorkload(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {
 		t.Fatal(err)
@@ -860,8 +860,8 @@ func TestSuccessfulExecTerminatesOnlyItsTID(t *testing.T) {
 	if !strings.Contains(got, "getpid") {
 		t.Fatalf("calls from a live interleaved TID were lost:\n%s", got)
 	}
-	if strings.Contains(got, "getppid") || strings.Contains(got, "getuid") {
-		t.Fatalf("calls after successful exec remained in their TID:\n%s", got)
+	if !strings.Contains(got, "getppid") || !strings.Contains(got, "getuid") {
+		t.Fatalf("replacement-image workload was lost:\n%s", got)
 	}
 }
 
