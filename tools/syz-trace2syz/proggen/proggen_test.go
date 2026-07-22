@@ -737,6 +737,13 @@ func TestFailedAIOCallsAreDropped(t *testing.T) {
 	}
 }
 
+func TestAIOPositiveResultIsNormalized(t *testing.T) {
+	p := parseSingleProg(t, `io_submit() = 1`)
+	if got, want := strings.TrimSpace(string(p.Serialize())), "syz_csb_io_submit()[0]"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 func TestShortSafeCallsAreDropped(t *testing.T) {
 	p := parseSingleProg(t, `
 madvise() = 0
