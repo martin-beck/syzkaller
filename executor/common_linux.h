@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #if SYZ_EXECUTOR || __NR_syz_csb_io_setup || __NR_syz_csb_io_getevents || __NR_syz_csb_io_pgetevents || __NR_syz_csb_io_destroy || __NR_syz_csb_io_submit || __NR_syz_csb_io_cancel
+#include <errno.h>
 #include <fcntl.h>
 #include <linux/aio_abi.h>
 #include <poll.h>
@@ -61,6 +62,8 @@ static long UNIQUE_FUNC(csb_aio_lifecycle)(enum UNIQUE_FUNC(csb_aio_op) op)
 			ret = syscall(__NR_io_cancel, ctx, &cb, &event);
 		else if (ret == 1)
 			ret = syscall(__NR_io_getevents, ctx, 0, 1, &event, &timeout);
+		if (op == UNIQUE_FUNC(CSB_AIO_CANCEL) && ret < 0 && errno == EINPROGRESS)
+			ret = 0;
 		if (cb.aio_fildes >= 0)
 			close(cb.aio_fildes);
 	}
