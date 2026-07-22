@@ -842,6 +842,11 @@ func (ctx *context) genArray(syzType *prog.ArrayType, dir prog.Dir, traceType pa
 				break
 			}
 		}
+		if syzType.Elem.Varlen() || syzType.Elem.Size() != 1 {
+			// A parser buffer has no element-width information. Expanding it byte by
+			// byte would change the layout of arrays with wider elements.
+			return syzType.DefaultArg(dir)
+		}
 		for _, val := range []byte(a.Val) {
 			args = append(args, ctx.genArg(syzType.Elem, dir, parser.Constant(val)))
 		}

@@ -377,6 +377,22 @@ func TestGenArrayDirectString(t *testing.T) {
 	}
 }
 
+func TestGenArrayDirectBufferWithWideElements(t *testing.T) {
+	elem := &prog.IntType{IntTypeCommon: prog.IntTypeCommon{
+		TypeCommon: prog.TypeCommon{TypeName: "int32", TypeSize: 4},
+	}}
+	array := &prog.ArrayType{
+		TypeCommon: prog.TypeCommon{TypeName: "array", TypeSize: 4},
+		Elem:       elem, Kind: prog.ArrayRangeLen, RangeBegin: 1, RangeEnd: 1,
+	}
+	prog.RestoreLinks(nil, nil, []prog.Type{elem, array})
+	arg := (&context{}).genArray(array, prog.DirIn, &parser.BufferType{Val: "wide"})
+	inner := arg.(*prog.GroupArg).Inner
+	if len(inner) != 1 || inner[0].(*prog.ConstArg).Val != 0 {
+		t.Fatalf("got %#v, want one default int32 element", inner)
+	}
+}
+
 func TestMadviseFromTrace(t *testing.T) {
 	p := parseSingleProg(t, `
 madvise(0xffff7fb57000, 8192, 0x4) = 0
