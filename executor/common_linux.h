@@ -34,7 +34,7 @@ static long UNIQUE_FUNC(csb_aio_lifecycle)(enum UNIQUE_FUNC(csb_aio_op) op)
 	struct timespec timeout = {};
 	if (op == UNIQUE_FUNC(CSB_AIO_GETEVENTS))
 		ret = syscall(__NR_io_getevents, ctx, 0, 1, &event, &timeout);
-#if defined(__NR_io_pgetevents)
+#if defined(__NR_io_pgetevents) || __NR_syz_csb_io_pgetevents
 	else if (op == UNIQUE_FUNC(CSB_AIO_PGETEVENTS))
 		ret = syscall(__NR_io_pgetevents, ctx, 0, 1, &event, &timeout, 0);
 #endif
