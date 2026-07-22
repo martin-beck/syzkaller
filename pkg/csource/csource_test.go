@@ -131,6 +131,9 @@ func TestCSBBoundsMillisecondWaits(t *testing.T) {
 			if got := strings.Contains(string(src), "CSB_MAX_WAIT_MS ? CSB_MAX_WAIT_MS"); got != csb {
 				t.Fatalf("%s, CSB=%v: bounded wait present=%v", call, csb, got)
 			}
+			if csb {
+				assert.Contains(t, string(src), "#ifndef CSB_MAX_WAIT_MS")
+			}
 		}
 	}
 }
