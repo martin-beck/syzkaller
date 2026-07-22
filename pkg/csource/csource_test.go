@@ -172,6 +172,7 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 		if strings.Contains(input, "FIONBIO") {
 			assert.Contains(t, string(src), "NONFAILING(*(uint32_t*)")
 			assert.Contains(t, string(src), "+PTR_OFFSET) = 1")
+			assert.Contains(t, string(src), "/*arg=*/0x200000000040ul+PTR_OFFSET")
 		}
 		if strings.HasPrefix(input, "openat2") {
 			assert.Contains(t, string(src), "NONFAILING(*(uint64_t*)")
