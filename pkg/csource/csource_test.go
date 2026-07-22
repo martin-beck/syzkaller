@@ -227,6 +227,23 @@ func TestCSBProtectRawIoUring(t *testing.T) {
 	}
 }
 
+func TestCSBClearsSQPOLLAtAbsoluteParams(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("io_uring_setup(0x1, 0x0)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, HandleSegv: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "*(uint32_t*)(0x8) &= ~2")
+	assert.NotContains(t, string(src), "0x8+PTR_OFFSET")
+}
+
 func TestCSBProtectRawIoUringInProgramOrder(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {

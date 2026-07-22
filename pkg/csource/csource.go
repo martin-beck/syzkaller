@@ -947,8 +947,11 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			ctx.copyin(w, &csumSeq, copyin)
 		}
 		if ctx.opts.CSB && call.Meta.CallName == "io_uring_setup" {
-			if params, ok := call.Args[1].(prog.ExecArgConst); ok && valInMMapRange(ctx, params.Value) {
-				offset := "+PTR_OFFSET"
+			if params, ok := call.Args[1].(prog.ExecArgConst); ok {
+				offset := ""
+				if valInMMapRange(ctx, params.Value) {
+					offset = "+PTR_OFFSET"
+				}
 				fmt.Fprintf(w, "\tNONFAILING(*(uint32*)(0x%x%s) &= ~%d);\n", params.Value+8, offset,
 					ctx.target.ConstMap["IORING_SETUP_SQPOLL"])
 			}
