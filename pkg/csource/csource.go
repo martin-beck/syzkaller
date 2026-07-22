@@ -738,6 +738,11 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 					futureRawIOUringFDs[src.Index] = true
 				}
 			}
+			if dst, ok := call.Args[1].(prog.ExecArgConst); ok && futureRawIOUringConstants[int32(dst.Value)] {
+				if src, ok := call.Args[0].(prog.ExecArgResult); ok && src.DivOp <= 1 && uint32(src.AddOp) == 0 {
+					futureRawIOUringFDs[src.Index] = true
+				}
+			}
 		}
 		if call.Meta.CallName == "pidfd_getfd" && call.Index != prog.ExecNoCopyout &&
 			futureRawIOUringFDs[call.Index] && len(call.Args) > 1 {
@@ -787,6 +792,9 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
 				if fd, ok := call.Args[1].(prog.ExecArgResult); ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
 					rawIOUringFDs[fd.Index] = true
+				}
+				if fd, ok := call.Args[1].(prog.ExecArgConst); ok {
+					rawIOUringConstants[int32(fd.Value)] = true
 				}
 			}
 		}
