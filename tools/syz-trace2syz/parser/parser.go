@@ -23,16 +23,16 @@ func parseSyscall(data []byte) (int, *Syscall) {
 }
 
 func normalizeStraceLine(line string) string {
+	name, start := straceCall(line)
 	// Large CPU sets are truncated with a trailing ellipsis.
-	if strings.Contains(line, "sched_setaffinity(") {
+	if name == "sched_setaffinity" {
 		line = strings.Replace(line, ", ...]", "]", 1)
 	}
 	// strace 6.8 can render a zero statx flags argument as an empty field.
 	// Normalize only that known form so malformed arguments in other calls
 	// continue to fail parsing instead of being silently rewritten.
-	if strings.Contains(line, " statx(") || strings.HasPrefix(line, "statx(") {
-		start := strings.Index(line, "statx(")
-		lastComma, commas := start+len("statx(")-1, 0
+	if name == "statx" {
+		lastComma, commas := start, 0
 		quoted, escaped := false, false
 		for i := lastComma + 1; i < len(line); i++ {
 			switch {
@@ -52,6 +52,28 @@ func normalizeStraceLine(line string) string {
 		}
 	}
 	return line
+}
+
+func straceCall(line string) (string, int) {
+	quoted, escaped := false, false
+	for i := 0; i < len(line); i++ {
+		switch {
+		case escaped:
+			escaped = false
+		case quoted && line[i] == '\\':
+			escaped = true
+		case line[i] == '"':
+			quoted = !quoted
+		case !quoted && line[i] == '(':
+			start := i
+			for start > 0 && (line[start-1] == '_' || line[start-1] >= 'a' && line[start-1] <= 'z' ||
+				line[start-1] >= 'A' && line[start-1] <= 'Z' || line[start-1] >= '0' && line[start-1] <= '9') {
+				start--
+			}
+			return line[start:i], i
+		}
+	}
+	return "", -1
 }
 
 func shouldSkip(line string) bool {

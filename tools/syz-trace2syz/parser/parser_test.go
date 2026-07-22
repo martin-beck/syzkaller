@@ -168,6 +168,10 @@ func TestParseEmptyStatxFlags(t *testing.T) {
 	if got := normalizeStraceLine(line); got != `1 statx(3, "a, ,b", 0, 0x1101, {}) = 0` {
 		t.Fatalf("normalized as %q", got)
 	}
+	quoted := `1 write(1, " statx(3, x, , y)", 18) = 18`
+	if got := normalizeStraceLine(quoted); got != quoted {
+		t.Fatalf("quoted payload normalized as %q", got)
+	}
 	tree := parseTestData(t, []byte(`1 statx(3, ".", , 0x1101, {}) = 0`))
 	call := tree.TraceMap[tree.RootPid].Calls[0]
 	arg, ok := call.Args[2].(Constant)
