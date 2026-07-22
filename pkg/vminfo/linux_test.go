@@ -89,6 +89,15 @@ func TestLinuxSyscalls(t *testing.T) {
 	}
 }
 
+func TestCSBAIOAlwaysSupported(t *testing.T) {
+	for _, name := range []string{"setup", "getevents", "pgetevents", "destroy", "submit", "cancel"} {
+		check := linuxSyscallChecks["syz_csb_io_"+name]
+		if check == nil || check(nil, nil) != "" {
+			t.Errorf("syz_csb_io_%s is not always supported", name)
+		}
+	}
+}
+
 func TestReadKVMInfo(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("not linux")
