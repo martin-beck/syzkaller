@@ -48,27 +48,23 @@ func joinSplitValues(data []byte) ([]byte, int64) {
 				rootPid = pid
 			}
 		}
-		if strings.HasSuffix(line, "= <unfinished ...>") {
-			if len(fields) >= 2 {
-				if paren := strings.IndexByte(fields[1], '('); paren > 0 {
-					pending[fields[0]] = pendingCall{i, fields[1][:paren]}
-				}
-			}
-			continue
-		}
 		start := strings.Index(line, "<... ")
 		end := strings.Index(line, " resumed>")
-		if start < 0 || end < start {
-			continue
+		if start >= 0 && end >= start {
+			pid := strings.TrimSpace(line[:start])
+			if call, ok := pending[pid]; ok && line[start+5:end] == call.name {
+				lines[i] = strings.TrimSuffix(lines[call.line], "<unfinished ...>") + line[end+9:]
+				removed[call.line] = true
+				delete(pending, pid)
+				line = lines[i]
+				fields = strings.Fields(line)
+			}
 		}
-		pid := strings.TrimSpace(line[:start])
-		call, ok := pending[pid]
-		if !ok || line[start+5:end] != call.name {
-			continue
+		if strings.HasSuffix(line, "= <unfinished ...>") && len(fields) >= 2 {
+			if paren := strings.IndexByte(fields[1], '('); paren > 0 {
+				pending[fields[0]] = pendingCall{i, fields[1][:paren]}
+			}
 		}
-		lines[i] = strings.TrimSuffix(lines[call.line], "<unfinished ...>") + line[end+9:]
-		removed[call.line] = true
-		delete(pending, pid)
 	}
 	joined := lines[:0]
 	for i, line := range lines {
