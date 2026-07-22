@@ -689,7 +689,14 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	rawIOUring := false
 	ioUringFDs := make(map[uint64]bool)
 	for _, call := range p.Calls {
-		if call.Meta.CallName == "io_uring_setup" && call.Index != prog.ExecNoCopyout {
+		if (call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup") &&
+			call.Index != prog.ExecNoCopyout {
+			ioUringFDs[call.Index] = true
+		}
+		if call.Index != prog.ExecNoCopyout && ioUringResultArg(call, ioUringFDs) &&
+			(call.Meta.CallName == "dup" || call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3" ||
+				fcntlCommand(call, ctx.target.ConstMap["F_DUPFD"]) ||
+				fcntlCommand(call, ctx.target.ConstMap["F_DUPFD_CLOEXEC"])) {
 			ioUringFDs[call.Index] = true
 		}
 		if call.Meta.Name == "mmap$IORING_OFF_SQ_RING" || call.Meta.Name == "mmap$IORING_OFF_SQES" {
@@ -703,7 +710,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				sqRingOffset /= ctx.target.PageSize
 				sqesOffset /= ctx.target.PageSize
 			}
-			if fdOK && offsetOK && ioUringFDs[fd.Index] &&
+			if fdOK && fd.DivOp == 0 && fd.AddOp == 0 && offsetOK && ioUringFDs[fd.Index] &&
 				(offset.Value == sqRingOffset || offset.Value == sqesOffset) {
 				rawIOUring = true
 			}
@@ -711,6 +718,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	}
 	for ci, call := range p.Calls {
 		w := new(bytes.Buffer)
+		guardSQE := false
 		if addComments {
 			w.WriteString(callComments[ci] + "\n")
 		}
@@ -735,8 +743,10 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				if valInMMapRange(ctx, sqe.Value) {
 					offset = "+PTR_OFFSET"
 				}
-				fmt.Fprintf(w, "\tNONFAILING(if (*(uint8*)(0x%x%s) == 19 && *(int32*)(0x%x%s) <= 2) *(int32*)(0x%x%s) = -1);\n",
+				fmt.Fprintf(w, "\tint csb_sqe_ok_%d = NONFAILING(if (*(uint8*)(0x%x%s) == 19 && *(int32*)(0x%x%s) <= 2) *(int32*)(0x%x%s) = -1);\n",
+					ci,
 					sqe.Value, offset, sqe.Value+4, offset, sqe.Value+4, offset)
+				guardSQE = true
 			}
 		}
 
@@ -759,6 +769,9 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			call.Args = args
 		}
 
+		if guardSQE {
+			fmt.Fprintf(w, "\tif (csb_sqe_ok_%d) {\n", ci)
+		}
 		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall, dataMmap)
 
 		if call.Props.Rerun > 0 {
@@ -770,6 +783,9 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		// Copyout.
 		if resCopyout || argCopyout {
 			ctx.copyout(w, call, resCopyout)
+		}
+		if guardSQE {
+			fmt.Fprint(w, "\n\t}")
 		}
 		calls = append(calls, w.String())
 
@@ -865,6 +881,22 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	NetOpsFDsAccept = tmpOps
 
 	return calls, p.Vars
+}
+
+func ioUringResultArg(call prog.ExecCall, fds map[uint64]bool) bool {
+	if len(call.Args) == 0 {
+		return false
+	}
+	fd, ok := call.Args[0].(prog.ExecArgResult)
+	return ok && fd.DivOp == 0 && fd.AddOp == 0 && fds[fd.Index]
+}
+
+func fcntlCommand(call prog.ExecCall, command uint64) bool {
+	if call.Meta.CallName != "fcntl" || len(call.Args) < 2 {
+		return false
+	}
+	arg, ok := call.Args[1].(prog.ExecArgConst)
+	return ok && arg.Value == command
 }
 
 func loopIdenticalCalls(calls []string, minRun int) []string {
@@ -1066,7 +1098,7 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) str
 			}
 
 			val := com + handleBigEndian(arg, ctx.constArgToStr(arg, native)) + PTR_OFFSET_STR
-			argsStrs = append(argsStrs, ctx.protectCSBControlFD(callName, i, val))
+			argsStrs = append(argsStrs, ctx.protectCSBControlFD(callName, i, val, argsStrs))
 		case prog.ExecArgResult:
 			if initCall {
 				initFDs[arg.Index] = true
@@ -1081,7 +1113,7 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) str
 				// and take 2 slots without the cast, which would be wrong.
 				val = "(intptr_t)" + val
 			}
-			argsStrs = append(argsStrs, ctx.protectCSBControlFD(callName, i, com+val))
+			argsStrs = append(argsStrs, ctx.protectCSBControlFD(callName, i, com+val, argsStrs))
 		default:
 			panic(fmt.Sprintf("unknown arg type: %+v", arg))
 		}
@@ -1092,13 +1124,17 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) str
 	return fmt.Sprintf("%v(%v)", funcName, strings.Join(argsStrs, ", "))
 }
 
-func (ctx *context) protectCSBControlFD(callName string, arg int, val string) string {
+func (ctx *context) protectCSBControlFD(callName string, arg int, val string, previous []string) string {
 	if !ctx.opts.CSB {
 		return val
 	}
 	// CSB uses stdin/stdout/stderr to control and report benchmark operations.
-	if (callName == "close" && arg == 0) || ((callName == "dup2" || callName == "dup3") && arg == 1) {
+	if callName == "close" && arg == 0 {
 		return fmt.Sprintf("((uint32)(%s) <= 2 ? -1 : (%s))", val, val)
+	}
+	if (callName == "dup2" || callName == "dup3") && arg == 1 {
+		return fmt.Sprintf("((uint32)(%[1]s) <= 2 && (uint32)(%[2]s) != (uint32)(%[1]s) ? -1 : (%[1]s))",
+			val, previous[len(previous)-1])
 	}
 	if callName == "close_range" && arg == 0 {
 		return fmt.Sprintf("((uint32)(%s) <= 2 ? 3 : (%s))", val, val)

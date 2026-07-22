@@ -130,6 +130,15 @@ func TestCSBProtectControlFDs(t *testing.T) {
 		assert.Contains(t, string(csb), want)
 		assert.NotContains(t, string(normal), want)
 	}
+	self, err := target.Deserialize([]byte("dup2(0x0, 0x0)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(self, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "!= (uint32_t)(/*newfd=*/0)")
 }
 
 func TestCSBProtectControlFDsIoUring(t *testing.T) {
@@ -162,6 +171,7 @@ func TestCSBProtectControlFDsIoUring(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Contains(t, string(src), "NONFAILING(if (*(uint8_t*)(0x0)")
+	assert.Contains(t, string(src), "if (csb_sqe_ok_0)")
 	assert.NotContains(t, string(src), "0x0+PTR_OFFSET")
 }
 
@@ -204,6 +214,26 @@ func TestCSBProtectRawIoUringMmap2(t *testing.T) {
 	p, err := target.Deserialize([]byte("r0 = io_uring_setup(0x1, &(0x7f0000000000))\n"+
 		"mmap2$auto(0x20000000, 0x1000, 0x3, 0x1, r0, 0x10000)\n"+
 		"io_uring_enter(r0, 0x1, 0x0, 0x0, 0x0, 0x0)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "/*to_submit=*/0")
+}
+
+func TestCSBProtectAliasedIoUring(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte(
+		"r0 = syz_io_uring_setup(0x1, &(0x7f0000000000), &(0x7f0000001000/0x1000)=nil, &(0x7f0000002000/0x1000)=nil)\n"+
+			"r1 = dup(r0)\n"+
+			"mmap(&(0x7f0000003000/0x1000)=nil, 0x1000, 0x3, 0x1, r1, 0x10000000)\n"+
+			"io_uring_enter(r1, 0x1, 0x0, 0x0, 0x0, 0x0)\n"), prog.NonStrict)
 	if err != nil {
 		t.Fatal(err)
 	}
