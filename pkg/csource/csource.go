@@ -455,6 +455,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		header += "#define MMAP_LENGTH " + fmt.Sprintf("0x%x", ctx.target.NumPages*ctx.target.PageSize) + "ul\n"
 		header += "const static uint64_t UNIQUE_VAR(maxWriteBufferSize) = " + fmt.Sprintf("%d", ctx.opts.MaxWriteSize) + "ul;\n"
 		header += "const static uint64_t UNIQUE_VAR(maxWriteBufferSizeAlignment) = " + fmt.Sprintf("%d", ctx.opts.MaxWriteSizeAlignment) + "ul;\n"
+		header += "static int UNIQUE_VAR(csb_sqe_lock);\n"
 
 		// Connect NetOps
 		opsSeq, err := toStringArray(NetOpsFDsConnect)
@@ -723,7 +724,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			rawIOUring = true
 		} else if (call.Meta.CallName == "mmap" || call.Meta.CallName == "mmap2") && len(call.Args) > 5 {
 			fd, fdOK := call.Args[4].(prog.ExecArgResult)
-			_, constantFD := call.Args[4].(prog.ExecArgConst)
+			constant, constantFD := call.Args[4].(prog.ExecArgConst)
 			offset, offsetOK := call.Args[5].(prog.ExecArgConst)
 			sqRingOffset := ctx.target.ConstMap["IORING_OFF_SQ_RING"]
 			sqesOffset := ctx.target.ConstMap["IORING_OFF_SQES"]
@@ -732,7 +733,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				sqesOffset /= ctx.target.PageSize
 			}
 			knownRingFD := (fdOK && fd.DivOp == 0 && fd.AddOp == 0 && ioUringFDs[fd.Index]) ||
-				(constantFD && ioUringCreated)
+				(constantFD && constant.Value > 2 && constant.Value != ^uint64(0) && ioUringCreated)
 			if knownRingFD && offsetOK &&
 				(offset.Value == sqRingOffset || offset.Value == sqesOffset) {
 				rawIOUring = true
@@ -742,19 +743,20 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	for ci, call := range p.Calls {
 		w := new(bytes.Buffer)
 		guardSQE := false
+		lockSQE := ctx.opts.CSB && call.Meta.Name == "syz_io_uring_submit"
 		if addComments {
 			w.WriteString(callComments[ci] + "\n")
+		}
+		if lockSQE {
+			fmt.Fprint(w, "\twhile (__atomic_exchange_n(&UNIQUE_VAR(csb_sqe_lock), 1, __ATOMIC_ACQUIRE)) {}\n")
 		}
 		// Copyin.
 		for _, copyin := range call.Copyin {
 			ctx.copyin(w, &csumSeq, copyin)
 		}
 		if ctx.opts.CSB && call.Meta.CallName == "io_uring_setup" {
-			if params, ok := call.Args[1].(prog.ExecArgConst); ok {
-				offset := ""
-				if valInMMapRange(ctx, params.Value) {
-					offset = "+PTR_OFFSET"
-				}
+			if params, ok := call.Args[1].(prog.ExecArgConst); ok && valInMMapRange(ctx, params.Value) {
+				offset := "+PTR_OFFSET"
 				fmt.Fprintf(w, "\tNONFAILING(*(uint32*)(0x%x%s) &= ~%d);\n", params.Value+8, offset,
 					ctx.target.ConstMap["IORING_SETUP_SQPOLL"])
 			}
@@ -813,6 +815,9 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		}
 		if guardSQE {
 			fmt.Fprint(w, "\n\t}")
+		}
+		if lockSQE {
+			fmt.Fprint(w, "\t__atomic_store_n(&UNIQUE_VAR(csb_sqe_lock), 0, __ATOMIC_RELEASE);\n")
 		}
 		calls = append(calls, w.String())
 
