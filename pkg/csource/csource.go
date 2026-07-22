@@ -710,7 +710,9 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			}
 		}
 		if ctx.opts.CSB && call.Meta.CallName == "openat2" {
-			if how, ok := call.Args[2].(prog.ExecArgConst); ok && valInMMapRange(ctx, how.Value) {
+			how, howOK := call.Args[2].(prog.ExecArgConst)
+			size, sizeOK := call.Args[3].(prog.ExecArgConst)
+			if howOK && sizeOK && size.Value >= 8 && valInMMapRange(ctx, how.Value) {
 				fmt.Fprintf(w, "\tNONFAILING(if (!(*(uint64*)(0x%x+PTR_OFFSET) & %d)) *(uint64*)(0x%x+PTR_OFFSET) |= %d);\n",
 					how.Value, ctx.target.ConstMap["O_PATH"], how.Value, ctx.target.ConstMap["O_NONBLOCK"])
 			}
@@ -733,6 +735,12 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			flags.Value |= ctx.target.ConstMap["O_NONBLOCK"]
 			args[2] = flags
 			call.Args = args
+		}
+		if ctx.opts.CSB && call.Meta.CallName == "mq_getsetattr" && localIOArg(call, localIO) {
+			if attr, ok := call.Args[1].(prog.ExecArgConst); ok && valInMMapRange(ctx, attr.Value) {
+				fmt.Fprintf(w, "\tNONFAILING(*(uint64*)(0x%x+PTR_OFFSET) |= %d);\n",
+					attr.Value, ctx.target.ConstMap["O_NONBLOCK"])
+			}
 		}
 		if ctx.opts.CSB && ctx.target.OS == targets.Linux {
 			// Opening a FIFO for one end only must not stall a generated workload.

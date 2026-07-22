@@ -130,7 +130,8 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 		"r0 = fanotify_init(0x0, 0x0)\nread(r0, &(0x7f0000000000), 0x10)\n",
 		"r0 = userfaultfd(0x0)\nread(r0, &(0x7f0000000000), 0x20)\n",
 		"r0 = mq_open(&(0x7f0000000000)='/queue\\x00', 0x42, 0x180, 0x0)\n" +
-			"fcntl$setstatus(r0, 0x4, 0x0)\nmq_timedreceive(r0, &(0x7f0000000040), 0x1, 0x0, 0x0)\n",
+			"mq_getsetattr(r0, &(0x7f0000000040)={0x0, 0x0, 0x0, 0x0}, 0x0)\n" +
+			"mq_timedreceive(r0, &(0x7f0000000080), 0x1, 0x0, 0x0)\n",
 		"r0 = signalfd(0xffffffffffffffff, &(0x7f0000000000)=0x0, 0x8)\n" +
 			"read(r0, &(0x7f0000000040), 0x80)\n",
 		"r0 = signalfd(0xffffffffffffffff, &(0x7f0000000000)=0x0, 0x8)\n" +
@@ -180,6 +181,9 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 			assert.Contains(t, string(src), "+PTR_OFFSET) = 1")
 			assert.Contains(t, string(src), "/*arg=*/0x200000000040ul+PTR_OFFSET")
 		}
+		if strings.Contains(input, "mq_getsetattr") {
+			assert.Contains(t, string(src), "+PTR_OFFSET) |= 2048")
+		}
 		if strings.HasPrefix(input, "openat2") {
 			assert.Contains(t, string(src), "NONFAILING(*(uint64_t*)")
 			assert.Contains(t, string(src), "+PTR_OFFSET) |= 2048")
@@ -207,6 +211,23 @@ func TestCSBPreservesOpenat2OPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Contains(t, string(src), "& 2097152")
+}
+
+func TestCSBDoesNotModifyShortOpenat2How(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("openat2(0xffffffffffffff9c, &(0x7f0000000000)='./file\\x00', "+
+		"&(0x7f0000000040)={0x0, 0x0, 0x0}, 0x4)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, HandleSegv: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.NotContains(t, string(src), "+PTR_OFFSET) |= 2048")
 }
 
 func TestCSBPreservesNonblockAfterOpen(t *testing.T) {
