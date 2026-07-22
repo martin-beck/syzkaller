@@ -957,11 +957,15 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			}
 		}
 		if ctx.opts.CSB && call.Meta.Name == "ioctl$SECCOMP_IOCTL_NOTIF_ADDFD" {
-			if arg, ok := call.Args[2].(prog.ExecArgConst); ok && valInMMapRange(ctx, arg.Value) {
-				fmt.Fprintf(w, "\tNONFAILING(if ((*(uint32*)(0x%x+PTR_OFFSET) & %d) && "+
-					"*(uint32*)(0x%x+PTR_OFFSET) <= 2) *(uint32*)(0x%x+PTR_OFFSET) &= ~%d);\n",
-					arg.Value+8, ctx.target.ConstMap["SECCOMP_ADDFD_FLAG_SETFD"], arg.Value+16,
-					arg.Value+8, ctx.target.ConstMap["SECCOMP_ADDFD_FLAG_SETFD"])
+			if arg, ok := call.Args[2].(prog.ExecArgConst); ok {
+				offset := ""
+				if valInMMapRange(ctx, arg.Value) {
+					offset = "+PTR_OFFSET"
+				}
+				fmt.Fprintf(w, "\tNONFAILING(if ((*(uint32*)(0x%x%s) & %d) && "+
+					"*(uint32*)(0x%x%s) <= 2) *(uint32*)(0x%x%s) &= ~%d);\n",
+					arg.Value+8, offset, ctx.target.ConstMap["SECCOMP_ADDFD_FLAG_SETFD"], arg.Value+16, offset,
+					arg.Value+8, offset, ctx.target.ConstMap["SECCOMP_ADDFD_FLAG_SETFD"])
 			}
 		}
 		if ctx.opts.CSB && call.Meta.Name == "syz_io_uring_submit" {
