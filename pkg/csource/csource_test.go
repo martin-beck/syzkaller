@@ -149,7 +149,7 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 			assert.Contains(t, string(src), "/*flags=O_NONBLOCK*/0x800")
 		}
 		if strings.Contains(input, "FIONBIO") {
-			assert.Contains(t, string(src), "NONFAILING(*(uint64_t*)")
+			assert.Contains(t, string(src), "NONFAILING(*(uint32_t*)")
 			assert.Contains(t, string(src), "+PTR_OFFSET) = 1")
 		}
 		src, _, err = Write(p, Options{Slowdown: 1})
@@ -173,7 +173,7 @@ func TestCSBFIONBIOInvalidPointer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.NotContains(t, string(src), "uint64_t*)(0x0")
+	assert.NotContains(t, string(src), "uint32_t*)(0x0")
 }
 
 func TestLocalIONonblockingLifetime(t *testing.T) {

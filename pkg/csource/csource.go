@@ -706,7 +706,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			cmd, cmdOK := call.Args[1].(prog.ExecArgConst)
 			value, valueOK := call.Args[2].(prog.ExecArgConst)
 			if cmdOK && valueOK && cmd.Value == ctx.target.ConstMap["FIONBIO"] && valInMMapRange(ctx, value.Value) {
-				fmt.Fprintf(w, "\tNONFAILING(*(uint64*)(0x%x+PTR_OFFSET) = 1);\n", value.Value)
+				fmt.Fprintf(w, "\tNONFAILING(*(uint32*)(0x%x+PTR_OFFSET) = 1);\n", value.Value)
 			}
 		}
 
