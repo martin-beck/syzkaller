@@ -709,6 +709,12 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				fmt.Fprintf(w, "\tNONFAILING(*(uint32*)(0x%x+PTR_OFFSET) = 1);\n", value.Value)
 			}
 		}
+		if ctx.opts.CSB && call.Meta.CallName == "openat2" {
+			if how, ok := call.Args[2].(prog.ExecArgConst); ok && valInMMapRange(ctx, how.Value) {
+				fmt.Fprintf(w, "\tNONFAILING(*(uint64*)(0x%x+PTR_OFFSET) |= %d);\n", how.Value,
+					ctx.target.ConstMap["O_NONBLOCK"])
+			}
+		}
 
 		if call.Props.FailNth > 0 {
 			fmt.Fprintf(w, "\tinject_fault(%v);\n", call.Props.FailNth)
@@ -869,8 +875,13 @@ func localIOResources(p prog.ExecProg, target *prog.Target) map[uint64]bool {
 			for _, copyout := range call.Copyout {
 				local[copyout.Index] = true
 			}
-		case "eventfd", "eventfd2":
+		case "eventfd", "eventfd2", "timerfd_create", "inotify_init", "inotify_init1":
 			if call.Index != prog.ExecNoCopyout {
+				local[call.Index] = true
+			}
+		case "signalfd", "signalfd4":
+			fd, ok := call.Args[0].(prog.ExecArgConst)
+			if ok && fd.Value == ^uint64(0) && call.Index != prog.ExecNoCopyout {
 				local[call.Index] = true
 			}
 		case "dup", "dup2", "dup3":
@@ -902,7 +913,7 @@ func localIOArg(call prog.ExecCall, local map[uint64]bool) bool {
 		return false
 	}
 	arg, ok := call.Args[0].(prog.ExecArgResult)
-	return ok && local[arg.Index]
+	return ok && arg.DivOp == 0 && arg.AddOp == 0 && local[arg.Index]
 }
 
 func newLocalIOResources(call prog.ExecCall, local map[uint64]bool) []uint64 {
@@ -913,7 +924,8 @@ func newLocalIOResources(call prog.ExecCall, local map[uint64]bool) []uint64 {
 			ret = append(ret, copyout.Index)
 		}
 		return ret
-	case "eventfd", "eventfd2", "dup", "dup2", "dup3", "fcntl":
+	case "eventfd", "eventfd2", "timerfd_create", "signalfd", "signalfd4", "inotify_init", "inotify_init1",
+		"dup", "dup2", "dup3", "fcntl":
 		if call.Index != prog.ExecNoCopyout && local[call.Index] {
 			return []uint64{call.Index}
 		}

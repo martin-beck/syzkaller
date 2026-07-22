@@ -124,6 +124,12 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 		"pipe(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n" +
 			"r2 = dup(r1)\nwrite(r2, &(0x7f0000000040)=\"00\", 0x1)\n",
 		"r0 = eventfd(0x0)\nread$eventfd(r0, &(0x7f0000000000), 0x8)\n",
+		"r0 = timerfd_create(0x0, 0x0)\nread(r0, &(0x7f0000000000), 0x8)\n",
+		"r0 = inotify_init()\nread(r0, &(0x7f0000000000), 0x10)\n",
+		"r0 = signalfd(0xffffffffffffffff, &(0x7f0000000000)=0x0, 0x8)\n" +
+			"read(r0, &(0x7f0000000040), 0x80)\n",
+		"openat2(0xffffffffffffff9c, &(0x7f0000000000)='./fifo\\x00', " +
+			"&(0x7f0000000040)={0x0, 0x0, 0x0}, 0x18)\n",
 		"pipe(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n" +
 			"ioctl$int_in(r0, 0x5421, &(0x7f0000000040)=0x0)\nread(r0, &(0x7f0000000080), 0x1)\n",
 		"pipe(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n" +
@@ -148,7 +154,9 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 				assert.Contains(t, string(src), want)
 			}
 		}
-		assert.Contains(t, string(src), "O_NONBLOCK")
+		if !strings.HasPrefix(input, "openat2") {
+			assert.Contains(t, string(src), "O_NONBLOCK")
+		}
 		assert.NotContains(t, string(src), "csb_io_errno_")
 		if strings.Contains(input, "F_SETFL") || strings.Contains(input, "fcntl$setstatus") {
 			assert.Contains(t, string(src), "0x800")
@@ -157,11 +165,24 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 			assert.Contains(t, string(src), "NONFAILING(*(uint32_t*)")
 			assert.Contains(t, string(src), "+PTR_OFFSET) = 1")
 		}
+		if strings.HasPrefix(input, "openat2") {
+			assert.Contains(t, string(src), "NONFAILING(*(uint64_t*)")
+			assert.Contains(t, string(src), "+PTR_OFFSET) |= 2048")
+		}
 		src, _, err = Write(p, Options{Slowdown: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
 		assert.NotContains(t, string(src), "F_SETFL")
+	}
+}
+
+func TestLocalIOArgRejectsTransforms(t *testing.T) {
+	local := map[uint64]bool{1: true}
+	for _, arg := range []prog.ExecArgResult{{Index: 1, DivOp: 2}, {Index: 1, AddOp: 1}} {
+		if localIOArg(prog.ExecCall{Args: []prog.ExecArg{arg}}, local) {
+			t.Fatalf("transformed result treated as local: %+v", arg)
+		}
 	}
 }
 
