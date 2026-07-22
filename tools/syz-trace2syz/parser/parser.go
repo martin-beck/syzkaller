@@ -79,6 +79,9 @@ func straceCall(line string) (string, int) {
 
 func shouldSkip(line string) bool {
 	return strings.Contains(line, "ERESTART") ||
+		(strings.Contains(line, "<unfinished ...>") && strings.HasSuffix(line, " = ?")) ||
+		strings.Contains(line, "????(") ||
+		strings.Contains(line, "???? resumed") ||
 		strings.Contains(line, "+++") ||
 		strings.Contains(line, "---") ||
 		strings.Contains(line, "<ptrace(SYSCALL):No such process>")
