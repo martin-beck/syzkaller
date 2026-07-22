@@ -236,6 +236,7 @@ func TestExecutorMacros(t *testing.T) {
 	expected["SYZ_HAVE_SETUP_LOOP"] = true
 	expected["SYZ_HAVE_RESET_LOOP"] = true
 	expected["SYZ_HAVE_SETUP_TEST"] = true
+	expected["SYZ_CSB_SIGPIPE_STATE"] = true
 	expected["SYZ_TEST_COMMON_EXT_EXAMPLE"] = true
 	macros := regexp.MustCompile("SYZ_[A-Za-z0-9_]+").FindAllString(string(executor.CommonHeader), -1)
 	for _, macro := range macros {
