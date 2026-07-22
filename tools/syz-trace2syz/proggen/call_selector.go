@@ -35,6 +35,18 @@ var discriminatorArgs = map[string][]int{
 	"openat":      {1},
 }
 
+func (cs *defaultCallSelector) callDiscriminators(call *parser.Syscall) []int {
+	discriminators := discriminatorArgs[call.CallName]
+	if call.CallName == "prctl" && len(call.Args) > 1 {
+		option, ok := call.Args[0].(parser.Constant)
+		if ok && (option.Val() == cs.target.ConstMap["PR_SET_MM"] ||
+			option.Val() == cs.target.ConstMap["PR_SET_SYSCALL_USER_DISPATCH"]) {
+			return []int{0, 1}
+		}
+	}
+	return discriminators
+}
+
 var openDiscriminatorArgs = map[string]int{
 	"open":         0,
 	"openat":       1,
@@ -178,7 +190,7 @@ type defaultCallSelector struct {
 // Select returns the best matching descrimination for this syscall.
 func (cs *defaultCallSelector) Select(call *parser.Syscall) *prog.Syscall {
 	var match *prog.Syscall
-	discriminators := discriminatorArgs[call.CallName]
+	discriminators := cs.callDiscriminators(call)
 	if len(discriminators) == 0 {
 		return nil
 	}

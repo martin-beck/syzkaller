@@ -26,9 +26,13 @@ func TestParse(t *testing.T) {
 	tests := []Test{
 		{`
 prctl(0x26, 1, 0, 0, 0) = 0
+prctl(35, 13, 3, 0, 0) = 0
+prctl(59, 0, 0, 0, 0) = 0
 keyctl(0x1, "session") = 3
 `, `
 prctl$PR_SET_NO_NEW_PRIVS(0x26, 0x1)[0]
+prctl$PR_SET_MM_EXE_FILE(0x23, 0xd, 0x3)[0]
+prctl$PR_SET_SYSCALL_USER_DISPATCH_OFF(0x3b, 0x0)[0]
 keyctl$join(0x1, &(0x7f0000000000))[3]
 `,
 		},
