@@ -369,3 +369,19 @@ func TestSkipUnusableRecords(t *testing.T) {
 		t.Fatal("terminal unfinished call was not skipped")
 	}
 }
+
+func TestUnusableMarkersInArgumentsAreParsed(t *testing.T) {
+	for _, line := range []string{
+		`1 write(1, "????(", 5) = 5`,
+		`1 write(1, "<unfinished ...>", 16) = ?`,
+		`1 write(1, "---", 3) = 3`,
+	} {
+		if shouldSkip(line) {
+			t.Errorf("skipped syscall argument in %q", line)
+		}
+	}
+	tree := parseTestData(t, []byte(`1 write(1, "ERESTART", 8) = 8`))
+	if calls := tree.TraceMap[1].Calls; len(calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(calls))
+	}
+}

@@ -78,13 +78,20 @@ func straceCall(line string) (string, int) {
 }
 
 func shouldSkip(line string) bool {
-	return strings.Contains(line, "ERESTART") ||
-		(strings.Contains(line, "<unfinished ...>") && strings.HasSuffix(line, " = ?")) ||
-		strings.Contains(line, "????(") ||
-		strings.Contains(line, "???? resumed") ||
-		strings.Contains(line, "+++") ||
-		strings.Contains(line, "---") ||
-		strings.Contains(line, "<ptrace(SYSCALL):No such process>")
+	record := strings.TrimSpace(line)
+	if space := strings.IndexByte(record, ' '); space >= 0 {
+		if _, err := strconv.ParseInt(record[:space], 10, 64); err == nil {
+			record = strings.TrimSpace(record[space+1:])
+		}
+	}
+	unfinished := strings.LastIndex(record, "<unfinished ...>")
+	ret := strings.LastIndex(record, ") = ")
+	return (ret >= 0 && strings.Contains(record[ret:], "ERESTART")) ||
+		(unfinished > strings.LastIndex(record, "\"") && strings.HasSuffix(record, " = ?")) ||
+		strings.HasPrefix(record, "????(") ||
+		strings.HasPrefix(record, "<... ???? resumed") ||
+		strings.HasPrefix(record, "+++") || strings.HasPrefix(record, "---") ||
+		strings.HasPrefix(record, "<ptrace(SYSCALL):No such process>")
 }
 
 func joinSplitValues(data []byte) ([]byte, int64) {
