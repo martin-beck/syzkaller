@@ -178,6 +178,24 @@ func TestCSBProtectControlFDsIoUring(t *testing.T) {
 	assert.NotContains(t, string(src), "0x0+PTR_OFFSET")
 }
 
+func TestCSBProtectControlFDsSeccompAddfd(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("ioctl$SECCOMP_IOCTL_NOTIF_ADDFD(0x0, 0x40182103, "+
+		"&(0x7f0000000000)={0x0, 0x1, 0x3, 0x1, 0x0})\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "0x200000000010+PTR_OFFSET) <= 2")
+	assert.Contains(t, string(src), "&= ~1")
+}
+
 func TestCSBProtectRawIoUring(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {
