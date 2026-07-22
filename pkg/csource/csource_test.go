@@ -284,6 +284,8 @@ func TestCSBProtectAliasedIoUring(t *testing.T) {
 		"r0 = io_uring_setup(0x1, &(0x7f0000000000))\n" +
 			"r1 = openat(0xffffffffffffff9c, 0x0, 0x0, 0x0)\n" +
 			"dup2(r0, r1)\n",
+		"r0 = io_uring_setup(0x1, &(0x7f0000000000))\n" +
+			"r1 = pidfd_getfd(0x0, r0, 0x0)\n",
 	} {
 		p, err := target.Deserialize([]byte(input+
 			"mmap(&(0x7f0000003000/0x1000)=nil, 0x1000, 0x3, 0x1, r1, 0x10000000)\n"+

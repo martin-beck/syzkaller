@@ -732,6 +732,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				sqesOffset /= ctx.target.PageSize
 			}
 			knownRingFD := (fdOK && fd.DivOp == 0 && fd.AddOp == 0 && ioUringFDs[fd.Index]) ||
+				(fdOK && ioUringCreated) ||
 				(constantFD && constant.Value > 2 && constant.Value <= 1<<31-1 && ioUringCreated)
 			if knownRingFD && offsetOK &&
 				(offset.Value == sqRingOffset || offset.Value == sqesOffset) {
