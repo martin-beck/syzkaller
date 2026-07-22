@@ -376,6 +376,7 @@ func TestUnusableMarkersInArgumentsAreParsed(t *testing.T) {
 		`1 write(1, "????(", 5) = 5`,
 		`1 write(1, "<unfinished ...>", 16) = ?`,
 		`1 write(1, "---", 3) = 3`,
+		`1 write(1, "x) = ERESTART", 13) = 13`,
 	} {
 		if shouldSkip(line) {
 			t.Errorf("skipped syscall argument in %q", line)

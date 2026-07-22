@@ -85,19 +85,36 @@ func shouldSkip(line string) bool {
 		}
 	}
 	unfinished := strings.LastIndex(record, "<unfinished ...>")
-	restart := false
-	for offset := 0; offset < len(record); {
-		ret := strings.IndexByte(record[offset:], ')')
-		if ret < 0 {
-			break
+	// The final result delimiter is outside quoted arguments. Traced buffers can
+	// contain arbitrary text that resembles a restart result.
+	result := ""
+	quoted, escaped, depth := false, false, 0
+	for i, ch := range record {
+		if quoted {
+			if escaped {
+				escaped = false
+			} else if ch == '\\' {
+				escaped = true
+			} else if ch == '"' {
+				quoted = false
+			}
+			continue
 		}
-		offset += ret + 1
-		result := strings.TrimLeft(record[offset:], " \t")
-		if strings.HasPrefix(result, "=") && strings.Contains(result, "ERESTART") {
-			restart = true
-			break
+		switch ch {
+		case '"':
+			quoted = true
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+				if depth == 0 && result == "" {
+					result = strings.TrimLeft(record[i+1:], " \t")
+				}
+			}
 		}
 	}
+	restart := strings.HasPrefix(result, "=") && strings.Contains(result, "ERESTART")
 	return restart ||
 		(unfinished > strings.LastIndex(record, "\"") && strings.HasSuffix(record, " = ?")) ||
 		strings.HasPrefix(record, "????(") ||
