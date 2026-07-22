@@ -781,7 +781,7 @@ func TestExecLifecycleCall(t *testing.T) {
 	}
 }
 
-func TestSkipOnlyRootBootstrapExec(t *testing.T) {
+func TestSkipOnlyInitialBootstrapExec(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {
 		t.Fatal(err)
@@ -798,8 +798,8 @@ func TestSkipOnlyRootBootstrapExec(t *testing.T) {
 	if got := strings.Count(root, "syz_csb_execve"); got != 1 {
 		t.Fatalf("root contains %d exec lifecycles, want 1:\n%s", got, root)
 	}
-	if !strings.Contains(root, "getppid") {
-		t.Fatalf("root lost calls after its skipped bootstrap exec:\n%s", root)
+	if strings.Contains(root, "getppid") {
+		t.Fatalf("root retained calls after its workload exec:\n%s", root)
 	}
 	child := string(genProg(trace, target, false, false, false, false).Serialize())
 	if got := strings.Count(child, "syz_csb_execve"); got != 1 {
@@ -807,6 +807,15 @@ func TestSkipOnlyRootBootstrapExec(t *testing.T) {
 	}
 	if strings.Contains(child, "getppid") {
 		t.Fatalf("child retained calls after its successful workload exec:\n%s", child)
+	}
+	initial := &parser.Trace{Calls: []*parser.Syscall{
+		parser.NewSyscall(1, "execve", nil, -1, false, false),
+		parser.NewSyscall(1, "execve", nil, 0, false, false),
+		parser.NewSyscall(1, "getpid", nil, 1, false, false),
+	}}
+	got := string(genProg(initial, target, false, false, false, true).Serialize())
+	if count := strings.Count(got, "syz_csb_execve"); count != 0 || !strings.Contains(got, "getpid") {
+		t.Fatalf("initial bootstrap handling failed:\n%s", got)
 	}
 }
 
@@ -823,11 +832,11 @@ func TestBootstrapExecIsRootSpecific(t *testing.T) {
 	}}
 
 	got := string(genProg(trace, target, false, false, false, true).Serialize())
-	if lifecycles := strings.Count(got, "syz_csb_execve"); lifecycles != 1 {
-		t.Fatalf("got %d exec lifecycles, want child exec only:\n%s", lifecycles, got)
+	if lifecycles := strings.Count(got, "syz_csb_execve"); lifecycles != 2 {
+		t.Fatalf("got %d exec lifecycles, want child and workload execs:\n%s", lifecycles, got)
 	}
-	if !strings.Contains(got, "getppid") {
-		t.Fatalf("root calls after its bootstrap exec were lost:\n%s", got)
+	if strings.Contains(got, "getppid") {
+		t.Fatalf("root calls after its workload exec remained:\n%s", got)
 	}
 }
 
@@ -881,7 +890,7 @@ func TestExitCallsUseBoundedLifecycles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"syz_csb_exit()", "syz_csb_exit_group()"} {
+	for _, want := range []string{"UNIQUE_FUNC(syz_csb_exit)", "UNIQUE_FUNC(syz_csb_exit_group)"} {
 		if !strings.Contains(string(src), want) {
 			t.Fatalf("generated CSB header missing %q", want)
 		}
