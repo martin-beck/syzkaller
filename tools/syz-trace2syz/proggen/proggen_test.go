@@ -758,8 +758,12 @@ func TestRemainingRtSignalCallsUseOwnedSignals(t *testing.T) {
 			if got := strings.TrimSpace(string(p.Serialize())); got != want {
 				t.Fatalf("got %q, want %q", got, want)
 			}
-			if _, _, err := csource.Write(p, csource.Options{Slowdown: 1, CSB: true, Trace: true}); err != nil {
+			src, _, err := csource.Write(p, csource.Options{Slowdown: 1, CSB: true, Trace: true})
+			if err != nil {
 				t.Fatal(err)
+			}
+			if name == "rt_sigsuspend" && !strings.Contains(string(src), "__NR_rt_tgsigqueueinfo") {
+				t.Fatal("suspend wake-up is not thread-directed")
 			}
 		})
 	}

@@ -133,7 +133,7 @@ static long UNIQUE_FUNC(syz_csb_rt_sigreturn)(void)
 	return ret;
 }
 
-static long UNIQUE_FUNC(csb_queue_owned_signal)(void)
+static long UNIQUE_FUNC(csb_queue_owned_signal)(long tid)
 {
 	siginfo_t info;
 	memset(&info, 0, sizeof(info));
@@ -141,6 +141,8 @@ static long UNIQUE_FUNC(csb_queue_owned_signal)(void)
 	info.si_code = SI_QUEUE;
 	info.si_pid = getpid();
 	info.si_uid = getuid();
+	if (tid)
+		return syscall(__NR_rt_tgsigqueueinfo, getpid(), tid, SIGUSR1, &info);
 	return syscall(__NR_rt_sigqueueinfo, getpid(), SIGUSR1, &info);
 }
 
@@ -154,7 +156,7 @@ static long UNIQUE_FUNC(syz_csb_rt_sigqueueinfo)(void)
 	sigemptyset(&action.sa_mask);
 	if (sigaction(SIGUSR1, &action, &old) < 0)
 		return -1;
-	long ret = UNIQUE_FUNC(csb_queue_owned_signal)();
+	long ret = UNIQUE_FUNC(csb_queue_owned_signal)(0);
 	if (sigaction(SIGUSR1, &old, 0) < 0)
 		return -1;
 	return ret;
@@ -176,7 +178,7 @@ static long UNIQUE_FUNC(syz_csb_rt_sigsuspend)(void)
 	sigaddset(&blocked, SIGUSR1);
 	if (sigprocmask(SIG_BLOCK, &blocked, &old_mask) < 0)
 		return -1;
-	long ret = UNIQUE_FUNC(csb_queue_owned_signal)();
+	long ret = UNIQUE_FUNC(csb_queue_owned_signal)(syscall(__NR_gettid));
 	if (ret >= 0) {
 		sigset_t suspend_mask = old_mask;
 		sigdelset(&suspend_mask, SIGUSR1);
