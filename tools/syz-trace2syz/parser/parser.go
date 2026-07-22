@@ -220,6 +220,9 @@ func ParseData(data []byte, splitThreads bool, numLines int) (*TraceTree, *Trace
 		if splitThreads {
 			tree.add(call)
 		} else {
+			if trace.RootPid == 0 {
+				trace.RootPid = call.Pid
+			}
 			if !call.Resumed {
 				lastCalls[call.Pid] = call
 			} else {

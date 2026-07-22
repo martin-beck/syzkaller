@@ -160,10 +160,6 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 	numCalls := len(trace.Calls)
 	// Skip only the root bootstrap; a later successful exec ends that TID's original workload.
 	bootstrapExecSkipped := false
-	var rootPID int64
-	if len(trace.Calls) != 0 {
-		rootPID = trace.Calls[0].Pid
-	}
 	terminatedTIDs := make(map[int64]bool)
 	for sIdx, sCall := range trace.Calls {
 		if sIdx%1000 == 0 {
@@ -180,7 +176,7 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 		if terminatedTIDs[sCall.Pid] {
 			continue
 		}
-		if skipBootstrapExec && !bootstrapExecSkipped && sCall.Pid == rootPID && isSuccessfulExec(sCall) {
+		if skipBootstrapExec && !bootstrapExecSkipped && sCall.Pid == trace.RootPid && isSuccessfulExec(sCall) {
 			bootstrapExecSkipped = true
 			continue
 		}

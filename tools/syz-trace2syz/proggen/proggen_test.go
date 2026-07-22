@@ -643,8 +643,9 @@ func TestTaskCreationLifecycleFromTrace(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(src), test.want) {
-				t.Fatalf("generated CSB header missing %q:\n%s", test.want, src)
+			helper := "UNIQUE_FUNC(" + strings.TrimSuffix(test.want, "()") + ")()"
+			if !strings.Contains(string(src), helper) {
+				t.Fatalf("generated CSB header missing %q:\n%s", helper, src)
 			}
 		})
 	}
@@ -769,7 +770,7 @@ func TestSkipOnlyRootBootstrapExec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	trace := &parser.Trace{Calls: []*parser.Syscall{
+	trace := &parser.Trace{RootPid: 1, Calls: []*parser.Syscall{
 		parser.NewSyscall(1, "execve", nil, -1, false, false),
 		parser.NewSyscall(1, "getpid", nil, 1, false, false),
 		parser.NewSyscall(1, "execveat", nil, 0, false, false),
@@ -793,24 +794,22 @@ func TestSkipOnlyRootBootstrapExec(t *testing.T) {
 	}
 }
 
-func TestBootstrapExecIsRootSpecific(t *testing.T) {
+func TestBootstrapExecUsesRootTID(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {
 		t.Fatal(err)
 	}
-	trace := &parser.Trace{Calls: []*parser.Syscall{
-		parser.NewSyscall(1, "getpid", nil, 1, false, false),
+	trace := &parser.Trace{RootPid: 1, Calls: []*parser.Syscall{
 		parser.NewSyscall(2, "execve", nil, 0, false, false),
+		parser.NewSyscall(2, "getuid", nil, 0, false, false),
 		parser.NewSyscall(1, "execve", nil, 0, false, false),
-		parser.NewSyscall(1, "getppid", nil, 1, false, false),
+		parser.NewSyscall(1, "getpid", nil, 1, false, false),
 	}}
 
 	got := string(genProg(trace, target, false, false, false, true).Serialize())
-	if lifecycles := strings.Count(got, "syz_csb_execve"); lifecycles != 1 {
-		t.Fatalf("got %d exec lifecycles, want child exec only:\n%s", lifecycles, got)
-	}
-	if !strings.Contains(got, "getppid") {
-		t.Fatalf("root calls after its bootstrap exec were lost:\n%s", got)
+	if strings.Count(got, "syz_csb_execve") != 1 || strings.Contains(got, "getuid") ||
+		!strings.Contains(got, "getpid") {
+		t.Fatalf("bootstrap exec was not restricted to the root TID:\n%s", got)
 	}
 }
 
