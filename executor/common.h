@@ -31,6 +31,7 @@
 #endif
 
 #if CSB
+#include <pthread.h>
 #include <signal.h>
 #endif
 

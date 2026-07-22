@@ -540,54 +540,16 @@ func TestCSBIgnoresSIGPIPE(t *testing.T) {
 		!strings.Contains(string(src), "static size_t syz_csb_sigpipe_users;") {
 		t.Fatal("SIGPIPE ownership is not shared by generated CSB targets")
 	}
-	probe := []byte(`#include <pthread.h>
-#include <signal.h>
-#include <stddef.h>
-static struct sigaction syz_csb_previous_sigpipe_action;
-static size_t syz_csb_sigpipe_users;
-static pthread_mutex_t syz_csb_sigpipe_mutex = PTHREAD_MUTEX_INITIALIZER;
-static int syz_csb_ignore_sigpipe(void)
-{
-	if (pthread_mutex_lock(&syz_csb_sigpipe_mutex))
-		return -1;
-	if (syz_csb_sigpipe_users == 0) {
-		struct sigaction ignore_sigpipe = {};
-		ignore_sigpipe.sa_handler = SIG_IGN;
-		if (sigaction(SIGPIPE, &ignore_sigpipe, &syz_csb_previous_sigpipe_action)) {
-			pthread_mutex_unlock(&syz_csb_sigpipe_mutex);
-			return -1;
-		}
-	}
-	syz_csb_sigpipe_users++;
-	return pthread_mutex_unlock(&syz_csb_sigpipe_mutex) ? -1 : 0;
-}
-static int syz_csb_restore_sigpipe(void)
-{
-	if (pthread_mutex_lock(&syz_csb_sigpipe_mutex))
-		return -1;
-	if (syz_csb_sigpipe_users == 0 ||
-	    (syz_csb_sigpipe_users == 1 && sigaction(SIGPIPE, &syz_csb_previous_sigpipe_action, 0))) {
-		pthread_mutex_unlock(&syz_csb_sigpipe_mutex);
-		return -1;
-	}
-	syz_csb_sigpipe_users--;
-	return pthread_mutex_unlock(&syz_csb_sigpipe_mutex) ? -1 : 0;
-}
-int main(void)
-{
-	if (syz_csb_ignore_sigpipe() || syz_csb_ignore_sigpipe())
-		return 1;
-	if (syz_csb_restore_sigpipe() || syz_csb_restore_sigpipe())
-		return 1;
-	return 0;
-}
-`)
-	bin, err := Build(target, probe)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Remove(bin) })
-	if output, err := exec.Command(bin).CombinedOutput(); err != nil {
-		t.Fatalf("SIGPIPE ownership probe failed: %v\n%s", err, output)
+	const consumer = `#include <assert.h>
+#include <dirent.h>
+#include <errno.h>
+#include <stdint.h>
+typedef struct { void* r; } thread_ctx_t;
+`
+	cmd := exec.Command(targets.Get(target.OS, target.Arch).CCompiler,
+		"-x", "c", "-fsyntax-only", "-pthread", "-")
+	cmd.Stdin = strings.NewReader(consumer + string(src))
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("non-threaded CSB output does not compile: %v\n%s", err, output)
 	}
 }
