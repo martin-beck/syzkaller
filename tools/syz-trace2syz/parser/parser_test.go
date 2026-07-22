@@ -117,6 +117,14 @@ func TestParseSplitFieldValue(t *testing.T) {
 	}
 }
 
+func TestParseSplitFieldValueNoPID(t *testing.T) {
+	tree := parseTestData(t, []byte(`bpf(0x10, {query={prog_ids= <unfinished ...>
+<... bpf resumed>[], prog_cnt=1}}, 32) = 0`))
+	if call := tree.TraceMap[-1].Calls[0]; call.CallName != "bpf" {
+		t.Fatalf("split call parsed as %#v", call)
+	}
+}
+
 func TestEvaluateExpressions(t *testing.T) {
 	type ExprTest struct {
 		line         string

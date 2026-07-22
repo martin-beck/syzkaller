@@ -57,13 +57,13 @@ func joinSplitValues(data []byte) ([]byte, int64) {
 				removed[call.line] = true
 				delete(pending, pid)
 				line = lines[i]
-				fields = strings.Fields(line)
 			}
 		}
-		if strings.HasSuffix(line, "= <unfinished ...>") && len(fields) >= 2 {
-			if paren := strings.IndexByte(fields[1], '('); paren > 0 {
-				pending[fields[0]] = pendingCall{i, fields[1][:paren]}
-			}
+		if paren := strings.IndexByte(line, '('); strings.HasSuffix(line, "= <unfinished ...>") && paren > 0 {
+			prefix := strings.TrimSpace(line[:paren])
+			parts := strings.Fields(prefix)
+			name := parts[len(parts)-1]
+			pending[strings.TrimSpace(strings.TrimSuffix(prefix, name))] = pendingCall{i, name}
 		}
 	}
 	joined := lines[:0]
