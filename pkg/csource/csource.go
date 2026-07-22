@@ -742,6 +742,8 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				flagArg = 1
 			case "openat":
 				flagArg = 2
+			case "mq_open":
+				flagArg = 1
 			case "creat":
 				flags := call.Args[1].(prog.ExecArgConst)
 				flags.Value = ctx.target.ConstMap["O_WRONLY"] | ctx.target.ConstMap["O_CREAT"] |
@@ -877,7 +879,7 @@ func localIOResources(p prog.ExecProg, target *prog.Target) map[uint64]bool {
 	local := make(map[uint64]bool)
 	for _, call := range p.Calls {
 		switch call.Meta.CallName {
-		case "open", "openat", "openat2", "creat":
+		case "open", "openat", "openat2", "creat", "mq_open":
 			if call.Index != prog.ExecNoCopyout {
 				local[call.Index] = true
 			}
@@ -935,7 +937,7 @@ func newLocalIOResources(call prog.ExecCall, local map[uint64]bool) []uint64 {
 		}
 		return ret
 	case "eventfd", "eventfd2", "timerfd_create", "signalfd", "signalfd4", "inotify_init", "inotify_init1", "fanotify_init", "userfaultfd",
-		"dup", "dup2", "dup3", "fcntl":
+		"mq_open", "dup", "dup2", "dup3", "fcntl":
 		if call.Index != prog.ExecNoCopyout && local[call.Index] {
 			return []uint64{call.Index}
 		}

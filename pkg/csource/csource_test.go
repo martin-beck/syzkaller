@@ -129,6 +129,8 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 		"r0 = inotify_init()\nread(r0, &(0x7f0000000000), 0x10)\n",
 		"r0 = fanotify_init(0x0, 0x0)\nread(r0, &(0x7f0000000000), 0x10)\n",
 		"r0 = userfaultfd(0x0)\nread(r0, &(0x7f0000000000), 0x20)\n",
+		"r0 = mq_open(&(0x7f0000000000)='/queue\\x00', 0x40, 0x180, 0x0)\n" +
+			"mq_timedreceive(r0, &(0x7f0000000040), 0x1, 0x0, 0x0)\n",
 		"r0 = signalfd(0xffffffffffffffff, &(0x7f0000000000)=0x0, 0x8)\n" +
 			"read(r0, &(0x7f0000000040), 0x80)\n",
 		"r0 = signalfd(0xffffffffffffffff, &(0x7f0000000000)=0x0, 0x8)\n" +
