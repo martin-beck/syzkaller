@@ -51,13 +51,18 @@ static long UNIQUE_FUNC(csb_aio_lifecycle)(enum UNIQUE_FUNC(csb_aio_op) op)
 		ret = syscall(__NR_io_submit, ctx, 1, list);
 		if (op == UNIQUE_FUNC(CSB_AIO_CANCEL))
 			ret = syscall(__NR_io_cancel, ctx, &cb, &event);
-		else if (ret == 1)
-			ret = syscall(__NR_io_getevents, ctx, 0, 1, &event, &timeout);
+		else if (ret == 1) {
+			long completed = syscall(__NR_io_getevents, ctx, 0, 1, &event, &timeout);
+			if (completed < 0)
+				ret = completed;
+		}
 		if (cb.aio_fildes >= 0)
 			close(cb.aio_fildes);
 	}
 	long destroyed = syscall(__NR_io_destroy, ctx);
-	return ret < 0 ? ret : destroyed;
+	if (op == UNIQUE_FUNC(CSB_AIO_DESTROY))
+		return destroyed;
+	return ret < 0 ? ret : destroyed < 0 ? destroyed : ret;
 }
 
 static long UNIQUE_FUNC(syz_csb_io_setup)(void) { return UNIQUE_FUNC(csb_aio_lifecycle)(UNIQUE_FUNC(CSB_AIO_SETUP)); }
