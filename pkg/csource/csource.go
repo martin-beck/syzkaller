@@ -785,6 +785,48 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			}
 		}
 	}
+	// Duplicate relationships are aliases in both directions. Close the graph to handle
+	// mappings and async enters on either side regardless of source-program order.
+	for changed := true; changed; {
+		changed = false
+		for _, call := range p.Calls {
+			duplicate := call.Meta.CallName == "dup" || call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3" ||
+				fcntlCommand(call, ctx.target.ConstMap["F_DUPFD"]) ||
+				fcntlCommand(call, ctx.target.ConstMap["F_DUPFD_CLOEXEC"])
+			if !duplicate || len(call.Args) == 0 {
+				continue
+			}
+			rawAlias := call.Index != prog.ExecNoCopyout && futureRawIOUringFDs[call.Index]
+			if src, ok := call.Args[0].(prog.ExecArgResult); ok && src.DivOp <= 1 && uint32(src.AddOp) == 0 {
+				rawAlias = rawAlias || futureRawIOUringFDs[src.Index]
+			} else if src, ok := call.Args[0].(prog.ExecArgConst); ok {
+				rawAlias = rawAlias || futureRawIOUringConstants[int32(src.Value)]
+			}
+			if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
+				if dst, ok := call.Args[1].(prog.ExecArgResult); ok && dst.DivOp <= 1 && uint32(dst.AddOp) == 0 {
+					rawAlias = rawAlias || futureRawIOUringFDs[dst.Index]
+				} else if dst, ok := call.Args[1].(prog.ExecArgConst); ok {
+					rawAlias = rawAlias || futureRawIOUringConstants[int32(dst.Value)]
+				}
+			}
+			if !rawAlias {
+				continue
+			}
+			if call.Index != prog.ExecNoCopyout && !futureRawIOUringFDs[call.Index] {
+				futureRawIOUringFDs[call.Index], changed = true, true
+			}
+			if src, ok := call.Args[0].(prog.ExecArgResult); ok && src.DivOp <= 1 && uint32(src.AddOp) == 0 &&
+				!futureRawIOUringFDs[src.Index] {
+				futureRawIOUringFDs[src.Index], changed = true, true
+			}
+			if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
+				if dst, ok := call.Args[1].(prog.ExecArgResult); ok && dst.DivOp <= 1 && uint32(dst.AddOp) == 0 &&
+					!futureRawIOUringFDs[dst.Index] {
+					futureRawIOUringFDs[dst.Index], changed = true, true
+				}
+			}
+		}
+	}
 	for ci, call := range p.Calls {
 		// Track raw rings in program order so later mappings don't suppress earlier submissions.
 		if call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup" {
