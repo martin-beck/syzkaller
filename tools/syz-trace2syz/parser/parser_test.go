@@ -164,6 +164,10 @@ func TestEvaluateExpressions(t *testing.T) {
 }
 
 func TestParseEmptyStatxFlags(t *testing.T) {
+	line := `1 statx(3, "a, ,b", , 0x1101, {}) = 0`
+	if got := normalizeStraceLine(line); got != `1 statx(3, "a, ,b", 0, 0x1101, {}) = 0` {
+		t.Fatalf("normalized as %q", got)
+	}
 	tree := parseTestData(t, []byte(`1 statx(3, ".", , 0x1101, {}) = 0`))
 	call := tree.TraceMap[tree.RootPid].Calls[0]
 	arg, ok := call.Args[2].(Constant)

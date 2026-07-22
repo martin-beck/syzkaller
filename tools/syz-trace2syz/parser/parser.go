@@ -31,7 +31,25 @@ func normalizeStraceLine(line string) string {
 	// Normalize only that known form so malformed arguments in other calls
 	// continue to fail parsing instead of being silently rewritten.
 	if strings.Contains(line, " statx(") || strings.HasPrefix(line, "statx(") {
-		return strings.Replace(line, ", ,", ", 0,", 1)
+		start := strings.Index(line, "statx(")
+		lastComma, commas := start+len("statx(")-1, 0
+		quoted, escaped := false, false
+		for i := lastComma + 1; i < len(line); i++ {
+			switch {
+			case escaped:
+				escaped = false
+			case quoted && line[i] == '\\':
+				escaped = true
+			case line[i] == '"':
+				quoted = !quoted
+			case !quoted && line[i] == ',':
+				commas++
+				if commas == 3 && strings.TrimSpace(line[lastComma+1:i]) == "" {
+					return line[:lastComma+1] + " 0" + line[i:]
+				}
+				lastComma = i
+			}
+		}
 	}
 	return line
 }
