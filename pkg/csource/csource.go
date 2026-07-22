@@ -1014,7 +1014,8 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) str
 				PTR_OFFSET_STR = "+PTR_OFFSET"
 			}
 
-			argsStrs = append(argsStrs, com+handleBigEndian(arg, ctx.constArgToStr(arg, native))+PTR_OFFSET_STR)
+			val := handleBigEndian(arg, ctx.constArgToStr(arg, native)) + PTR_OFFSET_STR
+			argsStrs = append(argsStrs, com+ctx.boundWaitArg(callName, i, val))
 		case prog.ExecArgResult:
 			if initCall {
 				initFDs[arg.Index] = true
@@ -1029,7 +1030,7 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) str
 				// and take 2 slots without the cast, which would be wrong.
 				val = "(intptr_t)" + val
 			}
-			argsStrs = append(argsStrs, com+val)
+			argsStrs = append(argsStrs, com+ctx.boundWaitArg(callName, i, val))
 		default:
 			panic(fmt.Sprintf("unknown arg type: %+v", arg))
 		}
@@ -1120,6 +1121,14 @@ func (ctx *context) copyin(w *bytes.Buffer, csumSeq *int, copyin prog.ExecCopyin
 	default:
 		panic(fmt.Sprintf("bad argument type: %+v", arg))
 	}
+}
+
+func (ctx *context) boundWaitArg(callName string, arg int, val string) string {
+	if !ctx.opts.CSB || !((callName == "poll" && arg == 2) ||
+		((callName == "epoll_wait" || callName == "epoll_pwait") && arg == 3)) {
+		return val
+	}
+	return fmt.Sprintf("((int32_t)(%[1]s) < 0 || (int32_t)(%[1]s) > CSB_MAX_WAIT_MS ? CSB_MAX_WAIT_MS : (%[1]s))", val)
 }
 
 func (ctx *context) copyinVal(w *bytes.Buffer, addr, size uint64, val string, bf prog.BinaryFormat,

@@ -109,6 +109,32 @@ func TestCSBReappliesCurrentAffinity(t *testing.T) {
 	assert.Contains(t, string(src), "sched_getaffinity(0, mask_size, mask)")
 }
 
+func TestCSBBoundsMillisecondWaits(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range []string{
+		"poll(0x0, 0x0, 0xea60)",
+		"epoll_wait(0xffffffffffffffff, 0x0, 0x1, 0xffffffffffffffff)",
+		"epoll_pwait(0xffffffffffffffff, 0x0, 0x1, 0xea60, 0x0, 0x0)",
+	} {
+		p, err := target.Deserialize([]byte(call+"\n"), prog.NonStrict)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, csb := range []bool{true, false} {
+			src, _, err := Write(p, Options{CSB: csb, Slowdown: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(string(src), "CSB_MAX_WAIT_MS ? CSB_MAX_WAIT_MS"); got != csb {
+				t.Fatalf("%s, CSB=%v: bounded wait present=%v", call, csb, got)
+			}
+		}
+	}
+}
+
 func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {
 	t.Helper()
 	// Strip text that cannot declare or reference a C identifier. In particular,
