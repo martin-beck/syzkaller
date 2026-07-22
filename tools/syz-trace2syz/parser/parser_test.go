@@ -6,6 +6,7 @@
 package parser
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -83,6 +84,44 @@ func TestParseLoopBasic(t *testing.T) {
 		if calls[0].CallName != "open" || calls[1].CallName != "fstat" {
 			t.Fatalf("call list should be open->fstat. Got %s->%s", calls[0].CallName, calls[1].CallName)
 		}
+	}
+}
+
+func TestParseSplitFieldValue(t *testing.T) {
+	data := []byte(`1 bpf(0x10, {query={target_fd=14, attach_type=0x6, query_flags=0, attach_flags=0, prog_ids= <unfinished ...>
+2 close(3) = 0
+1 <... bpf resumed>[], prog_cnt= <unfinished ...>
+1 <... bpf resumed>64 => 0}}, 32) = 0`)
+	for _, splitThreads := range []bool{false, true} {
+		t.Run(fmt.Sprint(splitThreads), func(t *testing.T) {
+			tree, trace, err := ParseData(data, splitThreads, -1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			callIndex := 1
+			if splitThreads {
+				if tree.RootPid != 1 {
+					t.Fatalf("root PID: got %d, want 1", tree.RootPid)
+				}
+				trace = tree.TraceMap[1]
+				callIndex = 0
+			} else if got := []string{trace.Calls[0].CallName, trace.Calls[1].CallName}; !reflect.DeepEqual(got, []string{"close", "bpf"}) {
+				t.Fatalf("calls: got %v, want [close bpf]", got)
+			}
+			call := trace.Calls[callIndex]
+			query := call.Args[1].(*GroupType).Elems[0].(*GroupType)
+			if call.CallName != "bpf" || len(query.Elems) != 6 {
+				t.Fatalf("split query parsed as %#v", call)
+			}
+		})
+	}
+}
+
+func TestParseSplitFieldValueNoPID(t *testing.T) {
+	tree := parseTestData(t, []byte(`bpf(0x10, {query={prog_ids= <unfinished ...>
+<... bpf resumed>[], prog_cnt=1}}, 32) = 0`))
+	if call := tree.TraceMap[-1].Calls[0]; call.CallName != "bpf" {
+		t.Fatalf("split call parsed as %#v", call)
 	}
 }
 
