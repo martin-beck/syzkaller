@@ -742,6 +742,12 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				flagArg = 1
 			case "openat":
 				flagArg = 2
+			case "creat":
+				flags := call.Args[1].(prog.ExecArgConst)
+				flags.Value = ctx.target.ConstMap["O_WRONLY"] | ctx.target.ConstMap["O_CREAT"] |
+					ctx.target.ConstMap["O_TRUNC"] | ctx.target.ConstMap["O_NONBLOCK"]
+				call.Meta = ctx.target.SyscallMap["open"]
+				call.Args = []prog.ExecArg{call.Args[0], flags, call.Args[1]}
 			}
 			if flagArg != -1 {
 				args := append([]prog.ExecArg(nil), call.Args...)
@@ -875,13 +881,13 @@ func localIOResources(p prog.ExecProg, target *prog.Target) map[uint64]bool {
 			for _, copyout := range call.Copyout {
 				local[copyout.Index] = true
 			}
-		case "eventfd", "eventfd2", "timerfd_create", "inotify_init", "inotify_init1":
+		case "eventfd", "eventfd2", "timerfd_create", "inotify_init", "inotify_init1", "fanotify_init":
 			if call.Index != prog.ExecNoCopyout {
 				local[call.Index] = true
 			}
 		case "signalfd", "signalfd4":
 			fd, ok := call.Args[0].(prog.ExecArgConst)
-			if ok && fd.Value == ^uint64(0) && call.Index != prog.ExecNoCopyout {
+			if call.Index != prog.ExecNoCopyout && ((ok && fd.Value == ^uint64(0)) || localIOArg(call, local)) {
 				local[call.Index] = true
 			}
 		case "dup", "dup2", "dup3":
@@ -924,7 +930,7 @@ func newLocalIOResources(call prog.ExecCall, local map[uint64]bool) []uint64 {
 			ret = append(ret, copyout.Index)
 		}
 		return ret
-	case "eventfd", "eventfd2", "timerfd_create", "signalfd", "signalfd4", "inotify_init", "inotify_init1",
+	case "eventfd", "eventfd2", "timerfd_create", "signalfd", "signalfd4", "inotify_init", "inotify_init1", "fanotify_init",
 		"dup", "dup2", "dup3", "fcntl":
 		if call.Index != prog.ExecNoCopyout && local[call.Index] {
 			return []uint64{call.Index}

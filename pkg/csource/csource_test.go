@@ -118,6 +118,7 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 	}
 	tests := []string{
 		"openat(0xffffffffffffff9c, &(0x7f0000000000)='./fifo\\x00', 0x0, 0x0)\n",
+		"creat(&(0x7f0000000000)='./fifo\\x00', 0x0)\n",
 		"socketpair$unix(0x1, 0x1, 0x0, &(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n" +
 			"fcntl$setstatus(r0, 0x4, 0x0)\n" +
 			"read(r0, &(0x7f0000000040), 0x1)\n",
@@ -126,8 +127,11 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 		"r0 = eventfd(0x0)\nread$eventfd(r0, &(0x7f0000000000), 0x8)\n",
 		"r0 = timerfd_create(0x0, 0x0)\nread(r0, &(0x7f0000000000), 0x8)\n",
 		"r0 = inotify_init()\nread(r0, &(0x7f0000000000), 0x10)\n",
+		"r0 = fanotify_init(0x0, 0x0)\nread(r0, &(0x7f0000000000), 0x10)\n",
 		"r0 = signalfd(0xffffffffffffffff, &(0x7f0000000000)=0x0, 0x8)\n" +
 			"read(r0, &(0x7f0000000040), 0x80)\n",
+		"r0 = signalfd(0xffffffffffffffff, &(0x7f0000000000)=0x0, 0x8)\n" +
+			"r1 = signalfd(r0, &(0x7f0000000040)=0x0, 0x8)\nread(r1, &(0x7f0000000080), 0x80)\n",
 		"openat2(0xffffffffffffff9c, &(0x7f0000000000)='./fifo\\x00', " +
 			"&(0x7f0000000040)={0x0, 0x0, 0x0}, 0x18)\n",
 		"pipe(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n" +
@@ -150,12 +154,16 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, want := range []string{"F_GETFL", "O_NONBLOCK", "F_SETFL"} {
-			if !strings.HasPrefix(input, "openat") {
+			if !strings.HasPrefix(input, "openat") && !strings.HasPrefix(input, "creat") {
 				assert.Contains(t, string(src), want)
 			}
 		}
-		if !strings.HasPrefix(input, "openat2") {
+		if !strings.HasPrefix(input, "openat2") && !strings.HasPrefix(input, "creat") {
 			assert.Contains(t, string(src), "O_NONBLOCK")
+		}
+		if strings.HasPrefix(input, "creat") {
+			assert.Contains(t, string(src), "syscall(__NR_open")
+			assert.Contains(t, string(src), "0xa41")
 		}
 		assert.NotContains(t, string(src), "csb_io_errno_")
 		if strings.Contains(input, "F_SETFL") || strings.Contains(input, "fcntl$setstatus") {
