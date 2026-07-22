@@ -701,7 +701,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		for _, copyin := range call.Copyin {
 			ctx.copyin(w, &csumSeq, copyin)
 		}
-		if ctx.opts.CSB && (call.Meta.Name == "ioctl$int_in" || call.Meta.Name == "ioctl$auto_FIONBIO") &&
+		if ctx.opts.CSB && call.Meta.CallName == "ioctl" &&
 			localIOArg(call, localIO) {
 			cmd, cmdOK := call.Args[1].(prog.ExecArgConst)
 			value, valueOK := call.Args[2].(prog.ExecArgConst)

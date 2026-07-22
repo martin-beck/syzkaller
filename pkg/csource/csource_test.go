@@ -141,6 +141,8 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 		"pipe(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n" +
 			"ioctl$int_in(r0, 0x5421, &(0x7f0000000040)=0x0)\nread(r0, &(0x7f0000000080), 0x1)\n",
 		"pipe(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n" +
+			"ioctl(r0, 0x5421, &(0x7f0000000040)=0x0)\nread(r0, &(0x7f0000000080), 0x1)\n",
+		"pipe(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n" +
 			"ioctl$auto_FIONBIO(r0, 0x5421, 0x200000000040)\nread(r0, &(0x7f0000000080), 0x1)\n",
 		"pipe(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n" +
 			"fcntl$auto_F_SETFL(r0, 0x4, 0x0)\nread(r0, &(0x7f0000000040), 0x1)\n",
