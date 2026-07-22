@@ -823,9 +823,9 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			callName = call.Meta.CallName
 		}
 		if callName == "close" {
-			arg := call.Args[0]
-			fdRes := arg.(prog.ExecArgResult).Index
-			missedFDResources[fdRes] = false
+			if arg, ok := call.Args[0].(prog.ExecArgResult); ok {
+				missedFDResources[arg.Index] = false
+			}
 		}
 
 		if callName == "read" || callName == "pread" || callName == "pread64" || callName == "recv" || callName == "recvfrom" {
