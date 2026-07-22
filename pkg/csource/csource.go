@@ -739,6 +739,12 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				}
 			}
 		}
+		if call.Meta.CallName == "pidfd_getfd" && call.Index != prog.ExecNoCopyout &&
+			futureRawIOUringFDs[call.Index] && len(call.Args) > 1 {
+			if src, ok := call.Args[1].(prog.ExecArgResult); ok && src.DivOp == 0 && src.AddOp == 0 {
+				futureRawIOUringFDs[src.Index] = true
+			}
+		}
 	}
 	for ci, call := range p.Calls {
 		// Track raw rings in program order so later mappings don't suppress earlier submissions.
@@ -782,6 +788,12 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				if fd, ok := call.Args[1].(prog.ExecArgResult); ok && fd.DivOp == 0 && fd.AddOp == 0 {
 					rawIOUringFDs[fd.Index] = true
 				}
+			}
+		}
+		if call.Meta.CallName == "pidfd_getfd" && call.Index != prog.ExecNoCopyout && len(call.Args) > 1 {
+			if src, ok := call.Args[1].(prog.ExecArgResult); ok && src.DivOp == 0 && src.AddOp == 0 &&
+				rawIOUringFDs[src.Index] {
+				rawIOUringFDs[call.Index] = true
 			}
 		}
 		if call.Meta.Name == "mmap$IORING_OFF_SQ_RING" || call.Meta.Name == "mmap$IORING_OFF_SQES" {
