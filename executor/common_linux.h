@@ -73,14 +73,18 @@ static long UNIQUE_FUNC(syz_csb_io_cancel)(void) { return UNIQUE_FUNC(csb_aio_li
 #include <sys/wait.h>
 
 // Run termination in a child and reap it so a CSB operation can repeat safely.
-static long UNIQUE_FUNC(csb_exit_lifecycle)(bool group)
+static long UNIQUE_FUNC(csb_exit_lifecycle)(int group)
 {
+#if defined(__NR_fork)
 	long pid = syscall(__NR_fork);
+#else
+	long pid = syscall(__NR_clone, SIGCHLD, 0, 0, 0, 0);
+#endif
 	if (pid < 0)
 		return -1;
 	if (pid == 0) {
 		syscall(group ? __NR_exit_group : __NR_exit, 0);
-		UNIQUE_FUNC(doexit_thread)(0);
+		_exit(0);
 	}
 	int status = 0;
 	long ret;
@@ -90,8 +94,8 @@ static long UNIQUE_FUNC(csb_exit_lifecycle)(bool group)
 	return ret == pid ? 0 : -1;
 }
 
-static long UNIQUE_FUNC(syz_csb_exit)(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(false); }
-static long UNIQUE_FUNC(syz_csb_exit_group)(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(true); }
+static long UNIQUE_FUNC(syz_csb_exit)(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(0); }
+static long UNIQUE_FUNC(syz_csb_exit_group)(void) { return UNIQUE_FUNC(csb_exit_lifecycle)(1); }
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction || __NR_syz_csb_rt_sigreturn || __NR_syz_csb_rt_sigqueueinfo || __NR_syz_csb_rt_sigsuspend

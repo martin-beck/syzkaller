@@ -13,3 +13,12 @@ func TestCSBTaskHelperDependencies(t *testing.T) {
 		}
 	}
 }
+
+func TestCSBExitHelperDependencies(t *testing.T) {
+	for _, name := range []string{"syz_csb_exit", "syz_csb_exit_group"} {
+		deps := Get(Linux, AMD64).PseudoSyscallDeps[name]
+		if len(deps) == 0 || deps[0] != "clone" {
+			t.Errorf("%s dependencies = %v", name, deps)
+		}
+	}
+}
