@@ -23,6 +23,10 @@ func parseSyscall(data []byte) (int, *Syscall) {
 }
 
 func normalizeStraceLine(line string) string {
+	// Large CPU sets are truncated with a trailing ellipsis.
+	if strings.Contains(line, "sched_setaffinity(") {
+		line = strings.Replace(line, ", ...]", "]", 1)
+	}
 	// strace 6.8 can render a zero statx flags argument as an empty field.
 	// Normalize only that known form so malformed arguments in other calls
 	// continue to fail parsing instead of being silently rewritten.

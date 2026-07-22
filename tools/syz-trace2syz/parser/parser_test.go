@@ -172,6 +172,41 @@ func TestParseEmptyStatxFlags(t *testing.T) {
 	}
 }
 
+func TestParseTruncatedSchedAffinity(t *testing.T) {
+	data := []byte(`901717 sched_setaffinity(901734, 8192, [0, 1, 2, ...] <unfinished ...>
+901717 <... sched_setaffinity resumed>) = 0
+901717 close(3) = 0`)
+	tests := []struct {
+		name         string
+		splitThreads bool
+	}{
+		{"merged", false},
+		{"split", true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tree, trace, err := ParseData(data, test.splitThreads, -1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.splitThreads {
+				trace = tree.TraceMap[901717]
+			}
+			if len(trace.Calls) != 2 {
+				t.Fatalf("got %d calls, want resumed affinity and following call", len(trace.Calls))
+			}
+			call := trace.Calls[0]
+			if call.CallName != "sched_setaffinity" || call.Paused || call.Ret != 0 {
+				t.Fatalf("unexpected resumed call: %#v", call)
+			}
+			cpus, ok := call.Args[2].(*GroupType)
+			if !ok || len(cpus.Elems) != 3 {
+				t.Fatalf("CPU list parsed as %#v, want three known CPUs", call.Args[2])
+			}
+		})
+	}
+}
+
 func TestParseLoopPid(t *testing.T) {
 	data := `1  open() = 3
 			 1  fstat() = 0`
