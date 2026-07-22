@@ -519,3 +519,24 @@ func TestLoopIdenticalCalls(t *testing.T) {
 		}
 	}
 }
+
+func TestCSBIgnoresSIGPIPE(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(&prog.Prog{Target: target}, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const setup = "if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) {\n\t\treturn -1;\n\t}"
+	if !strings.Contains(string(src), setup) {
+		t.Fatal("CSB registration does not safely ignore SIGPIPE")
+	}
+	probe := []byte("#include <signal.h>\nint main(void)\n{\n\t" + setup + "\n\treturn 0;\n}\n")
+	bin, err := Build(target, probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(bin) })
+}
