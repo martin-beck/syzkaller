@@ -6,6 +6,7 @@
 package parser
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -83,6 +84,28 @@ func TestParseLoopBasic(t *testing.T) {
 		if calls[0].CallName != "open" || calls[1].CallName != "fstat" {
 			t.Fatalf("call list should be open->fstat. Got %s->%s", calls[0].CallName, calls[1].CallName)
 		}
+	}
+}
+
+func TestParseSplitFieldValue(t *testing.T) {
+	data := []byte(`1 bpf(0x10, {query={target_fd=14, attach_type=0x6, query_flags=0, attach_flags=0, prog_ids= <unfinished ...>
+2 close(3) = 0
+1 <... bpf resumed>[], prog_cnt=64 => 0}}, 32) = 0`)
+	for _, splitThreads := range []bool{false, true} {
+		t.Run(fmt.Sprint(splitThreads), func(t *testing.T) {
+			tree, trace, err := ParseData(data, splitThreads, -1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if splitThreads {
+				trace = tree.TraceMap[1]
+			}
+			call := trace.Calls[0]
+			query := call.Args[1].(*GroupType).Elems[0].(*GroupType)
+			if call.CallName != "bpf" || len(query.Elems) != 6 {
+				t.Fatalf("split query parsed as %#v", call)
+			}
+		})
 	}
 }
 

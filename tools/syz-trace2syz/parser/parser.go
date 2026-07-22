@@ -42,6 +42,49 @@ func shouldSkip(line string) bool {
 		strings.Contains(line, "<ptrace(SYSCALL):No such process>")
 }
 
+func joinSplitValues(data []byte) []byte {
+	// A value split immediately after '=' cannot be parsed as two partial trees.
+	// Rejoin only matching PID/syscall pairs before parsing either line.
+	type pendingCall struct {
+		line int
+		name string
+	}
+	lines := strings.Split(string(data), "\n")
+	pending := make(map[string]pendingCall)
+	removed := make(map[int]bool)
+	for i, line := range lines {
+		if strings.HasSuffix(line, "= <unfinished ...>") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				if paren := strings.IndexByte(fields[1], '('); paren > 0 {
+					pending[fields[0]] = pendingCall{i, fields[1][:paren]}
+				}
+			}
+			continue
+		}
+		start := strings.Index(line, "<... ")
+		end := strings.Index(line, " resumed>")
+		if start < 0 || end < start {
+			continue
+		}
+		pid := strings.TrimSpace(line[:start])
+		call, ok := pending[pid]
+		if !ok || line[start+5:end] != call.name {
+			continue
+		}
+		lines[call.line] = strings.TrimSuffix(lines[call.line], "<unfinished ...>") + line[end+9:]
+		removed[i] = true
+		delete(pending, pid)
+	}
+	joined := lines[:0]
+	for i, line := range lines {
+		if !removed[i] {
+			joined = append(joined, line)
+		}
+	}
+	return []byte(strings.Join(joined, "\n"))
+}
+
 // ParseData parses each line of a strace file in a loop.
 func ParseData(data []byte, splitThreads bool, numLines int) (*TraceTree, *Trace, error) {
 	var status string
@@ -49,7 +92,7 @@ func ParseData(data []byte, splitThreads bool, numLines int) (*TraceTree, *Trace
 	trace := new(Trace)
 	lastCalls := make(map[int64](*Syscall))
 	// Creating the process tree
-	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner := bufio.NewScanner(bytes.NewReader(joinSplitValues(data)))
 	scanner.Buffer(nil, 64<<20)
 	curLine := 0
 	for scanner.Scan() {
