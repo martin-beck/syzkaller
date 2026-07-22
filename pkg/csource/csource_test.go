@@ -109,6 +109,29 @@ func TestCSBReappliesCurrentAffinity(t *testing.T) {
 	assert.Contains(t, string(src), "sched_getaffinity(0, mask_size, mask)")
 }
 
+func TestCSBProtectControlFDs(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("r0 = openat(0xffffffffffffff9c, 0x0, 0x0, 0x0)\ndup2(r0, 0x2)\ndup3(r0, 0x1, 0x0)\nclose(r0)\nclose_range(0x0, 0xffffffff, 0x0)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normal, _, err := Write(p, Options{Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	csb, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"<= 2 ? -1", "<= 2 ? 3"} {
+		assert.Contains(t, string(csb), want)
+		assert.NotContains(t, string(normal), want)
+	}
+}
+
 func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {
 	t.Helper()
 	// Strip text that cannot declare or reference a C identifier. In particular,
