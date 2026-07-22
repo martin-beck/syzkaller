@@ -33,6 +33,14 @@ syz_csb_execve()[0]
 `,
 		},
 		{`
+prctl(0x26, 1, 0, 0, 0) = 0
+keyctl(0x1, "session") = 3
+`, `
+prctl$PR_SET_NO_NEW_PRIVS(0x26, 0x1)[0]
+keyctl$join(0x1, &(0x7f0000000000))[3]
+`,
+		},
+		{`
 open("file", 66) = 3
 write(3, "somedata", 8) = 8
 `, `
