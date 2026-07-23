@@ -322,7 +322,8 @@ func TestCSBDynamicOpenFlagsAndFcntlCommand(t *testing.T) {
 	calls, _ := ctx.generateCalls(decoded, false, false, nil, nil, nil)
 	assert.Contains(t, calls[1], "(UNIQUE_VAR(ctx->r)[0] | O_NONBLOCK)")
 	assert.Contains(t, calls[2], "syscall(__NR_open")
-	assert.Contains(t, calls[3], "fcntl(UNIQUE_VAR(ctx->r)[0], F_GETFL)")
+	assert.Contains(t, calls[3], "intptr_t csb_fcntl_cmd_3 = UNIQUE_VAR(ctx->r)[0]")
+	assert.Contains(t, calls[3], "csb_fcntl_cmd_3 == F_SETFL ? (0 | O_NONBLOCK) : 0")
 }
 
 func TestCSBTwoArgumentIoctl(t *testing.T) {

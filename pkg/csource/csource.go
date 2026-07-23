@@ -777,17 +777,17 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		if dynamicFcntlCommand {
 			_, dynamicFcntlCommand = call.Args[1].(prog.ExecArgResult)
 		}
-		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall, forceNonblockArg, dataMmap)
+		if dynamicFcntlCommand {
+			cmd := ctx.resultArgToStr(call.Args[1].(prog.ExecArgResult))
+			fmt.Fprintf(w, "\tintptr_t csb_fcntl_cmd_%d = %s;\n", ci, cmd)
+		}
+		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall,
+			forceNonblockArg, dynamicFcntlCommand, dataMmap)
 		if call.Props.Rerun > 0 {
 			fmt.Fprintf(w, "\tfor (int i = 0; i < %v; i++) {\n", call.Props.Rerun)
 			// Rerun invocations should not affect the result value.
-			ctx.emitCall(w, call, ci, false, false, initCall, forceNonblockArg, dataMmap)
+			ctx.emitCall(w, call, ci, false, false, initCall, forceNonblockArg, dynamicFcntlCommand, dataMmap)
 			fmt.Fprintf(w, "\t}\n")
-		}
-		if dynamicFcntlCommand {
-			fd := ctx.resultArgToStr(call.Args[0].(prog.ExecArgResult))
-			fmt.Fprintf(w, "\t{ int flags = fcntl(%[1]s, F_GETFL); "+
-				"if (flags != -1) fcntl(%[1]s, F_SETFL, flags | O_NONBLOCK); }\n", fd)
 		}
 		// Copyout.
 		if resCopyout || argCopyout {
@@ -967,7 +967,7 @@ func isNative(sysTarget *targets.Target, callName string) bool {
 }
 
 func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCopyout, trace, initCall bool,
-	forceNonblockArg int, dataMmap bool) {
+	forceNonblockArg int, dynamicFcntlCommand, dataMmap bool) {
 	native := isNative(ctx.sysTarget, call.Meta.CallName)
 	fmt.Fprintf(w, "\t")
 	if !native {
@@ -985,7 +985,7 @@ func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCo
 	if haveCopyout || trace {
 		fmt.Fprintf(w, "res = ")
 	}
-	w.WriteString(ctx.fmtCallBody(call, initCall, ci, forceNonblockArg, dataMmap))
+	w.WriteString(ctx.fmtCallBody(call, initCall, ci, forceNonblockArg, dynamicFcntlCommand, dataMmap))
 	if !native {
 		fmt.Fprintf(w, ")") // close NONFAILING macro
 	}
@@ -1018,7 +1018,8 @@ func valInMMapRange(ctx *context, val uint64) bool {
 	return val >= min && val < max
 }
 
-func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool, ci int, forceNonblockArg int, dataMmap bool) string {
+func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool, ci int, forceNonblockArg int,
+	dynamicFcntlCommand, dataMmap bool) string {
 	native := isNative(ctx.sysTarget, call.Meta.CallName)
 	callName, ok := ctx.sysTarget.SyscallTrampolines[call.Meta.CallName]
 	if !ok {
@@ -1139,8 +1140,11 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool, ci int, force
 				PTR_OFFSET_STR = "+PTR_OFFSET"
 			}
 
-			val := com + handleBigEndian(arg, ctx.constArgToStr(arg, native)) + PTR_OFFSET_STR
-			argsStrs = append(argsStrs, ctx.protectCSBControlFD(callName, i, val))
+			value := handleBigEndian(arg, ctx.constArgToStr(arg, native)) + PTR_OFFSET_STR
+			if dynamicFcntlCommand && i == 2 {
+				value = fmt.Sprintf("(csb_fcntl_cmd_%d == F_SETFL ? (%s | O_NONBLOCK) : %s)", ci, value, value)
+			}
+			argsStrs = append(argsStrs, ctx.protectCSBControlFD(callName, i, com+value))
 		case prog.ExecArgResult:
 			if initCall {
 				initFDs[arg.Index] = true
@@ -1150,6 +1154,12 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool, ci int, force
 			}
 			com := ctx.argComment(call.Meta.Args[i], arg)
 			val := ctx.resultArgToStr(arg)
+			if dynamicFcntlCommand && i == 1 {
+				val = fmt.Sprintf("csb_fcntl_cmd_%d", ci)
+			}
+			if dynamicFcntlCommand && i == 2 {
+				val = fmt.Sprintf("(csb_fcntl_cmd_%d == F_SETFL ? (%s | O_NONBLOCK) : %s)", ci, val, val)
+			}
 			if forceNonblockArg == i {
 				val = fmt.Sprintf("(%s | O_NONBLOCK)", val)
 			}
