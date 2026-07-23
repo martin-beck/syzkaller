@@ -287,8 +287,9 @@ func (ctx *context) genRtSigactionCall() *prog.Call {
 	if action, ok := traceCall.Args[1].(*parser.GroupType); ok {
 		if len(action.Elems) > 1 {
 			mask := ctx.sigsetMask(action.Elems[1])
-			ctx.setConstArg(call, 2, mask)
-			ctx.setConstArg(call, 3, mask>>32)
+			for i := range mask {
+				ctx.setConstArg(call, 2+i, mask[i])
+			}
 		}
 		if len(action.Elems) > 2 {
 			ctx.setConstArg(call, 1, sigactionFlags(action.Elems[2]))
@@ -298,19 +299,24 @@ func (ctx *context) genRtSigactionCall() *prog.Call {
 	return call
 }
 
-func (ctx *context) sigsetMask(arg parser.IrType) uint64 {
+func (ctx *context) sigsetMask(arg parser.IrType) [4]uint64 {
 	if group, ok := arg.(*parser.GroupType); ok {
-		var mask uint64
+		var mask [4]uint64
 		for _, elem := range group.Elems {
-			mask |= ctx.sigsetMask(elem)
+			elemMask := ctx.sigsetMask(elem)
+			for i := range mask {
+				mask[i] |= elemMask[i]
+			}
 		}
 		return mask
 	}
 	sig := ctx.signalNumber(arg)
-	if sig == 0 || sig > 64 {
-		return 0
+	if sig == 0 || sig > 128 {
+		return [4]uint64{}
 	}
-	return uint64(1) << (sig - 1)
+	var mask [4]uint64
+	mask[(sig-1)/32] = uint64(1) << ((sig - 1) % 32)
+	return mask
 }
 
 func (ctx *context) signalNumber(arg parser.IrType) uint64 {
@@ -324,7 +330,11 @@ func (ctx *context) signalNumber(arg parser.IrType) uint64 {
 	name := strings.TrimPrefix(buffer.Val, "SIG")
 	if suffix := strings.TrimPrefix(name, "RT_"); suffix != name {
 		offset, err := strconv.ParseUint(suffix, 10, 8)
-		if err == nil && offset <= 32 {
+		maxOffset := uint64(32)
+		if ctx.target.Arch == "mips64le" {
+			maxOffset = 96
+		}
+		if err == nil && offset <= maxOffset {
 			return 32 + offset
 		}
 	}
