@@ -754,6 +754,16 @@ func TestRtSigactionQueryIsReplayedDirectly(t *testing.T) {
 	}
 }
 
+func TestSignalNumberUsesTargetABI(t *testing.T) {
+	ctx := &context{target: &prog.Target{Arch: "mips64le"}}
+	if got := ctx.signalNumber(&parser.BufferType{Val: "SIGUSR1"}); got != 16 {
+		t.Fatalf("MIPS SIGUSR1 = %d, want 16", got)
+	}
+	if got := ctx.signalNumber(&parser.BufferType{Val: "SIGRT_1"}); got != 33 {
+		t.Fatalf("SIGRT_1 = %d, want 33", got)
+	}
+}
+
 func TestShortSafeCallsAreDropped(t *testing.T) {
 	p := parseSingleProg(t, `
 madvise() = 0

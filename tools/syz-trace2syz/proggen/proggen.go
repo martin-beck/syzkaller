@@ -13,6 +13,7 @@ import (
 	"io"
 	"math/rand"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/google/syzkaller/pkg/log"
@@ -282,10 +283,10 @@ func (ctx *context) genRtSigactionCall() *prog.Call {
 	if call == nil {
 		return nil
 	}
-	ctx.setConstArg(call, 0, signalNumber(traceCall.Args[0]))
+	ctx.setConstArg(call, 0, ctx.signalNumber(traceCall.Args[0]))
 	if action, ok := traceCall.Args[1].(*parser.GroupType); ok {
 		if len(action.Elems) > 1 {
-			mask := sigsetMask(action.Elems[1])
+			mask := ctx.sigsetMask(action.Elems[1])
 			ctx.setConstArg(call, 2, mask)
 			ctx.setConstArg(call, 3, mask>>32)
 		}
@@ -297,22 +298,22 @@ func (ctx *context) genRtSigactionCall() *prog.Call {
 	return call
 }
 
-func sigsetMask(arg parser.IrType) uint64 {
+func (ctx *context) sigsetMask(arg parser.IrType) uint64 {
 	if group, ok := arg.(*parser.GroupType); ok {
 		var mask uint64
 		for _, elem := range group.Elems {
-			mask |= sigsetMask(elem)
+			mask |= ctx.sigsetMask(elem)
 		}
 		return mask
 	}
-	sig := signalNumber(arg)
+	sig := ctx.signalNumber(arg)
 	if sig == 0 || sig > 64 {
 		return 0
 	}
 	return uint64(1) << (sig - 1)
 }
 
-func signalNumber(arg parser.IrType) uint64 {
+func (ctx *context) signalNumber(arg parser.IrType) uint64 {
 	if value, ok := arg.(parser.Constant); ok {
 		return value.Val()
 	}
@@ -321,13 +322,33 @@ func signalNumber(arg parser.IrType) uint64 {
 		return 0
 	}
 	name := strings.TrimPrefix(buffer.Val, "SIG")
-	return map[string]uint64{
+	if suffix := strings.TrimPrefix(name, "RT_"); suffix != name {
+		offset, err := strconv.ParseUint(suffix, 10, 8)
+		if err == nil && offset <= 32 {
+			return 32 + offset
+		}
+	}
+	if name == "RTMIN" {
+		return 32
+	}
+	generic := map[string]uint64{
 		"HUP": 1, "INT": 2, "QUIT": 3, "ILL": 4, "TRAP": 5, "ABRT": 6,
 		"BUS": 7, "FPE": 8, "KILL": 9, "USR1": 10, "SEGV": 11, "USR2": 12,
 		"PIPE": 13, "ALRM": 14, "TERM": 15, "STKFLT": 16, "CHLD": 17,
 		"CONT": 18, "STOP": 19, "TSTP": 20, "TTIN": 21, "TTOU": 22,
 		"URG": 23, "XCPU": 24, "XFSZ": 25, "VTALRM": 26, "PROF": 27,
 		"WINCH": 28, "IO": 29, "PWR": 30, "SYS": 31,
+	}
+	if ctx.target.Arch != "mips64le" {
+		return generic[name]
+	}
+	return map[string]uint64{
+		"HUP": 1, "INT": 2, "QUIT": 3, "ILL": 4, "TRAP": 5, "ABRT": 6,
+		"EMT": 7, "FPE": 8, "KILL": 9, "BUS": 10, "SEGV": 11, "SYS": 12,
+		"PIPE": 13, "ALRM": 14, "TERM": 15, "USR1": 16, "USR2": 17,
+		"CHLD": 18, "PWR": 19, "WINCH": 20, "URG": 21, "IO": 22,
+		"STOP": 23, "TSTP": 24, "CONT": 25, "TTIN": 26, "TTOU": 27,
+		"VTALRM": 28, "PROF": 29, "XCPU": 30, "XFSZ": 31,
 	}[name]
 }
 
