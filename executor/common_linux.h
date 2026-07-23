@@ -254,7 +254,10 @@ static long UNIQUE_FUNC(syz_csb_rt_sigqueueinfo)(void)
 		return -1;
 	}
 	int status = 0;
-	long ret = waitpid(pid, &status, 0);
+	long ret;
+	do {
+		ret = waitpid(pid, &status, 0);
+	} while (ret < 0 && errno == EINTR);
 	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 	return ret == pid && status == 0 ? 0 : -1;
 }
