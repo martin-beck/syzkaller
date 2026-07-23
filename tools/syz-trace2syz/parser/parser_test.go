@@ -181,9 +181,18 @@ func TestParseEmptyStatxFlags(t *testing.T) {
 }
 
 func TestParseTruncatedSchedAffinity(t *testing.T) {
-	data := []byte(`901717 sched_setaffinity(901734, 8192, [0, 1, 2, ...] <unfinished ...>
+	formats := []string{"[0, 1, 2, ...]", "[0 1 2 ...]"}
+	for _, format := range formats {
+		t.Run(format, func(t *testing.T) {
+			testParseTruncatedSchedAffinity(t, format)
+		})
+	}
+}
+
+func testParseTruncatedSchedAffinity(t *testing.T, cpus string) {
+	data := []byte(fmt.Sprintf(`901717 sched_setaffinity(901734, 8192, %s <unfinished ...>
 901717 <... sched_setaffinity resumed>) = 0
-901717 close(3) = 0`)
+901717 close(3) = 0`, cpus))
 	tests := []struct {
 		name         string
 		splitThreads bool

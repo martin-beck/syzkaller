@@ -27,6 +27,7 @@ func normalizeStraceLine(line string) string {
 	// Large CPU sets are truncated with a trailing ellipsis.
 	if name == "sched_setaffinity" {
 		line = strings.Replace(line, ", ...]", "]", 1)
+		line = strings.Replace(line, " ...]", "]", 1)
 	}
 	// strace 6.8 can render a zero statx flags argument as an empty field.
 	// Normalize only that known form so malformed arguments in other calls
