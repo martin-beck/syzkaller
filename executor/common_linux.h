@@ -249,8 +249,12 @@ static long UNIQUE_FUNC(syz_csb_rt_sigqueueinfo)(void)
 	long pid = fork();
 	if (pid == 0)
 		_exit(UNIQUE_FUNC(csb_rt_sigqueueinfo_lifecycle)() == 0 ? 0 : 1);
+	if (pid < 0) {
+		pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
+		return -1;
+	}
 	int status = 0;
-	long ret = pid < 0 ? -1 : waitpid(pid, &status, 0);
+	long ret = waitpid(pid, &status, 0);
 	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 	return ret == pid && status == 0 ? 0 : -1;
 }
