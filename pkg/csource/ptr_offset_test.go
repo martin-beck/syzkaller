@@ -36,7 +36,7 @@ func TestValInMMapRange(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {
 		t.Fatal(err)
-}
+	}
 	ctx := &context{target: target, sysTarget: targets.Get(target.OS, target.Arch)}
 	min := target.DataOffset
 	max := min + target.NumPages*target.PageSize
@@ -122,7 +122,7 @@ func TestPtrOffsetUsesPointerEncoding(t *testing.T) {
 
 	meta := target.SyscallMap["close"]
 	for _, arg := range []prog.ExecArgConst{{Size: 8, Value: addr}, {IsPointer: true, Size: 8, Value: addr}} {
-		got := ctx.fmtCallBody(prog.ExecCall{Meta: meta, Args: []prog.ExecArg{arg}}, false)
+		got := ctx.fmtCallBody(prog.ExecCall{Meta: meta, Args: []prog.ExecArg{arg}}, false, false)
 		if strings.Contains(got, "+PTR_OFFSET") != arg.IsPointer {
 			t.Fatalf("direct argument relocation does not match pointer encoding: %s", got)
 		}
