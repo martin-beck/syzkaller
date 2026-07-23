@@ -32,15 +32,15 @@ package parser
 %type <val_ret_type> ret_type
 %type <val_buf_type> buf_type
 %type <val_group_type> group_type
-%type <val_constant> constant
-%type <val_type> parenthetical, parentheticals, type, field_type
-%type <val_types> types
+%type <val_constant> constant bpf_constant
+%type <val_type> parenthetical, parentheticals, type, field_type bpf_type
+%type <val_types> types bpf_types
 %type <val_syscall> syscall
 
 %token STRING_LITERAL MAC IDENTIFIER FLAG INT UINT QUESTION DOUBLE ARROW
 %token OR AND LOR TIMES LAND LEQUAL ONESCOMP LSHIFT RSHIFT TIMES NOT MINUS PLUS
 %token COMMA LBRACKET RBRACKET LBRACKET_SQUARE RBRACKET_SQUARE LPAREN RPAREN EQUALS
-%token UNFINISHED RESUMED
+%token <data> UNFINISHED RESUMED BPF_MACRO
 %token SIGNAL_PLUS SIGNAL_MINUS NULL EQUALAT COLON FORWARDSLASH
 
 %nonassoc LOWEST
@@ -163,6 +163,30 @@ group_type:
     LBRACKET_SQUARE types RBRACKET_SQUARE {$$ = newGroupType($2)}
     | LBRACKET types RBRACKET {$$ = newGroupType($2)}
     | LBRACKET types COMMA RBRACKET {$$ = newGroupType($2)}
+    | BPF_MACRO LPAREN bpf_types RPAREN {$$ = newBPFGroupType($1, $3)}
+
+bpf_types:
+      {$$ = []IrType{}}
+    | bpf_types COMMA bpf_type {$1 = append($1, $3); $$ = $1}
+    | bpf_types bpf_type {$1 = append($1, $2); $$ = $1}
+
+bpf_type:
+    constant {$$ = $1}
+    | bpf_constant {$$ = $1}
+    | IDENTIFIER EQUALS bpf_type {$$ = $3}
+
+bpf_constant:
+    FLAG {
+        var ok bool
+        $$, ok = bpfFlagConstant($1)
+        if !ok {
+            Stracelex.Error("unknown symbolic BPF operand: " + $1)
+            return 1
+        }
+    }
+    | bpf_constant OR bpf_constant {$$ = $1 | $3}
+    | bpf_constant OR constant {$$ = $1 | $3}
+    | constant OR bpf_constant {$$ = $1 | $3}
 
 field_type:
     type COLON type {$$ = $3}
