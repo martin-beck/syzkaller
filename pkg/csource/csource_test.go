@@ -139,7 +139,8 @@ func TestCSBProtectControlFDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Contains(t, string(src), "!= (uint32_t)(/*newfd=*/0)")
-	assert.Contains(t, string(src), "if ((uint32_t)UNIQUE_VAR(ctx->r)[0] > 2) close")
+	assert.Contains(t, string(src),
+		"{ uint32_t fd = (uint32_t)UNIQUE_VAR(ctx->r)[0]; if (fd > 2) close(fd); }")
 }
 
 func TestCSBProtectControlFDsIoUring(t *testing.T) {

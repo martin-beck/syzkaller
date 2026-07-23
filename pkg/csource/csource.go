@@ -307,7 +307,8 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		// TODO: check the potential usage of initFDs below, and in the whole file.
 		if _, ok := listenFDs[fdRes]; !ok {
 			if ctx.opts.CSB {
-				fmt.Fprintf(closeBuf, "\tif ((uint32)UNIQUE_VAR(ctx->r)[%[1]v] > 2) close(UNIQUE_VAR(ctx->r)[%[1]v]);\n", fdRes)
+				fmt.Fprintf(closeBuf,
+					"\t{ uint32 fd = (uint32)UNIQUE_VAR(ctx->r)[%[1]v]; if (fd > 2) close(fd); }\n", fdRes)
 			} else {
 				fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(ctx->r)[%v]);\n", fdRes)
 			}
