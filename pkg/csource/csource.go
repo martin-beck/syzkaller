@@ -786,7 +786,8 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		if call.Props.Rerun > 0 {
 			fmt.Fprintf(w, "\tfor (int i = 0; i < %v; i++) {\n", call.Props.Rerun)
 			// Rerun invocations should not affect the result value.
-			ctx.emitCall(w, call, ci, false, false, initCall, forceNonblockArg, dynamicFcntlCommand, dataMmap)
+			ctx.emitCall(w, call, ci, false, false, initCall, forceNonblockArg,
+				dynamicFcntlCommand, dataMmap)
 			fmt.Fprintf(w, "\t}\n")
 		}
 		// Copyout.
