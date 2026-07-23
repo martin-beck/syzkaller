@@ -352,7 +352,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 
 	// use all but reg and dereg syscalls
 	var callsNetSrvBody []string
-	var asyncResultResets []string
+	var dispatchResultResets []string
 	for idx, call := range calls {
 		if slices.Contains(netSrvListenIdxs, idx) {
 			continue
@@ -364,14 +364,10 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 			continue
 		}
 		callsNetSrvBody = append(callsNetSrvBody, call)
-		if ctx.p.Calls[idx].Props.Async {
-			asyncResultResets = append(asyncResultResets, resultResets[idx])
-		} else {
-			asyncResultResets = append(asyncResultResets, "")
-		}
+		dispatchResultResets = append(dispatchResultResets, resultResets[idx])
 	}
 	syscallsBody := ctx.generateSyscalls(callsNetSrvBody, len(vars) != 0)
-	resultResetsCode := generateResultResetSwitch(asyncResultResets)
+	resultResetsCode := generateResultResetSwitch(dispatchResultResets)
 
 	// Get number of listen annotations
 	var callsNetSrvDereg []string
