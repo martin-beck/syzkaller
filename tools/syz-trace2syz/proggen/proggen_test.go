@@ -728,9 +728,9 @@ func TestAIOCallsUseBoundedLifecycles(t *testing.T) {
 }
 
 func TestRtSigactionIsolatesDispositionChange(t *testing.T) {
-	p := parseSingleProg(t, `rt_sigaction(12, {sa_handler=0x1234, sa_mask=[2], sa_flags=0x10000000}, NULL, 8) = 0`)
+	p := parseSingleProg(t, `rt_sigaction(12, {sa_handler=0x1234, sa_mask=[10, 12], sa_flags=0x10000000}, NULL, 8) = 0`)
 	if got := strings.TrimSpace(string(p.Serialize())); got !=
-		"syz_csb_rt_sigaction(0xc, 0x10000000, 0x2)[0]" {
+		"syz_csb_rt_sigaction(0xc, 0x10000000, 0xa00, 0x0)[0]" {
 		t.Fatalf("got %q", got)
 	}
 	src, _, err := csource.Write(p, csource.Options{Slowdown: 1, CSB: true, Trace: true})

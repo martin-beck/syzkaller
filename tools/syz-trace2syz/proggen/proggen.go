@@ -285,7 +285,9 @@ func (ctx *context) genRtSigactionCall() *prog.Call {
 	ctx.setConstArg(call, 0, constArgValue(traceCall.Args[0], 0))
 	if action, ok := traceCall.Args[1].(*parser.GroupType); ok {
 		if len(action.Elems) > 1 {
-			ctx.setConstArg(call, 2, firstConstValue(action.Elems[1]))
+			mask := sigsetMask(action.Elems[1])
+			ctx.setConstArg(call, 2, mask)
+			ctx.setConstArg(call, 3, mask>>32)
 		}
 		if len(action.Elems) > 2 {
 			ctx.setConstArg(call, 1, sigactionFlags(action.Elems[2]))
@@ -295,14 +297,19 @@ func (ctx *context) genRtSigactionCall() *prog.Call {
 	return call
 }
 
-func firstConstValue(arg parser.IrType) uint64 {
+func sigsetMask(arg parser.IrType) uint64 {
 	if group, ok := arg.(*parser.GroupType); ok {
-		if len(group.Elems) == 0 {
-			return 0
+		var mask uint64
+		for _, elem := range group.Elems {
+			mask |= sigsetMask(elem)
 		}
-		return firstConstValue(group.Elems[0])
+		return mask
 	}
-	return constArgValue(arg, 0)
+	sig := constArgValue(arg, 0)
+	if sig == 0 || sig > 64 {
+		return 0
+	}
+	return uint64(1) << (sig - 1)
 }
 
 func sigactionFlags(arg parser.IrType) uint64 {
