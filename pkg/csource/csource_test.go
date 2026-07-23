@@ -261,9 +261,9 @@ func TestCSBClearsSQPOLLAtAbsoluteParams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Contains(t, string(src), "{(void*)(0x8), sizeof(csb_io_uring_flags_0)}")
+	assert.Contains(t, string(src), "{(void*)(0x0), sizeof(csb_io_uring_params_0)}")
 	assert.Contains(t, string(src), "SYS_process_vm_readv")
-	assert.NotContains(t, string(src), "0x8+PTR_OFFSET")
+	assert.Contains(t, string(src), "(intptr_t)csb_io_uring_params_0")
 	p, err = target.Deserialize([]byte("syz_io_uring_setup(0x1, &(0x7f0000000000)={0x0, 0x0, 0x2}, "+
 		"&(0x7f0000001000/0x1000)=nil, &(0x7f0000002000/0x1000)=nil)\n"), prog.NonStrict)
 	if err != nil {
@@ -273,8 +273,8 @@ func TestCSBClearsSQPOLLAtAbsoluteParams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Contains(t, string(src), "{(void*)(0x200000000008+PTR_OFFSET), sizeof(csb_io_uring_flags_0)}")
-	assert.Contains(t, string(src), "csb_io_uring_flags_0 &= ~2")
+	assert.Contains(t, string(src), "{(void*)(0x200000000000+PTR_OFFSET), sizeof(csb_io_uring_params_0)}")
+	assert.Contains(t, string(src), "*(uint32_t*)(csb_io_uring_params_0 + 1) &= ~2")
 }
 
 func TestCSBProtectRawIoUringInProgramOrder(t *testing.T) {

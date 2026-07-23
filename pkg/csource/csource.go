@@ -959,20 +959,17 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				if valInMMapRange(ctx, params.Value) {
 					offset = "+PTR_OFFSET"
 				}
-				fmt.Fprintf(w, "\tuint32 csb_io_uring_flags_%[1]d;\n"+
-					"\tint csb_io_uring_flags_ok_%[1]d = 0;\n"+
+				fmt.Fprintf(w, "\tuint64 csb_io_uring_params_%[1]d[15];\n"+
 					"\tstruct { void* base; size_t len; } csb_io_uring_local_%[1]d = "+
-					"{&csb_io_uring_flags_%[1]d, sizeof(csb_io_uring_flags_%[1]d)};\n"+
+					"{csb_io_uring_params_%[1]d, sizeof(csb_io_uring_params_%[1]d)};\n"+
 					"\tstruct { void* base; size_t len; } csb_io_uring_remote_%[1]d = "+
-					"{(void*)(0x%[2]x%[3]s), sizeof(csb_io_uring_flags_%[1]d)};\n"+
-					"\tif (syscall(SYS_process_vm_readv, getpid(), &csb_io_uring_local_%[1]d, 1, "+
-					"&csb_io_uring_remote_%[1]d, 1, 0) == sizeof(csb_io_uring_flags_%[1]d)) {\n"+
-					"\t\tcsb_io_uring_flags_%[1]d &= ~%[4]d;\n"+
-					"\t\tcsb_io_uring_flags_ok_%[1]d = syscall(SYS_process_vm_writev, getpid(), "+
+					"{(void*)(0x%[2]x%[3]s), sizeof(csb_io_uring_params_%[1]d)};\n"+
+					"\tint csb_io_uring_params_ok_%[1]d = syscall(SYS_process_vm_readv, getpid(), "+
 					"&csb_io_uring_local_%[1]d, 1, &csb_io_uring_remote_%[1]d, 1, 0) == "+
-					"sizeof(csb_io_uring_flags_%[1]d);\n\t}\n",
-					ci, params.Value+8, offset, ctx.target.ConstMap["IORING_SETUP_SQPOLL"])
-				guardCondition = fmt.Sprintf("csb_io_uring_flags_ok_%d", ci)
+					"sizeof(csb_io_uring_params_%[1]d);\n"+
+					"\tif (csb_io_uring_params_ok_%[1]d) *(uint32*)(csb_io_uring_params_%[1]d + 1) &= ~%[4]d;\n",
+					ci, params.Value, offset, ctx.target.ConstMap["IORING_SETUP_SQPOLL"])
+				guardCondition = fmt.Sprintf("csb_io_uring_params_ok_%d", ci)
 			}
 		}
 		if ctx.opts.CSB && isSeccompAddfd(call, ctx.target.ConstMap["SECCOMP_IOCTL_NOTIF_ADDFD"]) {
@@ -1303,6 +1300,12 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool, ci 
 	}
 
 	for i, arg := range call.Args {
+		if ctx.opts.CSB && (call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup") && i == 1 {
+			if _, ok := arg.(prog.ExecArgConst); ok {
+				argsStrs = append(argsStrs, fmt.Sprintf("(intptr_t)csb_io_uring_params_%d", ci))
+				continue
+			}
+		}
 		if ctx.opts.CSB && call.Meta.Name == "syz_io_uring_submit" && i == 2 {
 			if _, ok := arg.(prog.ExecArgConst); ok {
 				argsStrs = append(argsStrs, fmt.Sprintf("(intptr_t)csb_sqe_%d", ci))
@@ -1442,7 +1445,7 @@ func (ctx *context) protectCSBControlFD(callName string, arg int, val string, pr
 	}
 	// CSB uses stdin/stdout/stderr to control and report benchmark operations.
 	if callName == "close" && arg == 0 {
-		return fmt.Sprintf("((uint32)(%s) <= 2 ? -1 : (%s))", val, val)
+		return fmt.Sprintf("({ intptr_t csb_fd = (%s); (uint32)csb_fd <= 2 ? -1 : csb_fd; })", val)
 	}
 	if (callName == "dup2" || callName == "dup3") && arg == 1 {
 		return fmt.Sprintf("((uint32)(%[1]s) <= 2 && (uint32)(%[2]s) != (uint32)(%[1]s) ? -1 : (%[1]s))",
