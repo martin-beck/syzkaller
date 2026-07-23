@@ -101,6 +101,7 @@ static long UNIQUE_FUNC(syz_csb_exit_group)(void) { return UNIQUE_FUNC(csb_exit_
 #if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction || __NR_syz_csb_rt_sigreturn || __NR_syz_csb_rt_sigqueueinfo || __NR_syz_csb_rt_sigsuspend
 #include <errno.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <string.h>
 
@@ -129,6 +130,14 @@ static void UNIQUE_FUNC(csb_noop_signal_handler)(int sig)
 	(void)sig;
 }
 
+static volatile sig_atomic_t UNIQUE_VAR(csb_signal_seen);
+
+static void UNIQUE_FUNC(csb_seen_signal_handler)(int sig)
+{
+	(void)sig;
+	UNIQUE_VAR(csb_signal_seen) = 1;
+}
+
 // Use a generated handler because executable addresses in strace are not portable.
 #if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction
 static long UNIQUE_FUNC(syz_csb_rt_sigaction)(void)
@@ -138,7 +147,7 @@ static long UNIQUE_FUNC(syz_csb_rt_sigaction)(void)
 	if (UNIQUE_FUNC(csb_lock_signal)() < 0)
 		return -1;
 	memset(&action, 0, sizeof(action));
-	action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
+	action.sa_handler = UNIQUE_FUNC(csb_seen_signal_handler);
 	sigemptyset(&action.sa_mask);
 	long ret = sigaction(SIGUSR1, &action, &old);
 	if (ret == 0)
@@ -222,7 +231,10 @@ static long UNIQUE_FUNC(syz_csb_rt_sigqueueinfo)(void)
 		pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 		return -1;
 	}
+	UNIQUE_VAR(csb_signal_seen) = 0;
 	long ret = UNIQUE_FUNC(csb_queue_owned_signal)(0);
+	while (ret >= 0 && !UNIQUE_VAR(csb_signal_seen))
+		sched_yield();
 	if (sigprocmask(SIG_SETMASK, &old_mask, 0) < 0)
 		ret = -1;
 	if (sigaction(SIGUSR1, &old, 0) < 0)
