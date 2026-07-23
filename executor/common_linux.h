@@ -100,6 +100,7 @@ static long UNIQUE_FUNC(syz_csb_io_cancel)(void)
 
 #if SYZ_EXECUTOR || __NR_syz_csb_exit || __NR_syz_csb_exit_group
 #include <errno.h>
+#include <signal.h>
 #include <sys/wait.h>
 
 // Run termination in a child and reap it so a CSB operation can repeat safely.
@@ -162,23 +163,36 @@ static void UNIQUE_FUNC(csb_noop_signal_handler)(int sig)
 
 // Use a generated handler because executable addresses in strace are not portable.
 #if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction
-static long UNIQUE_FUNC(syz_csb_rt_sigaction)(void)
+static long UNIQUE_FUNC(csb_rt_sigaction_lifecycle)(void)
 {
 	struct sigaction action;
 	struct sigaction old;
-	int err = pthread_mutex_lock(&CSB_SIGNAL_LOCK);
-	if (err) {
-		errno = err;
-		return -1;
-	}
 	memset(&action, 0, sizeof(action));
 	action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
 	sigemptyset(&action.sa_mask);
 	long ret = sigaction(SIGUSR1, &action, &old);
 	if (ret == 0)
 		ret = sigaction(SIGUSR1, &old, 0);
-	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 	return ret;
+}
+
+static long UNIQUE_FUNC(syz_csb_rt_sigaction)(void)
+{
+#if defined(__NR_fork)
+	long pid = syscall(__NR_fork);
+#else
+	long pid = syscall(__NR_clone, SIGCHLD, 0, 0, 0, 0);
+#endif
+	if (pid < 0)
+		return -1;
+	if (pid == 0)
+		_exit(UNIQUE_FUNC(csb_rt_sigaction_lifecycle)() == 0 ? 0 : 1);
+	int status = 0;
+	long ret;
+	do {
+		ret = syscall(__NR_wait4, pid, &status, 0, 0);
+	} while (ret < 0 && errno == EINTR);
+	return ret == pid && status == 0 ? 0 : -1;
 }
 #endif
 

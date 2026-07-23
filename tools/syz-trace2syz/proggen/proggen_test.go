@@ -739,7 +739,7 @@ func TestRtSigactionUsesGeneratedHandler(t *testing.T) {
 	if want := "UNIQUE_FUNC(syz_csb_rt_sigaction)"; !strings.Contains(string(src), want) {
 		t.Fatalf("generated CSB header missing %q", want)
 	}
-	for _, want := range []string{"#ifndef CSB_SIGNAL_LOCK_DEFINED", "pthread_mutex_lock", "pthread_mutex_unlock"} {
+	for _, want := range []string{"csb_rt_sigaction_lifecycle", "_exit("} {
 		if !strings.Contains(string(src), want) {
 			t.Fatalf("generated helper missing %q", want)
 		}
@@ -917,6 +917,18 @@ func TestExitCallsUseBoundedLifecycles(t *testing.T) {
 		if !strings.Contains(string(src), want) {
 			t.Fatalf("generated CSB header missing %q", want)
 		}
+	}
+	arm64, err := prog.GetTarget(targets.Linux, targets.ARM64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arm64Src, _, err := csource.Write(genProg(trace, arm64, false, false, false, false),
+		csource.Options{Slowdown: 1, CSB: true, Trace: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(arm64Src), "#include <signal.h>") {
+		t.Fatal("clone-based exit helper is missing SIGCHLD definition")
 	}
 }
 
