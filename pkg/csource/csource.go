@@ -760,12 +760,19 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			}
 		}
 
-		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall, dataMmap)
-
+		forceDynamicNonblock := ctx.opts.CSB && fcntlCommand(call, ctx.target.ConstMap["F_SETFL"]) &&
+			localIOArg(call, localIO) && len(call.Args) > 2
+		if forceDynamicNonblock {
+			_, forceDynamicNonblock = call.Args[2].(prog.ExecArgResult)
+		}
+		if !forceDynamicNonblock {
+			forceDynamicNonblock = false
+		}
+		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall, forceDynamicNonblock, dataMmap)
 		if call.Props.Rerun > 0 {
 			fmt.Fprintf(w, "\tfor (int i = 0; i < %v; i++) {\n", call.Props.Rerun)
 			// Rerun invocations should not affect the result value.
-			ctx.emitCall(w, call, ci, false, false, initCall, dataMmap)
+			ctx.emitCall(w, call, ci, false, false, initCall, forceDynamicNonblock, dataMmap)
 			fmt.Fprintf(w, "\t}\n")
 		}
 		// Copyout.
@@ -946,8 +953,8 @@ func isNative(sysTarget *targets.Target, callName string) bool {
 	return sysTarget.HasCallNumber(callName) && !trampoline
 }
 
-func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCopyout, trace bool,
-	initCall, dataMmap bool) {
+func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCopyout, trace bool, initCall,
+	forceDynamicNonblock, dataMmap bool) {
 	native := isNative(ctx.sysTarget, call.Meta.CallName)
 	fmt.Fprintf(w, "\t")
 	if !native {
@@ -965,7 +972,7 @@ func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCo
 	if haveCopyout || trace {
 		fmt.Fprintf(w, "res = ")
 	}
-	w.WriteString(ctx.fmtCallBody(call, initCall, dataMmap))
+	w.WriteString(ctx.fmtCallBody(call, initCall, ci, forceDynamicNonblock, dataMmap))
 	if !native {
 		fmt.Fprintf(w, ")") // close NONFAILING macro
 	}
@@ -998,7 +1005,7 @@ func valInMMapRange(ctx *context, val uint64) bool {
 	return val >= min && val < max
 }
 
-func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) string {
+func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool, ci int, forceDynamicNonblock, dataMmap bool) string {
 	native := isNative(ctx.sysTarget, call.Meta.CallName)
 	callName, ok := ctx.sysTarget.SyscallTrampolines[call.Meta.CallName]
 	if !ok {
@@ -1130,8 +1137,7 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) str
 			}
 			com := ctx.argComment(call.Meta.Args[i], arg)
 			val := ctx.resultArgToStr(arg)
-			if ctx.opts.CSB && call.Meta.CallName == "fcntl" && i == 2 &&
-				fcntlCommand(call, ctx.target.ConstMap["F_SETFL"]) {
+			if forceDynamicNonblock && i == 2 {
 				val = fmt.Sprintf("(%s | O_NONBLOCK)", val)
 			}
 			if native && ctx.target.PtrSize == 4 {
