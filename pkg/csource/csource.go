@@ -731,10 +731,11 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		}
 		if ctx.opts.CSB && fcntlCommand(call, ctx.target.ConstMap["F_SETFL"]) && localIOArg(call, localIO) {
 			args := append([]prog.ExecArg(nil), call.Args...)
-			flags := args[2].(prog.ExecArgConst)
-			flags.Value |= ctx.target.ConstMap["O_NONBLOCK"]
-			args[2] = flags
-			call.Args = args
+			if flags, ok := args[2].(prog.ExecArgConst); ok {
+				flags.Value |= ctx.target.ConstMap["O_NONBLOCK"]
+				args[2] = flags
+				call.Args = args
+			}
 		}
 		if ctx.opts.CSB && call.Meta.CallName == "mq_getsetattr" && localIOArg(call, localIO) {
 			if attr, ok := call.Args[1].(prog.ExecArgConst); ok && valInMMapRange(ctx, attr.Value) {
@@ -1310,7 +1311,8 @@ func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, resCopyout bool
 	} else {
 		fmt.Fprintf(w, "\tif (res != -1)")
 	}
-	copyoutMultiple := len(call.Copyout) > 1 || resCopyout && len(call.Copyout) > 0
+	copyoutMultiple := len(call.Copyout) > 1 || resCopyout && len(call.Copyout) > 0 ||
+		resCopyout && ctx.opts.CSB && ctx.target.OS == targets.Linux && localIO[call.Index]
 	if copyoutMultiple {
 		fmt.Fprintf(w, " {")
 	}

@@ -274,6 +274,21 @@ func TestCSBFIONBIOInvalidPointer(t *testing.T) {
 	assert.NotContains(t, string(src), "uint32_t*)(0x0")
 }
 
+func TestCSBFSetFLResultArgument(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("pipe(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n"+
+		"r2 = getpid()\nfcntl$auto(r0, 0x4, r2)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Write(p, Options{CSB: true, Slowdown: 1}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCSBTwoArgumentIoctl(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {
