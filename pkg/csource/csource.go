@@ -1425,7 +1425,7 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool, ci 
 			}
 
 			val := com + handleBigEndian(arg, ctx.constArgToStr(arg, native)) + PTR_OFFSET_STR
-			argsStrs = append(argsStrs, ctx.protectCSBControlFD(callName, i, val, argsStrs))
+			argsStrs = append(argsStrs, ctx.protectCSBControlFD(callName, i, val))
 		case prog.ExecArgResult:
 			if initCall {
 				initFDs[arg.Index] = true
@@ -1440,7 +1440,7 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool, ci 
 				// and take 2 slots without the cast, which would be wrong.
 				val = "(intptr_t)" + val
 			}
-			argsStrs = append(argsStrs, ctx.protectCSBControlFD(callName, i, com+val, argsStrs))
+			argsStrs = append(argsStrs, ctx.protectCSBControlFD(callName, i, com+val))
 		default:
 			panic(fmt.Sprintf("unknown arg type: %+v", arg))
 		}
@@ -1448,20 +1448,27 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool, ci 
 	for i := 0; i < call.Meta.MissingArgs; i++ {
 		argsStrs = append(argsStrs, "0")
 	}
+	if ctx.opts.CSB && (callName == "dup2" || callName == "dup3") {
+		argOffset := 0
+		if native {
+			argOffset = 1
+		}
+		src, dst := argsStrs[argOffset], argsStrs[argOffset+1]
+		argsStrs[argOffset] = "csb_dup_src"
+		argsStrs[argOffset+1] = "((uint32)csb_dup_dst <= 2 && (uint32)csb_dup_src != (uint32)csb_dup_dst ? -1 : csb_dup_dst)"
+		return fmt.Sprintf("({ intptr_t csb_dup_src = (%s); intptr_t csb_dup_dst = (%s); %v(%v); })",
+			src, dst, funcName, strings.Join(argsStrs, ", "))
+	}
 	return fmt.Sprintf("%v(%v)", funcName, strings.Join(argsStrs, ", "))
 }
 
-func (ctx *context) protectCSBControlFD(callName string, arg int, val string, previous []string) string {
+func (ctx *context) protectCSBControlFD(callName string, arg int, val string) string {
 	if !ctx.opts.CSB {
 		return val
 	}
 	// CSB uses stdin/stdout/stderr to control and report benchmark operations.
 	if callName == "close" && arg == 0 {
 		return fmt.Sprintf("({ intptr_t csb_fd = (%s); (uint32)csb_fd <= 2 ? -1 : csb_fd; })", val)
-	}
-	if (callName == "dup2" || callName == "dup3") && arg == 1 {
-		return fmt.Sprintf("((uint32)(%[1]s) <= 2 && (uint32)(%[2]s) != (uint32)(%[1]s) ? -1 : (%[1]s))",
-			val, previous[len(previous)-1])
 	}
 	if callName == "close_range" && arg == 0 {
 		return fmt.Sprintf("((uint32)(%s) <= 2 ? 3 : (%s))", val, val)
