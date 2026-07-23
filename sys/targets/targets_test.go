@@ -25,7 +25,7 @@ func TestCSBExitHelperDependencies(t *testing.T) {
 
 func TestCSBQueuedSignalDependencies(t *testing.T) {
 	deps := Get(Linux, AMD64).PseudoSyscallDeps["syz_csb_rt_sigqueueinfo"]
-	if len(deps) != 2 || deps[1] != "rt_tgsigqueueinfo" {
+	if len(deps) != 2 || deps[1] != "rt_sigqueueinfo" {
 		t.Fatalf("dependencies = %v", deps)
 	}
 }
