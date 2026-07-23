@@ -1068,6 +1068,12 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			ctx.emitCall(w, call, ci, false, false, initCall, dataMmap)
 			fmt.Fprintf(w, "\t}\n")
 		}
+		if ctx.opts.CSB && (call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup") {
+			if _, ok := call.Args[1].(prog.ExecArgConst); ok {
+				fmt.Fprintf(w, "\tsyscall(SYS_process_vm_writev, getpid(), &csb_io_uring_local_%[1]d, 1, "+
+					"&csb_io_uring_remote_%[1]d, 1, 0);\n", ci)
+			}
+		}
 		// Copyout.
 		if resCopyout || argCopyout {
 			ctx.copyout(w, call, resCopyout)
