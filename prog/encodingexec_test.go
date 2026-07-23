@@ -289,8 +289,9 @@ func TestSerializeForExec(t *testing.T) {
 						Index: ExecNoCopyout,
 						Args: []ExecArg{
 							ExecArgConst{
-								Size:  ptrSize,
-								Value: dataOffset,
+								IsPointer: true,
+								Size:      ptrSize,
+								Value:     dataOffset,
 							},
 						},
 						Copyin: []ExecCopyin{
@@ -479,8 +480,9 @@ func TestSerializeForExec(t *testing.T) {
 						Index: ExecNoCopyout,
 						Args: []ExecArg{
 							ExecArgConst{
-								Value: dataOffset,
-								Size:  8,
+								IsPointer: true,
+								Value:     dataOffset,
+								Size:      8,
 							},
 						},
 						Copyin: []ExecCopyin{
@@ -624,8 +626,9 @@ test$res1(r0)
 						Index: ExecNoCopyout,
 						Args: []ExecArg{
 							ExecArgConst{
-								Value: dataOffset + 0x10,
-								Size:  8,
+								IsPointer: true,
+								Value:     dataOffset + 0x10,
+								Size:      8,
 							},
 						},
 						Copyout: []ExecCopyout{
