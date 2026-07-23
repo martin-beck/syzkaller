@@ -126,7 +126,7 @@ func TestCSBProtectControlFDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"(uint32_t)(", "<= 2 ? -1", "<= 2 ? 3"} {
+	for _, want := range []string{"(uint32_t)csb_", "<= 2 ? -1", "<= 2 ? 3"} {
 		assert.Contains(t, string(csb), want)
 		assert.NotContains(t, string(normal), want)
 	}
@@ -158,6 +158,20 @@ func TestCSBProtectControlFDs(t *testing.T) {
 		"syscall(__NR_dup2, csb_dup_src, ((uint32_t)csb_dup_dst <= 2 && "+
 			"(uint32_t)csb_dup_src != (uint32_t)csb_dup_dst ? -1 : csb_dup_dst))")
 	assert.Equal(t, 1, strings.Count(string(src), "/*oldfd=*/UNIQUE_VAR(ctx->r)[0]+1"))
+
+	closeRange, err := target.Deserialize([]byte(
+		"r0 = openat(0xffffffffffffff9c, 0x0, 0x0, 0x0)\nclose_range(r0+1, 0xffffffff, 0x0)\n"),
+		prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err = Write(closeRange, Options{CSB: true, Threaded: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src),
+		"intptr_t csb_fd = (/*fd=*/UNIQUE_VAR(ctx->r)[0]+1); (uint32_t)csb_fd <= 2 ? 3 : csb_fd;")
+	assert.Equal(t, 1, strings.Count(string(src), "/*fd=*/UNIQUE_VAR(ctx->r)[0]+1"))
 }
 
 func TestCSBProtectControlFDsIoUring(t *testing.T) {

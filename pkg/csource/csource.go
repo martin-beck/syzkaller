@@ -1471,7 +1471,7 @@ func (ctx *context) protectCSBControlFD(callName string, arg int, val string) st
 		return fmt.Sprintf("({ intptr_t csb_fd = (%s); (uint32)csb_fd <= 2 ? -1 : csb_fd; })", val)
 	}
 	if callName == "close_range" && arg == 0 {
-		return fmt.Sprintf("((uint32)(%s) <= 2 ? 3 : (%s))", val, val)
+		return fmt.Sprintf("({ intptr_t csb_fd = (%s); (uint32)csb_fd <= 2 ? 3 : csb_fd; })", val)
 	}
 	return val
 }
