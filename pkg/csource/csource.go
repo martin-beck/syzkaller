@@ -791,7 +791,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		}
 		// Copyout.
 		if resCopyout || argCopyout {
-			ctx.copyout(w, call, resCopyout, localIO)
+			ctx.copyout(w, call, ci, resCopyout, localIO, dynamicFcntlCommand)
 		}
 		calls = append(calls, w.String())
 
@@ -1326,7 +1326,8 @@ func (ctx *context) copyinVal(w *bytes.Buffer, addr, size uint64, val string, bf
 	}
 }
 
-func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, resCopyout bool, localIO map[uint64]bool) {
+func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, ci int, resCopyout bool,
+	localIO map[uint64]bool, dynamicFcntlCommand bool) {
 	if ctx.sysTarget.OS == targets.Fuchsia {
 		// On fuchsia we have real system calls that return ZX_OK on success,
 		// and libc calls that are casted to function returning intptr_t,
@@ -1349,7 +1350,15 @@ func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, resCopyout bool
 		initFDs[call.Index] = true
 		if ctx.opts.CSB && ctx.target.OS == targets.Linux && localIO[call.Index] {
 			// Set nonblocking mode before publishing the descriptor to concurrent calls.
-			fmt.Fprintf(w, "\t\t{ int flags = fcntl(res, F_GETFL); if (flags != -1) fcntl(res, F_SETFL, flags | O_NONBLOCK); }\n")
+			if dynamicFcntlCommand {
+				fmt.Fprintf(w, "\t\tif (csb_fcntl_cmd_%[1]d == F_DUPFD || "+
+					"csb_fcntl_cmd_%[1]d == F_DUPFD_CLOEXEC) "+
+					"{ int flags = fcntl(res, F_GETFL); if (flags != -1) "+
+					"fcntl(res, F_SETFL, flags | O_NONBLOCK); }\n", ci)
+			} else {
+				fmt.Fprintf(w, "\t\t{ int flags = fcntl(res, F_GETFL); "+
+					"if (flags != -1) fcntl(res, F_SETFL, flags | O_NONBLOCK); }\n")
+			}
 		}
 		fmt.Fprintf(w, "\t\t%v[%v] = res;\n", ctx.resultArrayName(), call.Index)
 	}
