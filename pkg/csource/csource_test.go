@@ -365,7 +365,7 @@ func TestCSBSetsNonblockingBeforePublishingDescriptor(t *testing.T) {
 		t.Fatal(err)
 	}
 	setNonblock := strings.Index(string(src), "int fd = *(uint32_t*)(0x200000000000ul+PTR_OFFSET)")
-	publish := strings.Index(string(src), "UNIQUE_VAR(ctx->r)[0] = *(uint32_t*)(0x200000000000ul+PTR_OFFSET)")
+	publish := strings.Index(string(src), "UNIQUE_VAR(ctx->r)[0] = fd")
 	if setNonblock == -1 || publish == -1 || setNonblock > publish {
 		t.Fatalf("descriptor publication precedes nonblocking setup:\n%s", src)
 	}

@@ -1334,7 +1334,9 @@ func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, resCopyout bool
 		value := fmt.Sprintf("*(uint%v*)(0x%xul%v)", copyout.Size*8, copyout.Addr, PTR_OFFSET_STR_ADDR)
 		if ctx.opts.CSB && ctx.target.OS == targets.Linux && localIO[copyout.Index] {
 			fmt.Fprintf(w, "\t\tNONFAILING({ int fd = %[1]s; int flags = fcntl(fd, F_GETFL); "+
-				"if (flags != -1) fcntl(fd, F_SETFL, flags | O_NONBLOCK); });\n", value)
+				"if (flags != -1) fcntl(fd, F_SETFL, flags | O_NONBLOCK); %[2]v[%[3]v] = fd; });\n",
+				value, ctx.resultArrayName(), copyout.Index)
+			continue
 		}
 		fmt.Fprintf(w, "\t\tNONFAILING(%v[%v] = %v);\n", ctx.resultArrayName(), copyout.Index, value)
 	}
