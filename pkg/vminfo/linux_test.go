@@ -96,6 +96,10 @@ func TestCSBAIOAlwaysSupported(t *testing.T) {
 			t.Errorf("syz_csb_io_%s is not always supported", name)
 		}
 	}
+	check := linuxSyscallChecks["syz_reapply_affinity"]
+	if check == nil || check(nil, nil) != "" {
+		t.Error("syz_reapply_affinity is not always supported")
+	}
 }
 
 func TestReadKVMInfo(t *testing.T) {

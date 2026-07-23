@@ -100,6 +100,7 @@ var linuxSyscallChecks = map[string]func(*checkContext, *prog.Syscall) string{
 	"syz_csb_io_destroy":            alwaysSupported,
 	"syz_csb_io_submit":             alwaysSupported,
 	"syz_csb_io_cancel":             alwaysSupported,
+	"syz_reapply_affinity":          alwaysSupported,
 	"syz_memcpy_off":                alwaysSupported,
 	"syz_btf_id_by_name":            linuxBtfVmlinuxSupported,
 	"syz_fuse_handle_req":           alwaysSupported,
