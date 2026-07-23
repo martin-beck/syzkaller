@@ -1077,8 +1077,8 @@ func (ctx *context) generateCsumInet(w *bytes.Buffer, addr uint64, arg prog.Exec
 	for i, chunk := range arg.Chunks {
 		switch chunk.Kind {
 		case prog.ExecArgCsumChunkData:
-			fmt.Fprintf(w, "\tNONFAILING(csum_inet_update(&csum_%d, (const uint8*)0x%x, %d));\n",
-				csumSeq, chunk.Value, chunk.Size)
+			fmt.Fprintf(w, "\tNONFAILING(csum_inet_update(&csum_%d, (const uint8*)(0x%xul%v), %d));\n",
+				csumSeq, chunk.Value, ctx.ptrOffset(chunk.Value), chunk.Size)
 		case prog.ExecArgCsumChunkConst:
 			fmt.Fprintf(w, "\tuint%d csum_%d_chunk_%d = 0x%x;\n",
 				chunk.Size*8, csumSeq, i, chunk.Value)
@@ -1088,8 +1088,15 @@ func (ctx *context) generateCsumInet(w *bytes.Buffer, addr uint64, arg prog.Exec
 			panic(fmt.Sprintf("unknown checksum chunk kind %v", chunk.Kind))
 		}
 	}
-	fmt.Fprintf(w, "\tNONFAILING(*(uint16*)0x%x = csum_inet_digest(&csum_%d));\n",
-		addr, csumSeq)
+	fmt.Fprintf(w, "\tNONFAILING(*(uint16*)(0x%xul%v) = csum_inet_digest(&csum_%d));\n",
+		addr, ctx.ptrOffset(addr), csumSeq)
+}
+
+func (ctx *context) ptrOffset(addr uint64) string {
+	if ctx.opts.CSB && valInMMapRange(ctx, addr) {
+		return "+PTR_OFFSET"
+	}
+	return ""
 }
 
 func (ctx *context) copyin(w *bytes.Buffer, csumSeq *int, copyin prog.ExecCopyin) {
