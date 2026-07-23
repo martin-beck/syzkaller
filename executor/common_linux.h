@@ -149,7 +149,7 @@ static long UNIQUE_FUNC(syz_csb_rt_sigaction)(void)
 	if (UNIQUE_FUNC(csb_lock_signal)() < 0)
 		return -1;
 	memset(&action, 0, sizeof(action));
-	action.sa_handler = UNIQUE_FUNC(csb_seen_signal_handler);
+	action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
 	sigemptyset(&action.sa_mask);
 	long ret = sigaction(SIGUSR1, &action, &old);
 	if (ret == 0)
@@ -220,7 +220,7 @@ static long UNIQUE_FUNC(syz_csb_rt_sigqueueinfo)(void)
 	if (UNIQUE_FUNC(csb_lock_signal)() < 0)
 		return -1;
 	memset(&action, 0, sizeof(action));
-	action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
+	action.sa_handler = UNIQUE_FUNC(csb_seen_signal_handler);
 	sigemptyset(&action.sa_mask);
 	if (sigaction(SIGUSR1, &action, &old) < 0) {
 		pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
