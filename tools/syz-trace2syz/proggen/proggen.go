@@ -275,6 +275,9 @@ func (ctx *context) genRtSigactionCall() *prog.Call {
 	if len(traceCall.Args) < 2 {
 		return nil
 	}
+	if traceCall.Ret < 0 {
+		return nil
+	}
 	// A NULL action is a read-only query and is safe to replay directly.
 	if action, ok := traceCall.Args[1].(parser.Constant); ok && action.Val() == 0 {
 		return ctx.genCall()
@@ -347,7 +350,7 @@ func (ctx *context) signalNumber(arg parser.IrType) uint64 {
 		offset, err := strconv.ParseUint(suffix, 10, 8)
 		maxOffset := uint64(32)
 		if ctx.target.Arch == "mips64le" {
-			maxOffset = 96
+			maxOffset = 95
 		}
 		if err == nil && offset <= maxOffset {
 			return 32 + offset
@@ -358,7 +361,7 @@ func (ctx *context) signalNumber(arg parser.IrType) uint64 {
 	}
 	if name == "RTMAX" {
 		if ctx.target.Arch == "mips64le" {
-			return 128
+			return 127
 		}
 		return 64
 	}

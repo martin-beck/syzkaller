@@ -754,6 +754,13 @@ func TestReservedRtSigactionIsDropped(t *testing.T) {
 	}
 }
 
+func TestFailedRtSigactionIsDropped(t *testing.T) {
+	p := parseSingleProg(t, `rt_sigaction(SIGUSR1, 0x1234, NULL, 8) = -1 EFAULT (Bad address)`)
+	if len(p.Calls) != 0 {
+		t.Fatalf("failed rt_sigaction must be dropped:\n%s", p.Serialize())
+	}
+}
+
 func TestRtSigactionQueryIsReplayedDirectly(t *testing.T) {
 	p := parseSingleProg(t, `rt_sigaction(10, NULL, {sa_handler=SIG_DFL}, 8) = 0`)
 	if got := strings.TrimSpace(string(p.Serialize())); !strings.HasPrefix(got, "rt_sigaction(") {
@@ -769,8 +776,14 @@ func TestSignalNumberUsesTargetABI(t *testing.T) {
 	if got := ctx.signalNumber(&parser.BufferType{Val: "SIGRT_1"}); got != 33 {
 		t.Fatalf("SIGRT_1 = %d, want 33", got)
 	}
-	if got := ctx.signalNumber(&parser.BufferType{Val: "SIGRTMAX"}); got != 128 {
-		t.Fatalf("MIPS SIGRTMAX = %d, want 128", got)
+	if got := ctx.signalNumber(&parser.BufferType{Val: "SIGRTMAX"}); got != 127 {
+		t.Fatalf("MIPS SIGRTMAX = %d, want 127", got)
+	}
+	if got := ctx.signalNumber(&parser.BufferType{Val: "SIGRT_95"}); got != 127 {
+		t.Fatalf("MIPS SIGRT_95 = %d, want 127", got)
+	}
+	if got := ctx.signalNumber(&parser.BufferType{Val: "SIGRT_96"}); got != 0 {
+		t.Fatalf("MIPS SIGRT_96 = %d, want 0", got)
 	}
 	mask := ctx.sigsetMask(&parser.GroupType{Elems: []parser.IrType{parser.Constant(65), parser.Constant(127)}})
 	if mask != [4]uint64{0, 0, 1, 1 << 30} {
