@@ -263,6 +263,16 @@ func TestCSBClearsSQPOLLAtAbsoluteParams(t *testing.T) {
 	}
 	assert.Contains(t, string(src), "*(uint32_t*)(0x8) &= ~2")
 	assert.NotContains(t, string(src), "0x8+PTR_OFFSET")
+	p, err = target.Deserialize([]byte("syz_io_uring_setup(0x1, &(0x7f0000000000)={0x0, 0x0, 0x2}, "+
+		"&(0x7f0000001000/0x1000)=nil, &(0x7f0000002000/0x1000)=nil)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err = Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "0x200000000008+PTR_OFFSET) &= ~2")
 }
 
 func TestCSBProtectRawIoUringInProgramOrder(t *testing.T) {

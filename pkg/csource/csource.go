@@ -946,7 +946,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		for _, copyin := range call.Copyin {
 			ctx.copyin(w, &csumSeq, copyin)
 		}
-		if ctx.opts.CSB && call.Meta.CallName == "io_uring_setup" {
+		if ctx.opts.CSB && (call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup") {
 			if params, ok := call.Args[1].(prog.ExecArgConst); ok {
 				offset := ""
 				if valInMMapRange(ctx, params.Value) {
