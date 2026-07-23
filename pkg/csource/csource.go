@@ -970,9 +970,9 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 					"\tint csb_seccomp_addfd_ok_%[1]d = syscall(SYS_process_vm_readv, getpid(), "+
 					"&csb_seccomp_local_%[1]d, 1, &csb_seccomp_remote_%[1]d, 1, 0) == 24;\n",
 					ci, arg.Value, offset)
-				fmt.Fprintf(w, "\tif ((*(uint32*)(csb_seccomp_addfd_%d + 8) & %d) && "+
+				fmt.Fprintf(w, "\tif (csb_seccomp_addfd_ok_%d && (*(uint32*)(csb_seccomp_addfd_%d + 8) & %d) && "+
 					"*(uint32*)(csb_seccomp_addfd_%d + 16) <= 2) "+
-					"*(uint32*)(csb_seccomp_addfd_%d + 8) &= ~%d;\n", ci,
+					"*(uint32*)(csb_seccomp_addfd_%d + 8) &= ~%d;\n", ci, ci,
 					ctx.target.ConstMap["SECCOMP_ADDFD_FLAG_SETFD"], ci, ci,
 					ctx.target.ConstMap["SECCOMP_ADDFD_FLAG_SETFD"])
 				guardCondition = fmt.Sprintf("csb_seccomp_addfd_ok_%d", ci)
