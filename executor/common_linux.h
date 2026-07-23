@@ -130,6 +130,7 @@ static void UNIQUE_FUNC(csb_noop_signal_handler)(int sig)
 	(void)sig;
 }
 
+#if SYZ_EXECUTOR || __NR_syz_csb_rt_sigqueueinfo
 static volatile sig_atomic_t UNIQUE_VAR(csb_signal_seen);
 
 static void UNIQUE_FUNC(csb_seen_signal_handler)(int sig)
@@ -137,6 +138,7 @@ static void UNIQUE_FUNC(csb_seen_signal_handler)(int sig)
 	(void)sig;
 	UNIQUE_VAR(csb_signal_seen) = 1;
 }
+#endif
 
 // Use a generated handler because executable addresses in strace are not portable.
 #if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction
