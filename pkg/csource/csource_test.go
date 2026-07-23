@@ -195,6 +195,7 @@ func TestCSBProtectControlFDsSeccompAddfd(t *testing.T) {
 	assert.Contains(t, string(src), "csb_seccomp_addfd_0 + 16) <= 2")
 	assert.Contains(t, string(src), "&= ~1")
 	assert.Contains(t, string(src), "(intptr_t)csb_seccomp_addfd_0")
+	assert.Contains(t, string(src), "SYS_process_vm_readv")
 	p, err = target.Deserialize([]byte("ioctl$SECCOMP_IOCTL_NOTIF_ADDFD(0x0, 0x40182103, 0x0)\n"), prog.NonStrict)
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +204,7 @@ func TestCSBProtectControlFDsSeccompAddfd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Contains(t, string(src), "memcpy(csb_seccomp_addfd_0, (void*)(0x0), 24)")
+	assert.Contains(t, string(src), "{(void*)(0x0), 24}")
 	assert.NotContains(t, string(src), "0x0+PTR_OFFSET")
 	p, err = target.Deserialize([]byte("ioctl$auto(0x0, 0x40182103, 0x0)\n"), prog.NonStrict)
 	if err != nil {

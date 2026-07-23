@@ -963,13 +963,13 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 					offset = "+PTR_OFFSET"
 				}
 				fmt.Fprintf(w, "\tuint8 csb_seccomp_addfd_%d[24];\n", ci)
-				if ctx.opts.HandleSegv {
-					fmt.Fprintf(w, "\tint csb_seccomp_addfd_ok_%d = NONFAILING(memcpy(csb_seccomp_addfd_%d, "+
-						"(void*)(0x%x%s), 24));\n", ci, ci, arg.Value, offset)
-				} else {
-					fmt.Fprintf(w, "\tmemcpy(csb_seccomp_addfd_%d, (void*)(0x%x%s), 24);\n"+
-						"\tint csb_seccomp_addfd_ok_%d = 1;\n", ci, arg.Value, offset, ci)
-				}
+				fmt.Fprintf(w, "\tstruct { void* base; size_t len; } csb_seccomp_local_%[1]d = "+
+					"{csb_seccomp_addfd_%[1]d, 24};\n"+
+					"\tstruct { void* base; size_t len; } csb_seccomp_remote_%[1]d = "+
+					"{(void*)(0x%[2]x%[3]s), 24};\n"+
+					"\tint csb_seccomp_addfd_ok_%[1]d = syscall(SYS_process_vm_readv, getpid(), "+
+					"&csb_seccomp_local_%[1]d, 1, &csb_seccomp_remote_%[1]d, 1, 0) == 24;\n",
+					ci, arg.Value, offset)
 				fmt.Fprintf(w, "\tif ((*(uint32*)(csb_seccomp_addfd_%d + 8) & %d) && "+
 					"*(uint32*)(csb_seccomp_addfd_%d + 16) <= 2) "+
 					"*(uint32*)(csb_seccomp_addfd_%d + 8) &= ~%d;\n", ci,
