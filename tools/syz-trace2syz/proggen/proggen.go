@@ -282,7 +282,7 @@ func (ctx *context) genRtSigactionCall() *prog.Call {
 	sig := ctx.signalNumber(traceCall.Args[0])
 	// libc reserves signals 32 and 33, while its sigaction layout is not the
 	// kernel ABI required for safely bypassing the wrapper.
-	if sig == 32 || sig == 33 {
+	if sig == 0 || sig == 32 || sig == 33 {
 		return nil
 	}
 	call := ctx.makeDefaultCall("syz_csb_rt_sigaction")
@@ -355,6 +355,12 @@ func (ctx *context) signalNumber(arg parser.IrType) uint64 {
 	}
 	if name == "RTMIN" {
 		return 32
+	}
+	if name == "RTMAX" {
+		if ctx.target.Arch == "mips64le" {
+			return 128
+		}
+		return 64
 	}
 	generic := map[string]uint64{
 		"HUP": 1, "INT": 2, "QUIT": 3, "ILL": 4, "TRAP": 5, "ABRT": 6,

@@ -769,6 +769,9 @@ func TestSignalNumberUsesTargetABI(t *testing.T) {
 	if got := ctx.signalNumber(&parser.BufferType{Val: "SIGRT_1"}); got != 33 {
 		t.Fatalf("SIGRT_1 = %d, want 33", got)
 	}
+	if got := ctx.signalNumber(&parser.BufferType{Val: "SIGRTMAX"}); got != 128 {
+		t.Fatalf("MIPS SIGRTMAX = %d, want 128", got)
+	}
 	mask := ctx.sigsetMask(&parser.GroupType{Elems: []parser.IrType{parser.Constant(65), parser.Constant(127)}})
 	if mask != [4]uint64{0, 0, 1, 1 << 30} {
 		t.Fatalf("MIPS high signal mask = %#v", mask)
