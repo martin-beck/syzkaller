@@ -1037,9 +1037,8 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			}
 			if fd, ok := call.Args[0].(prog.ExecArgResult); ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
 				rawRing = fds[fd.Index]
-				if !call.Props.Async && futureRawIOUringFDs[fd.Index] {
-					rawRing = rawRing || len(rawIOUringFDs) != 0 || len(rawIOUringConstants) != 0 || rawUnknownIOUring
-				}
+				// A stale result can hold the descriptor number of a ring created later.
+				rawRing = rawRing || len(fds) != 0 || len(constants) != 0 || unknown
 			} else if fd, ok := call.Args[0].(prog.ExecArgConst); ok {
 				rawRing = constants[int32(fd.Value)] || unknown
 			}
