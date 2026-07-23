@@ -118,7 +118,9 @@ func shouldSkip(line string) bool {
 			}
 		}
 	}
-	restart := strings.HasPrefix(result, "=") && strings.Contains(result, "ERESTART")
+	resultFields := strings.Fields(result)
+	restart := len(resultFields) >= 3 && resultFields[0] == "=" &&
+		strings.HasPrefix(resultFields[2], "ERESTART")
 	return restart ||
 		(unfinished > strings.LastIndex(record, "\"") && strings.HasSuffix(record, " = ?")) ||
 		strings.HasPrefix(record, "????(") ||
