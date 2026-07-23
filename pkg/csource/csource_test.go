@@ -274,6 +274,38 @@ func TestCSBFIONBIOInvalidPointer(t *testing.T) {
 	assert.NotContains(t, string(src), "uint32_t*)(0x0")
 }
 
+func TestCSBTwoArgumentIoctl(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("r0 = eventfd(0x0)\nioctl$FIOCLEX(r0, 0x5451)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Write(p, Options{CSB: true, Slowdown: 1}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCSBMQFlagsUsesTargetPointerWidth(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.I386)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("r0 = mq_open(&(0x7f0000000000)='/queue\\x00', 0x42, 0x180, 0x0)\n"+
+		"mq_getsetattr(r0, &(0x7f0000000040)={0x0, 0x0, 0x0, 0x0}, 0x0)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "*(uint32_t*)(0x80000040+PTR_OFFSET) |= 2048")
+	assert.NotContains(t, string(src), "*(uint64_t*)(0x80000040+PTR_OFFSET)")
+}
+
 func TestLocalIONonblockingLifetime(t *testing.T) {
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err != nil {

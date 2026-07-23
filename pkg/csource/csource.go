@@ -701,7 +701,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		for _, copyin := range call.Copyin {
 			ctx.copyin(w, &csumSeq, copyin)
 		}
-		if ctx.opts.CSB && call.Meta.CallName == "ioctl" &&
+		if ctx.opts.CSB && call.Meta.CallName == "ioctl" && len(call.Args) > 2 &&
 			localIOArg(call, localIO) {
 			cmd, cmdOK := call.Args[1].(prog.ExecArgConst)
 			value, valueOK := call.Args[2].(prog.ExecArgConst)
@@ -738,8 +738,8 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		}
 		if ctx.opts.CSB && call.Meta.CallName == "mq_getsetattr" && localIOArg(call, localIO) {
 			if attr, ok := call.Args[1].(prog.ExecArgConst); ok && valInMMapRange(ctx, attr.Value) {
-				fmt.Fprintf(w, "\tNONFAILING(*(uint64*)(0x%x+PTR_OFFSET) |= %d);\n",
-					attr.Value, ctx.target.ConstMap["O_NONBLOCK"])
+				fmt.Fprintf(w, "\tNONFAILING(*(uint%d*)(0x%x+PTR_OFFSET) |= %d);\n",
+					ctx.target.PtrSize*8, attr.Value, ctx.target.ConstMap["O_NONBLOCK"])
 			}
 		}
 		if ctx.opts.CSB && ctx.target.OS == targets.Linux {
