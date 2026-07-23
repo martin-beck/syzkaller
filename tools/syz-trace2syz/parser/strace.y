@@ -176,7 +176,14 @@ bpf_type:
     | IDENTIFIER EQUALS bpf_type {$$ = $3}
 
 bpf_constant:
-    FLAG {$$ = bpfFlagConstant($1)}
+    FLAG {
+        var ok bool
+        $$, ok = bpfFlagConstant($1)
+        if !ok {
+            Stracelex.Error("unknown symbolic BPF operand: " + $1)
+            return 1
+        }
+    }
     | bpf_constant OR bpf_constant {$$ = $1 | $3}
 
 field_type:

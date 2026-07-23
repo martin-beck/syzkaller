@@ -266,12 +266,14 @@ func TestParseGroupType(t *testing.T) {
 
 func TestParseBPFFilterMacros(t *testing.T) {
 	tree := parseTestData(t, []byte(
-		`1 seccomp(1, 0, [BPF_STMT(code=BPF_LD|BPF_W|BPF_ABS, k=4), BPF_JUMP(0x15, 1, 0, 1)]) = 0`))
+		`1 seccomp(1, 0, [BPF_STMT(code=BPF_LD|BPF_W|BPF_ABS, k=4), `+
+			`BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW), BPF_JUMP(0x15, 1, 0, 1)]) = 0`))
 	filter, ok := tree.TraceMap[1].Calls[0].Args[2].(*GroupType)
-	if !ok || len(filter.Elems) != 2 {
-		t.Fatalf("filter parsed as %#v, want two instructions", filter)
+	if !ok || len(filter.Elems) != 3 {
+		t.Fatalf("filter parsed as %#v, want three instructions", filter)
 	}
-	if got, want := filter.String(), "[[0x20,0x0,0x0,0x4,],[0x15,0x0,0x1,0x1,],]"; got != want {
+	if got, want := filter.String(),
+		"[[0x20,0x0,0x0,0x4,],[0x6,0x0,0x0,0x7fff0000,],[0x15,0x0,0x1,0x1,],]"; got != want {
 		t.Fatalf("filter = %q, want %q", got, want)
 	}
 }

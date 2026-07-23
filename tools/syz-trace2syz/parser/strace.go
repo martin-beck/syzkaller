@@ -1036,71 +1036,76 @@ Stracedefault:
 		StraceDollar = StraceS[Stracept-1 : Stracept+1]
 //line tools/syz-trace2syz/parser/strace.y:179
 		{
-			StraceVAL.val_constant = bpfFlagConstant(StraceDollar[1].data)
+			var ok bool
+			StraceVAL.val_constant, ok = bpfFlagConstant(StraceDollar[1].data)
+			if !ok {
+				Stracelex.Error("unknown symbolic BPF operand: " + StraceDollar[1].data)
+				return 1
+			}
 		}
 	case 65:
 		StraceDollar = StraceS[Stracept-3 : Stracept+1]
-//line tools/syz-trace2syz/parser/strace.y:180
+//line tools/syz-trace2syz/parser/strace.y:187
 		{
 			StraceVAL.val_constant = StraceDollar[1].val_constant | StraceDollar[3].val_constant
 		}
 	case 66:
 		StraceDollar = StraceS[Stracept-3 : Stracept+1]
-//line tools/syz-trace2syz/parser/strace.y:183
+//line tools/syz-trace2syz/parser/strace.y:190
 		{
 			StraceVAL.val_type = StraceDollar[3].val_type
 		}
 	case 67:
 		StraceDollar = StraceS[Stracept-3 : Stracept+1]
-//line tools/syz-trace2syz/parser/strace.y:184
+//line tools/syz-trace2syz/parser/strace.y:191
 		{
 			StraceVAL.val_type = StraceDollar[3].val_type
 		}
 	case 68:
 		StraceDollar = StraceS[Stracept-3 : Stracept+1]
-//line tools/syz-trace2syz/parser/strace.y:185
+//line tools/syz-trace2syz/parser/strace.y:192
 		{
 			StraceVAL.val_type = StraceDollar[3].val_type
 		}
 	case 69:
 		StraceDollar = StraceS[Stracept-3 : Stracept+1]
-//line tools/syz-trace2syz/parser/strace.y:186
+//line tools/syz-trace2syz/parser/strace.y:193
 		{
 			StraceVAL.val_type = StraceDollar[1].val_type
 		}
 	case 70:
 		StraceDollar = StraceS[Stracept-6 : Stracept+1]
-//line tools/syz-trace2syz/parser/strace.y:187
+//line tools/syz-trace2syz/parser/strace.y:194
 		{
 			StraceVAL.val_type = StraceDollar[6].val_type
 		}
 	case 71:
 		StraceDollar = StraceS[Stracept-1 : Stracept+1]
-//line tools/syz-trace2syz/parser/strace.y:190
+//line tools/syz-trace2syz/parser/strace.y:197
 		{
 			StraceVAL.val_buf_type = newBufferType(StraceDollar[1].data)
 		}
 	case 72:
 		StraceDollar = StraceS[Stracept-1 : Stracept+1]
-//line tools/syz-trace2syz/parser/strace.y:191
+//line tools/syz-trace2syz/parser/strace.y:198
 		{
 			StraceVAL.val_buf_type = newBufferType(StraceDollar[1].data)
 		}
 	case 73:
 		StraceDollar = StraceS[Stracept-1 : Stracept+1]
-//line tools/syz-trace2syz/parser/strace.y:192
+//line tools/syz-trace2syz/parser/strace.y:199
 		{
 			StraceVAL.val_buf_type = newBufferType(StraceDollar[1].data)
 		}
 	case 74:
 		StraceDollar = StraceS[Stracept-1 : Stracept+1]
-//line tools/syz-trace2syz/parser/strace.y:193
+//line tools/syz-trace2syz/parser/strace.y:200
 		{
 			StraceVAL.val_buf_type = newBufferType(StraceDollar[1].data)
 		}
 	case 75:
 		StraceDollar = StraceS[Stracept-1 : Stracept+1]
-//line tools/syz-trace2syz/parser/strace.y:194
+//line tools/syz-trace2syz/parser/strace.y:201
 		{
 			StraceVAL.val_buf_type = newBufferType(StraceDollar[1].data)
 		}

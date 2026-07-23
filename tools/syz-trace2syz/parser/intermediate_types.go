@@ -113,8 +113,8 @@ func newBPFGroupType(macro string, elems []IrType) *GroupType {
 	return newGroupType(elems)
 }
 
-func bpfFlagConstant(flag string) Constant {
-	return Constant(map[string]uint64{
+func bpfFlagConstant(flag string) (Constant, bool) {
+	value, ok := map[string]uint64{
 		"BPF_LD": 0x00, "BPF_LDX": 0x01, "BPF_ST": 0x02, "BPF_STX": 0x03,
 		"BPF_ALU": 0x04, "BPF_JMP": 0x05, "BPF_RET": 0x06, "BPF_MISC": 0x07,
 		"BPF_W": 0x00, "BPF_H": 0x08, "BPF_B": 0x10, "BPF_DW": 0x18,
@@ -127,7 +127,14 @@ func bpfFlagConstant(flag string) Constant {
 		"BPF_JA": 0x00, "BPF_JEQ": 0x10, "BPF_JGT": 0x20, "BPF_JGE": 0x30,
 		"BPF_JSET": 0x40, "BPF_K": 0x00, "BPF_X": 0x08, "BPF_A": 0x10,
 		"BPF_TAX": 0x00, "BPF_TXA": 0x80,
-	}[flag])
+		"SECCOMP_RET_KILL_THREAD": 0x00000000, "SECCOMP_RET_KILL": 0x00000000,
+		"SECCOMP_RET_TRAP": 0x00030000, "SECCOMP_RET_ERRNO": 0x00050000,
+		"SECCOMP_RET_USER_NOTIF": 0x7fc00000, "SECCOMP_RET_TRACE": 0x7ff00000,
+		"SECCOMP_RET_LOG": 0x7ffc0000, "SECCOMP_RET_ALLOW": 0x7fff0000,
+		"SECCOMP_RET_KILL_PROCESS": 0x80000000,
+		"SECCOMP_RET_ACTION_FULL":  0xffff0000, "SECCOMP_RET_DATA": 0x0000ffff,
+	}[flag]
+	return Constant(value), ok
 }
 
 // String implements IrType String()
