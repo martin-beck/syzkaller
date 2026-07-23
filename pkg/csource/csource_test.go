@@ -99,7 +99,7 @@ func TestCSBReappliesCurrentAffinity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src, _, err := Write(p, Options{Slowdown: 1, Repeat: true, Sandbox: "csb"})
+	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
