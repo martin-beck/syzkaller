@@ -34,7 +34,7 @@ static long UNIQUE_FUNC(csb_aio_lifecycle)(enum UNIQUE_FUNC(csb_aio_op) op)
 	struct timespec timeout = {};
 	if (op == UNIQUE_FUNC(CSB_AIO_GETEVENTS))
 		ret = syscall(__NR_io_getevents, ctx, 0, 1, &event, &timeout);
-#if defined(__NR_io_pgetevents)
+#if defined(__NR_io_pgetevents) || __NR_syz_csb_io_pgetevents
 	else if (op == UNIQUE_FUNC(CSB_AIO_PGETEVENTS))
 		ret = syscall(__NR_io_pgetevents, ctx, 0, 1, &event, &timeout, 0);
 #endif
@@ -104,6 +104,7 @@ static long UNIQUE_FUNC(syz_csb_exit_group)(void) { return UNIQUE_FUNC(csb_exit_
 #include <sched.h>
 #include <signal.h>
 #include <string.h>
+#include <sys/wait.h>
 
 #if CSB
 /*#ifndef*/ CSB_SIGNAL_LOCK_DEFINED
@@ -125,10 +126,12 @@ static long UNIQUE_FUNC(csb_lock_signal)(void)
 	return -1;
 }
 
+#if SYZ_EXECUTOR || __NR_syz_csb_rt_sigaction || __NR_syz_csb_rt_sigreturn || __NR_syz_csb_rt_sigsuspend
 static void UNIQUE_FUNC(csb_noop_signal_handler)(int sig)
 {
 	(void)sig;
 }
+#endif
 
 #if SYZ_EXECUTOR || __NR_syz_csb_rt_sigqueueinfo
 static volatile sig_atomic_t UNIQUE_VAR(csb_signal_seen);
@@ -211,38 +214,45 @@ static long UNIQUE_FUNC(csb_queue_owned_signal)(long tid)
 
 // Queue only to this process after installing a generated handler.
 #if SYZ_EXECUTOR || __NR_syz_csb_rt_sigqueueinfo
-static long UNIQUE_FUNC(syz_csb_rt_sigqueueinfo)(void)
+static long UNIQUE_FUNC(csb_rt_sigqueueinfo_lifecycle)(void)
 {
 	struct sigaction action;
 	struct sigaction old;
 	sigset_t helper_mask;
 	sigset_t old_mask;
-	if (UNIQUE_FUNC(csb_lock_signal)() < 0)
-		return -1;
 	memset(&action, 0, sizeof(action));
 	action.sa_handler = UNIQUE_FUNC(csb_seen_signal_handler);
 	sigemptyset(&action.sa_mask);
-	if (sigaction(SIGUSR1, &action, &old) < 0) {
-		pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
+	if (sigaction(SIGUSR1, &action, &old) < 0)
 		return -1;
-	}
 	sigemptyset(&helper_mask);
 	sigaddset(&helper_mask, SIGUSR1);
 	if (sigprocmask(SIG_UNBLOCK, &helper_mask, &old_mask) < 0) {
 		sigaction(SIGUSR1, &old, 0);
-		pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 		return -1;
 	}
 	UNIQUE_VAR(csb_signal_seen) = 0;
-	long ret = UNIQUE_FUNC(csb_queue_owned_signal)(syscall(__NR_gettid));
+	long ret = UNIQUE_FUNC(csb_queue_owned_signal)(0);
 	while (ret >= 0 && !UNIQUE_VAR(csb_signal_seen))
 		sched_yield();
 	if (sigprocmask(SIG_SETMASK, &old_mask, 0) < 0)
 		ret = -1;
 	if (sigaction(SIGUSR1, &old, 0) < 0)
 		ret = -1;
-	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 	return ret;
+}
+
+static long UNIQUE_FUNC(syz_csb_rt_sigqueueinfo)(void)
+{
+	if (UNIQUE_FUNC(csb_lock_signal)() < 0)
+		return -1;
+	long pid = fork();
+	if (pid == 0)
+		_exit(UNIQUE_FUNC(csb_rt_sigqueueinfo_lifecycle)() == 0 ? 0 : 1);
+	int status = 0;
+	long ret = pid < 0 ? -1 : waitpid(pid, &status, 0);
+	pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
+	return ret == pid && status == 0 ? 0 : -1;
 }
 #endif
 

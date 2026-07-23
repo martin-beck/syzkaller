@@ -723,6 +723,9 @@ func TestAIOCallsUseBoundedLifecycles(t *testing.T) {
 			if helper := "UNIQUE_FUNC(syz_csb_" + name + ")()"; !strings.Contains(string(src), helper) {
 				t.Fatalf("generated CSB header missing %q", helper)
 			}
+			if name == "io_pgetevents" && !strings.Contains(string(src), "__NR_io_pgetevents") {
+				t.Fatal("generated helper does not execute io_pgetevents")
+			}
 		})
 	}
 }
@@ -778,10 +781,23 @@ func TestRemainingRtSignalCallsUseOwnedSignals(t *testing.T) {
 			}
 			queueCall := "__NR_rt_tgsigqueueinfo"
 			if name == "rt_sigqueueinfo" {
+				queueCall = "__NR_rt_sigqueueinfo"
 				if !strings.Contains(string(src), "SIG_UNBLOCK") ||
 					!strings.Contains(string(src), "SIG_SETMASK") {
 					t.Fatal("queued signal mask is not restored")
 				}
+				if !strings.Contains(string(src), "fork()") {
+					t.Fatal("process-directed signal replay is not isolated")
+				}
+				standalone, _, err := csource.Write(p, csource.Options{Slowdown: 1})
+				if err != nil {
+					t.Fatal(err)
+				}
+				bin, err := csource.Build(p.Target, standalone)
+				if err != nil {
+					t.Fatal(err)
+				}
+				os.Remove(bin)
 			}
 			if !strings.Contains(string(src), queueCall) {
 				t.Fatalf("generated helper missing %q", queueCall)
