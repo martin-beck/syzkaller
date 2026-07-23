@@ -58,7 +58,8 @@ static long UNIQUE_FUNC(csb_aio_lifecycle)(enum UNIQUE_FUNC(csb_aio_op) op)
 		}
 		struct iocb* list[] = {&cb};
 		ret = syscall(__NR_io_submit, ctx, 1, list);
-		if (op == UNIQUE_FUNC(CSB_AIO_CANCEL) && ret == 1)
+		// Older kernels can reject IOCB_CMD_POLL, but still exercise io_cancel.
+		if (op == UNIQUE_FUNC(CSB_AIO_CANCEL))
 			ret = syscall(__NR_io_cancel, ctx, &cb, &event);
 		else if (ret == 1)
 			ret = syscall(__NR_io_getevents, ctx, 0, 1, &event, &timeout);
