@@ -779,6 +779,10 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			}
 		}
 		if call.Meta.CallName == "pidfd_getfd" && call.Index != prog.ExecNoCopyout && len(call.Args) > 1 {
+			if src, ok := call.Args[1].(prog.ExecArgResult); ok && src.DivOp <= 1 && uint32(src.AddOp) == 0 &&
+				futureRawIOUringFDs[src.Index] {
+				futureRawIOUringFDs[call.Index] = true
+			}
 			if src, ok := call.Args[1].(prog.ExecArgConst); ok &&
 				(futureRawIOUringConstants[int32(src.Value)] || futureRawUnknownIOUring) {
 				futureRawIOUringFDs[call.Index] = true
@@ -902,11 +906,14 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			}
 		}
 		if call.Meta.Name == "recvmsg$unix" &&
-			(len(rawIOUringFDs) != 0 || len(rawIOUringConstants) != 0 || rawUnknownIOUring) {
+			(len(rawIOUringFDs) != 0 || len(rawIOUringConstants) != 0 || rawUnknownIOUring ||
+				len(futureRawIOUringFDs) != 0 || len(futureRawIOUringConstants) != 0 || futureRawUnknownIOUring) {
 			// SCM_RIGHTS descriptors arrive through nested copyouts rather than the return value.
 			for _, copyout := range call.Copyout {
-				rawIOUringFDs[copyout.Index] = true
 				futureRawIOUringFDs[copyout.Index] = true
+				if len(rawIOUringFDs) != 0 || len(rawIOUringConstants) != 0 || rawUnknownIOUring {
+					rawIOUringFDs[copyout.Index] = true
+				}
 			}
 		}
 		if call.Meta.Name == "mmap$IORING_OFF_SQ_RING" || call.Meta.Name == "mmap$IORING_OFF_SQES" {
@@ -1029,6 +1036,9 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			}
 			if fd, ok := call.Args[0].(prog.ExecArgResult); ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
 				rawRing = fds[fd.Index]
+				if !call.Props.Async && futureRawIOUringFDs[fd.Index] {
+					rawRing = rawRing || len(rawIOUringFDs) != 0 || len(rawIOUringConstants) != 0 || rawUnknownIOUring
+				}
 			} else if fd, ok := call.Args[0].(prog.ExecArgConst); ok {
 				rawRing = constants[int32(fd.Value)] || unknown
 			}
