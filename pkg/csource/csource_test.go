@@ -499,7 +499,7 @@ syscall(SYS_csource8, /*num=*/(intptr_t)-1);
 			// Disable comment generation, as it's not the focus of these tests.
 			// This simplifies the expected output. For tests covering comments, see
 			// /pkg/csource/syscall_generation_test.go.
-			calls, _, _, err := ctx.generateProgCalls(p, false, false, nil)
+			calls, _, _, err := ctx.generateProgCalls(p, false, false, nil, false)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -257,7 +257,8 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		excludeIdices = append(excludeIdices, netSrvCloseIdxs...)
 	}
 
-	calls, vars, resultResets, err := ctx.generateProgCalls(ctx.p, ctx.opts.Trace, ctx.opts.CallComments, netSrvListenIdxs)
+	calls, vars, resultResets, err := ctx.generateProgCalls(ctx.p, ctx.opts.Trace, ctx.opts.CallComments,
+		netSrvListenIdxs, false)
 	if err != nil {
 		return nil, metaData, err
 	}
@@ -267,7 +268,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	// for a program and always very similar. Comments on these provide
 	// little-to-no additional context that can't be inferred from looking at
 	// the call arguments directly, and just make the source longer.
-	mmapCalls, _, _, err := ctx.generateProgCalls(mmapProg, false, false, []int{})
+	mmapCalls, _, _, err := ctx.generateProgCalls(mmapProg, false, false, []int{}, true)
 	if err != nil {
 		return nil, metaData, err
 	}
@@ -612,7 +613,7 @@ func generateComment(call *prog.Call) string {
 }
 
 func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool,
-	initIndices []int) ([]string, []uint64, []string, error) {
+	initIndices []int, dataMmap bool) ([]string, []uint64, []string, error) {
 	msgSizes := make([]uint64, len(p.Calls))
 	var comments []string
 	if addComments {
@@ -681,12 +682,14 @@ func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool,
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	calls, vars, resultResets := ctx.generateCalls(decoded, trace, addComments, comments, msgSizes, initIndices)
+	calls, vars, resultResets := ctx.generateCalls(decoded, trace, addComments, comments, msgSizes,
+		initIndices, dataMmap)
 	return calls, vars, resultResets, nil
 }
 
 func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
-	callComments []string, msgSizes []uint64, initIndices []int) ([]string, []uint64, []string) {
+	callComments []string, msgSizes []uint64, initIndices []int,
+	dataMmap bool) ([]string, []uint64, []string) {
 	var calls []string
 	var resultResets []string
 	csumSeq := 0
@@ -714,7 +717,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		resetBuf := new(bytes.Buffer)
 		ctx.invalidateCSBResults(resetBuf, call, resCopyout, p.Vars)
 		w.Write(resetBuf.Bytes())
-		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall)
+		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall, dataMmap)
 
 		if call.Props.Rerun > 0 {
 			fmt.Fprintf(w, "\tfor (int i = 0; i < %v; i++) {\n", call.Props.Rerun)
