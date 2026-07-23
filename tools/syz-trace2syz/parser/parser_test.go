@@ -163,6 +163,67 @@ func TestEvaluateExpressions(t *testing.T) {
 	}
 }
 
+func TestParseEmptyStatxFlags(t *testing.T) {
+	line := `1 statx(3, "a, ,b", , 0x1101, {}) = 0`
+	if got := normalizeStraceLine(line); got != `1 statx(3, "a, ,b", 0, 0x1101, {}) = 0` {
+		t.Fatalf("normalized as %q", got)
+	}
+	quoted := `1 write(1, " statx(3, x, , y)", 18) = 18`
+	if got := normalizeStraceLine(quoted); got != quoted {
+		t.Fatalf("quoted payload normalized as %q", got)
+	}
+	tree := parseTestData(t, []byte(`1 statx(3, ".", , 0x1101, {}) = 0`))
+	call := tree.TraceMap[tree.RootPid].Calls[0]
+	arg, ok := call.Args[2].(Constant)
+	if !ok || arg.Val() != 0 {
+		t.Fatalf("empty statx flags parsed as %#v, want constant zero", call.Args[2])
+	}
+}
+
+func TestParseTruncatedSchedAffinity(t *testing.T) {
+	formats := []string{"[0, 1, 2, ...]", "[0 1 2 ...]"}
+	for _, format := range formats {
+		t.Run(format, func(t *testing.T) {
+			testParseTruncatedSchedAffinity(t, format)
+		})
+	}
+}
+
+func testParseTruncatedSchedAffinity(t *testing.T, cpus string) {
+	data := []byte(fmt.Sprintf(`901717 sched_setaffinity(901734, 8192, %s <unfinished ...>
+901717 <... sched_setaffinity resumed>) = 0
+901717 close(3) = 0`, cpus))
+	tests := []struct {
+		name         string
+		splitThreads bool
+	}{
+		{"merged", false},
+		{"split", true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tree, trace, err := ParseData(data, test.splitThreads, -1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.splitThreads {
+				trace = tree.TraceMap[901717]
+			}
+			if len(trace.Calls) != 2 {
+				t.Fatalf("got %d calls, want resumed affinity and following call", len(trace.Calls))
+			}
+			call := trace.Calls[0]
+			if call.CallName != "sched_setaffinity" || call.Paused || call.Ret != 0 {
+				t.Fatalf("unexpected resumed call: %#v", call)
+			}
+			cpus, ok := call.Args[2].(*GroupType)
+			if !ok || len(cpus.Elems) != 3 {
+				t.Fatalf("CPU list parsed as %#v, want three known CPUs", call.Args[2])
+			}
+		})
+	}
+}
+
 func TestParseLoopPid(t *testing.T) {
 	data := `1  open() = 3
 			 1  fstat() = 0`

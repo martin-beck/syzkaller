@@ -90,6 +90,25 @@ func TestCSBExecLifecycle(t *testing.T) {
 	}
 }
 
+func TestCSBReappliesCurrentAffinity(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("syz_reapply_affinity()\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "UNIQUE_FUNC(syz_reapply_affinity)()")
+	assert.Contains(t, string(src), "static __thread cpu_set_t* mask = NULL")
+	assert.Contains(t, string(src), "mask = CPU_ALLOC(cpus)")
+	assert.Contains(t, string(src), "sched_getaffinity(0, mask_size, mask)")
+}
+
 func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {
 	t.Helper()
 	// Strip text that cannot declare or reference a C identifier. In particular,
