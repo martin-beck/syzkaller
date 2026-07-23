@@ -905,7 +905,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				rawIOUringFDs[call.Index] = true
 			}
 		}
-		if call.Meta.Name == "recvmsg$unix" &&
+		if (call.Meta.Name == "recvmsg$unix" || call.Meta.Name == "recvmmsg$unix") &&
 			(len(rawIOUringFDs) != 0 || len(rawIOUringConstants) != 0 || rawUnknownIOUring ||
 				len(futureRawIOUringFDs) != 0 || len(futureRawIOUringConstants) != 0 || futureRawUnknownIOUring) {
 			// SCM_RIGHTS descriptors arrive through nested copyouts rather than the return value.
