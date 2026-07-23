@@ -519,7 +519,7 @@ var oses = map[string]osCommon{
 			"syz_csb_exit_group":         {"clone", "exit_group", "wait4"},
 			"syz_csb_rt_sigaction":       {"rt_sigaction"},
 			"syz_csb_rt_sigreturn":       {"rt_sigaction", "rt_sigreturn", "tgkill"},
-			"syz_csb_rt_sigqueueinfo":    {"rt_sigaction", "rt_tgsigqueueinfo"},
+			"syz_csb_rt_sigqueueinfo":    {"rt_sigaction", "rt_sigqueueinfo"},
 			"syz_csb_rt_sigsuspend":      {"rt_sigaction", "rt_tgsigqueueinfo", "rt_sigsuspend"},
 			"syz_csb_thread_create_join": {"clone", "exit"},
 			"syz_csb_fork_wait":          {"clone", "exit", "wait4"},

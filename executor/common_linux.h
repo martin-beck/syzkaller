@@ -222,7 +222,7 @@ static long UNIQUE_FUNC(syz_csb_rt_sigqueueinfo)(void)
 		pthread_mutex_unlock(&CSB_SIGNAL_LOCK);
 		return -1;
 	}
-	long ret = UNIQUE_FUNC(csb_queue_owned_signal)(syscall(__NR_gettid));
+	long ret = UNIQUE_FUNC(csb_queue_owned_signal)(0);
 	if (sigprocmask(SIG_SETMASK, &old_mask, 0) < 0)
 		ret = -1;
 	if (sigaction(SIGUSR1, &old, 0) < 0)

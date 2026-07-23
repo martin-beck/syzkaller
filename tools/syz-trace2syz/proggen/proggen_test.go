@@ -776,12 +776,16 @@ func TestRemainingRtSignalCallsUseOwnedSignals(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(src), "__NR_rt_tgsigqueueinfo") {
-				t.Fatal("signal is not thread-directed")
+			queueCall := "__NR_rt_tgsigqueueinfo"
+			if name == "rt_sigqueueinfo" {
+				queueCall = "__NR_rt_sigqueueinfo"
+				if !strings.Contains(string(src), "SIG_UNBLOCK") ||
+					!strings.Contains(string(src), "SIG_SETMASK") {
+					t.Fatal("queued signal mask is not restored")
+				}
 			}
-			if name == "rt_sigqueueinfo" &&
-				(!strings.Contains(string(src), "SIG_UNBLOCK") || !strings.Contains(string(src), "SIG_SETMASK")) {
-				t.Fatal("queued signal mask is not restored")
+			if !strings.Contains(string(src), queueCall) {
+				t.Fatalf("generated helper missing %q", queueCall)
 			}
 			for _, want := range []string{"#ifndef CSB_SIGNAL_LOCK_DEFINED", "pthread_mutex_lock", "pthread_mutex_unlock"} {
 				if !strings.Contains(string(src), want) {
