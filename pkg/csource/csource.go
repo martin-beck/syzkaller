@@ -906,8 +906,7 @@ func localIOResources(p prog.ExecProg, target *prog.Target) map[uint64]bool {
 				local[call.Index] = true
 			}
 		case "signalfd", "signalfd4":
-			fd, ok := call.Args[0].(prog.ExecArgConst)
-			if call.Index != prog.ExecNoCopyout && ((ok && fd.Value == ^uint64(0)) || localIOArg(call, local)) {
+			if call.Index != prog.ExecNoCopyout {
 				local[call.Index] = true
 			}
 		case "dup", "dup2", "dup3":
