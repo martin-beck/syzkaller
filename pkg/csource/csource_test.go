@@ -289,6 +289,40 @@ func TestCSBFSetFLResultArgument(t *testing.T) {
 	}
 }
 
+func TestCSBDynamicOpenFlagsAndFcntlCommand(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("r0 = getpid()\n"+
+		"r1 = openat(0xffffffffffffff9c, &(0x7f0000000000)='./fifo\\x00', 0x0, 0x0)\n"+
+		"creat(&(0x7f0000000040)='./fifo2\\x00', 0x0)\n"+
+		"fcntl$auto(r1, 0x0, 0x0)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec, err := p.SerializeForExec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := target.DeserializeExec(exec, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dynamic := prog.ExecArgResult{Size: 8, Index: 0}
+	decoded.Calls[1].Args[2] = dynamic
+	decoded.Calls[2].Args[1] = dynamic
+	decoded.Calls[3].Args[1] = dynamic
+	ctx := &context{
+		p: p, opts: Options{CSB: true, Slowdown: 1}, target: target,
+		sysTarget: targets.Get(target.OS, target.Arch), calls: make(map[string]uint64),
+	}
+	calls, _ := ctx.generateCalls(decoded, false, false, nil, nil, nil)
+	assert.Contains(t, calls[1], "(UNIQUE_VAR(ctx->r)[0] | O_NONBLOCK)")
+	assert.Contains(t, calls[2], "syscall(__NR_open")
+	assert.Contains(t, calls[3], "fcntl(UNIQUE_VAR(ctx->r)[0], F_GETFL)")
+}
+
 func TestCSBTwoArgumentIoctl(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {
