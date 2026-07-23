@@ -303,6 +303,27 @@ func TestLocalIONonblockingLifetime(t *testing.T) {
 	}
 }
 
+func TestCSBSetsNonblockingBeforePublishingDescriptor(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("pipe(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0})\n"+
+		"read(r0, &(0x7f0000000040), 0x1)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Threaded: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setNonblock := strings.Index(string(src), "int fd = *(uint32_t*)(0x200000000000ul+PTR_OFFSET)")
+	publish := strings.Index(string(src), "UNIQUE_VAR(ctx->r)[0] = *(uint32_t*)(0x200000000000ul+PTR_OFFSET)")
+	if setNonblock == -1 || publish == -1 || setNonblock > publish {
+		t.Fatalf("descriptor publication precedes nonblocking setup:\n%s", src)
+	}
+}
+
 func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {
 	t.Helper()
 	// Strip text that cannot declare or reference a C identifier. In particular,

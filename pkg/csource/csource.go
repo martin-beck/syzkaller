@@ -778,14 +778,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		}
 		// Copyout.
 		if resCopyout || argCopyout {
-			ctx.copyout(w, call, resCopyout)
-		}
-		if ctx.opts.CSB && ctx.target.OS == targets.Linux {
-			for _, index := range newLocalIOResources(call, localIO) {
-				fd := fmt.Sprintf("%v[%v]", ctx.resultArrayName(), index)
-				// Duplicates share flags, so keep local descriptors nonblocking for their lifetime.
-				fmt.Fprintf(w, "\t{ int flags = fcntl(%[1]s, F_GETFL); if (flags != -1) fcntl(%[1]s, F_SETFL, flags | O_NONBLOCK); }\n", fd)
-			}
+			ctx.copyout(w, call, resCopyout, localIO)
 		}
 		calls = append(calls, w.String())
 
@@ -934,23 +927,6 @@ func localIOArg(call prog.ExecCall, local map[uint64]bool) bool {
 	}
 	arg, ok := call.Args[0].(prog.ExecArgResult)
 	return ok && arg.DivOp == 0 && arg.AddOp == 0 && local[arg.Index]
-}
-
-func newLocalIOResources(call prog.ExecCall, local map[uint64]bool) []uint64 {
-	switch call.Meta.CallName {
-	case "pipe", "pipe2", "socketpair":
-		var ret []uint64
-		for _, copyout := range call.Copyout {
-			ret = append(ret, copyout.Index)
-		}
-		return ret
-	case "eventfd", "eventfd2", "timerfd_create", "signalfd", "signalfd4", "inotify_init", "inotify_init1", "fanotify_init", "userfaultfd",
-		"mq_open", "dup", "dup2", "dup3", "fcntl":
-		if call.Index != prog.ExecNoCopyout && local[call.Index] {
-			return []uint64{call.Index}
-		}
-	}
-	return nil
 }
 
 func loopIdenticalCalls(calls []string, minRun int) []string {
@@ -1321,7 +1297,7 @@ func (ctx *context) copyinVal(w *bytes.Buffer, addr, size uint64, val string, bf
 	}
 }
 
-func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, resCopyout bool) {
+func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, resCopyout bool, localIO map[uint64]bool) {
 	if ctx.sysTarget.OS == targets.Fuchsia {
 		// On fuchsia we have real system calls that return ZX_OK on success,
 		// and libc calls that are casted to function returning intptr_t,
@@ -1341,6 +1317,10 @@ func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, resCopyout bool
 	fmt.Fprintf(w, "\n")
 	if resCopyout {
 		initFDs[call.Index] = true
+		if ctx.opts.CSB && ctx.target.OS == targets.Linux && localIO[call.Index] {
+			// Set nonblocking mode before publishing the descriptor to concurrent calls.
+			fmt.Fprintf(w, "\t\t{ int flags = fcntl(res, F_GETFL); if (flags != -1) fcntl(res, F_SETFL, flags | O_NONBLOCK); }\n")
+		}
 		fmt.Fprintf(w, "\t\t%v[%v] = res;\n", ctx.resultArrayName(), call.Index)
 	}
 	for _, copyout := range call.Copyout {
@@ -1348,8 +1328,12 @@ func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, resCopyout bool
 		if ctx.opts.CSB && valInMMapRange(ctx, copyout.Addr) {
 			PTR_OFFSET_STR_ADDR = "+PTR_OFFSET"
 		}
-		fmt.Fprintf(w, "\t\tNONFAILING(%v[%v] = *(uint%v*)(0x%xul%v));\n",
-			ctx.resultArrayName(), copyout.Index, copyout.Size*8, copyout.Addr, PTR_OFFSET_STR_ADDR)
+		value := fmt.Sprintf("*(uint%v*)(0x%xul%v)", copyout.Size*8, copyout.Addr, PTR_OFFSET_STR_ADDR)
+		if ctx.opts.CSB && ctx.target.OS == targets.Linux && localIO[copyout.Index] {
+			fmt.Fprintf(w, "\t\tNONFAILING({ int fd = %[1]s; int flags = fcntl(fd, F_GETFL); "+
+				"if (flags != -1) fcntl(fd, F_SETFL, flags | O_NONBLOCK); });\n", value)
+		}
+		fmt.Fprintf(w, "\t\tNONFAILING(%v[%v] = %v);\n", ctx.resultArrayName(), copyout.Index, value)
 	}
 	if copyoutMultiple {
 		fmt.Fprintf(w, "\t}\n")
