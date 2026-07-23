@@ -89,7 +89,8 @@ func shouldSkip(line string) bool {
 	// contain arbitrary text that resembles a restart result.
 	result := ""
 	quoted, angled, escaped, depth := false, false, false, 0
-	if strings.HasPrefix(record, "<... ") && strings.Contains(record, " resumed>") {
+	if strings.HasPrefix(record, "<... ") &&
+		(strings.Contains(record, " resumed>") || strings.HasPrefix(record, "<... resuming ")) {
 		// A resumed record contains the closing parenthesis but not its opener.
 		depth = 1
 	}
