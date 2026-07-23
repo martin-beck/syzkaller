@@ -830,6 +830,36 @@ func (ctx *context) genArray(syzType *prog.ArrayType, dir prog.Dir, traceType pa
 		for i := 0; i < len(a.Elems); i++ {
 			args = append(args, ctx.genArg(syzType.Elem, dir, a.Elems[i]))
 		}
+	case *parser.BufferType:
+		if _, ok := syzType.Elem.(*prog.BufferType); ok {
+			args = append(args, ctx.genArg(syzType.Elem, dir, a))
+			break
+		}
+		if ptr, ok := syzType.Elem.(*prog.PtrType); ok {
+			if _, ok := ptr.Elem.(*prog.BufferType); ok {
+				// The parser flattens a single-element string array to its buffer.
+				args = append(args, ctx.genArg(syzType.Elem, dir, a))
+				break
+			}
+		}
+		if syzType.Elem.Varlen() || syzType.Elem.Size() != 1 {
+			// A parser buffer has no element-width information. Expanding it byte by
+			// byte would change the layout of arrays with wider elements.
+			return syzType.DefaultArg(dir)
+		}
+		vals := []byte(a.Val)
+		if syzType.Kind == prog.ArrayRangeLen && syzType.RangeBegin == syzType.RangeEnd &&
+			uint64(len(vals)) > syzType.RangeBegin {
+			vals = vals[:syzType.RangeBegin]
+		}
+		for _, val := range vals {
+			args = append(args, ctx.genArg(syzType.Elem, dir, parser.Constant(val)))
+		}
+		if syzType.Kind == prog.ArrayRangeLen && syzType.RangeBegin == syzType.RangeEnd {
+			for uint64(len(args)) < syzType.RangeBegin {
+				args = append(args, syzType.Elem.DefaultArg(dir))
+			}
+		}
 	default:
 		log.Fatalf("unsupported type for array: %#v", traceType)
 	}
@@ -850,6 +880,16 @@ func (ctx *context) genStruct(syzType *prog.StructType, dir prog.Dir, traceType 
 		j := 0
 		if ret, recursed := ctx.recurseStructs(syzType, dir, a); recursed {
 			return ret
+		}
+		if syzType.Name() == "argv_array" && len(syzType.Fields) != 0 {
+			// strace represents argv as one group, while argv_array wraps the
+			// complete array and a trailing NULL sentinel in a struct.
+			args = append(args, ctx.genArg(syzType.Fields[0].Type,
+				syzType.Fields[0].Dir(dir), a))
+			for _, field := range syzType.Fields[1:] {
+				args = append(args, field.DefaultArg(field.Dir(dir)))
+			}
+			return prog.MakeGroupArg(syzType, dir, args)
 		}
 		for i := range syzType.Fields {
 			fldDir := syzType.Fields[i].Dir(dir)

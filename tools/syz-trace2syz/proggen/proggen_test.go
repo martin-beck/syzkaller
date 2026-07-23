@@ -25,6 +25,14 @@ func TestParse(t *testing.T) {
 	}
 	tests := []Test{
 		{`
+socket(37, 1, 0) = 3
+setsockopt(3, 278, 128, "abc", 3) = 0
+`, `
+r0 = socket$caif_stream(0x25, 0x1, 0x0)[3]
+setsockopt$CAIFSO_REQ_PARAM(r0, 0x116, 0x80, &(0x7f0000000000)='abc', 0x3)[0]
+`,
+		},
+		{`
 prctl(0x26, 1, 0, 0, 0) = 0
 prctl(35, 13, 3, 0, 0) = 0
 prctl(59, 0, 0, 0, 0) = 0
@@ -356,6 +364,80 @@ func TestGenBufferDeterministicOutSize(t *testing.T) {
 				t.Fatalf("got size %d, want %d", got, test.want)
 			}
 		})
+	}
+}
+
+func TestGenArrayDirectString(t *testing.T) {
+	elem := &prog.BufferType{TypeCommon: prog.TypeCommon{TypeName: "string", IsVarlen: true}, Kind: prog.BufferString}
+	array := &prog.ArrayType{TypeCommon: prog.TypeCommon{TypeName: "array", IsVarlen: true}, Elem: elem}
+	prog.RestoreLinks(nil, nil, []prog.Type{elem, array})
+	arg := (&context{}).genArray(array, prog.DirIn, &parser.BufferType{Val: "hat"})
+	if got := string(arg.(*prog.GroupArg).Inner[0].(*prog.DataArg).Data()); got != "hat\x00" {
+		t.Fatalf("got %q, want hat string", got)
+	}
+}
+
+func TestGenArrayDirectBufferWithWideElements(t *testing.T) {
+	elem := &prog.IntType{IntTypeCommon: prog.IntTypeCommon{
+		TypeCommon: prog.TypeCommon{TypeName: "int32", TypeSize: 4},
+	}}
+	array := &prog.ArrayType{
+		TypeCommon: prog.TypeCommon{TypeName: "array", TypeSize: 4},
+		Elem:       elem, Kind: prog.ArrayRangeLen, RangeBegin: 1, RangeEnd: 1,
+	}
+	prog.RestoreLinks(nil, nil, []prog.Type{elem, array})
+	arg := (&context{}).genArray(array, prog.DirIn, &parser.BufferType{Val: "wide"})
+	inner := arg.(*prog.GroupArg).Inner
+	if len(inner) != 1 || inner[0].(*prog.ConstArg).Val != 0 {
+		t.Fatalf("got %#v, want one default int32 element", inner)
+	}
+}
+
+func TestGenArrayDirectBufferFixedLength(t *testing.T) {
+	elem := &prog.IntType{IntTypeCommon: prog.IntTypeCommon{
+		TypeCommon: prog.TypeCommon{TypeName: "int8", TypeSize: 1},
+	}}
+	array := &prog.ArrayType{
+		TypeCommon: prog.TypeCommon{TypeName: "array", TypeSize: 4},
+		Elem:       elem, Kind: prog.ArrayRangeLen, RangeBegin: 4, RangeEnd: 4,
+	}
+	prog.RestoreLinks(nil, nil, []prog.Type{elem, array})
+	arg := (&context{}).genArray(array, prog.DirIn, &parser.BufferType{Val: "hi"})
+	inner := arg.(*prog.GroupArg).Inner
+	got := make([]byte, len(inner))
+	for i, arg := range inner {
+		got[i] = byte(arg.(*prog.ConstArg).Val)
+	}
+	if want := []byte{'h', 'i', 0, 0}; !bytes.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestGenArgvArrayPreservesAllStrings(t *testing.T) {
+	str := &prog.BufferType{TypeCommon: prog.TypeCommon{TypeName: "string", IsVarlen: true}, Kind: prog.BufferString}
+	ptr := &prog.PtrType{TypeCommon: prog.TypeCommon{TypeName: "ptr", TypeSize: 8}, Elem: str}
+	array := &prog.ArrayType{TypeCommon: prog.TypeCommon{TypeName: "array", IsVarlen: true}, Elem: ptr}
+	zero := &prog.ConstType{IntTypeCommon: prog.IntTypeCommon{TypeCommon: prog.TypeCommon{TypeName: "const", TypeSize: 8}}}
+	argv := &prog.StructType{
+		TypeCommon: prog.TypeCommon{TypeName: "argv_array", IsVarlen: true},
+		Fields:     []prog.Field{{Name: "args", Type: array}, {Name: "z", Type: zero}},
+	}
+	prog.RestoreLinks(nil, nil, []prog.Type{str, ptr, array, zero, argv})
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := &context{builder: prog.MakeProgGen(target)}
+	trace := &parser.GroupType{Elems: []parser.IrType{
+		&parser.BufferType{Val: "first"}, &parser.BufferType{Val: "second"},
+	}}
+	arg := ctx.genStruct(argv, prog.DirIn, trace).(*prog.GroupArg)
+	strings := arg.Inner[0].(*prog.GroupArg).Inner
+	if len(strings) != 2 {
+		t.Fatalf("got %d argv strings, want 2", len(strings))
+	}
+	if got := arg.Inner[1].(*prog.ConstArg).Val; got != 0 {
+		t.Fatalf("got argv sentinel %#x, want 0", got)
 	}
 }
 
