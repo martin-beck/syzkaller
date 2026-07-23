@@ -118,7 +118,9 @@ func shouldSkip(line string) bool {
 		case '"':
 			quoted = true
 		case '<':
-			angled = true
+			if !strings.HasPrefix(record[i:], "<<") && (i == 0 || record[i-1] != '<') {
+				angled = true
+			}
 		case '(':
 			depth++
 		case ')':

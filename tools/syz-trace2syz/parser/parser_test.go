@@ -396,4 +396,7 @@ func TestRestartedResumedRecordIsSkipped(t *testing.T) {
 	if !shouldSkip(`1 read(3</tmp/a)>, "x", 1) = ? ERESTARTSYS (To be restarted)`) {
 		t.Fatal("restart after decoded fd annotation was not skipped")
 	}
+	if !shouldSkip(`1 nanosleep(1 << 5) = ? ERESTARTSYS (To be restarted)`) {
+		t.Fatal("restart after shift expression was not skipped")
+	}
 }
