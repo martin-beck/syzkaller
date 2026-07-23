@@ -96,6 +96,10 @@ func TestCSBTaskSyscallChecks(t *testing.T) {
 			t.Errorf("%s is not registered", name)
 		}
 	}
+	check := linuxSyscallChecks["syz_reapply_affinity"]
+	if check == nil || check(nil, nil) != "" {
+		t.Error("syz_reapply_affinity is not always supported")
+	}
 }
 
 func TestReadKVMInfo(t *testing.T) {
