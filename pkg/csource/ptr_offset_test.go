@@ -31,3 +31,48 @@ func TestPtrOffsetChecksumAddresses(t *testing.T) {
 		t.Fatalf("got %d offsets, want 2:\n%s", got, out.String())
 	}
 }
+
+func TestValInMMapRange(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := &context{target: target, sysTarget: targets.Get(target.OS, target.Arch)}
+	min := target.DataOffset
+	max := min + target.NumPages*target.PageSize
+	tests := []struct {
+		value uint64
+		want  bool
+	}{
+		{min - 1, false}, {min, true}, {max - 1, true}, {max, false}, {max + 0x1000, false},
+	}
+	for _, test := range tests {
+		if got := valInMMapRange(ctx, test.value); got != test.want {
+			t.Errorf("valInMMapRange(%#x)=%v, want %v", test.value, got, test.want)
+		}
+	}
+}
+
+func TestDataMmapProgOffsetsGuards(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := target.DataMmapProg()
+	exec, err := p.SerializeForExec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := target.DeserializeExec(exec, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := &context{p: p, target: target, sysTarget: targets.Get(target.OS, target.Arch), opts: Options{CSB: true}}
+	var calls strings.Builder
+	for _, call := range decoded.Calls {
+		calls.WriteString(ctx.fmtCallBody(call, false, true))
+	}
+	if got := strings.Count(calls.String(), "+PTR_OFFSET"); got != 3 {
+		t.Fatalf("data mmap and guards are not all relocated: %d offsets", got)
+	}
+}

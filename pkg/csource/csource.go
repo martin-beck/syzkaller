@@ -257,7 +257,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		excludeIdices = append(excludeIdices, netSrvCloseIdxs...)
 	}
 
-	calls, vars, err := ctx.generateProgCalls(ctx.p, ctx.opts.Trace, ctx.opts.CallComments, netSrvListenIdxs)
+	calls, vars, err := ctx.generateProgCalls(ctx.p, ctx.opts.Trace, ctx.opts.CallComments, netSrvListenIdxs, false)
 	if err != nil {
 		return nil, metaData, err
 	}
@@ -267,7 +267,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	// for a program and always very similar. Comments on these provide
 	// little-to-no additional context that can't be inferred from looking at
 	// the call arguments directly, and just make the source longer.
-	mmapCalls, _, err := ctx.generateProgCalls(mmapProg, false, false, []int{})
+	mmapCalls, _, err := ctx.generateProgCalls(mmapProg, false, false, []int{}, true)
 	if err != nil {
 		return nil, metaData, err
 	}
@@ -608,7 +608,8 @@ func generateComment(call *prog.Call) string {
 	return linesToCStyleComment(lines)
 }
 
-func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool, initIndices []int) ([]string, []uint64, error) {
+func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool, initIndices []int,
+	dataMmap bool) ([]string, []uint64, error) {
 	msgSizes := make([]uint64, len(p.Calls))
 	var comments []string
 	if addComments {
@@ -677,12 +678,12 @@ func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool, ini
 	if err != nil {
 		return nil, nil, err
 	}
-	calls, vars := ctx.generateCalls(decoded, trace, addComments, comments, msgSizes, initIndices)
+	calls, vars := ctx.generateCalls(decoded, trace, addComments, comments, msgSizes, initIndices, dataMmap)
 	return calls, vars, nil
 }
 
 func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
-	callComments []string, msgSizes []uint64, initIndices []int) ([]string, []uint64) {
+	callComments []string, msgSizes []uint64, initIndices []int, dataMmap bool) ([]string, []uint64) {
 	var calls []string
 	csumSeq := 0
 	for ci, call := range p.Calls {
@@ -707,12 +708,12 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			initCall = true
 		}
 
-		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall)
+		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall, dataMmap)
 
 		if call.Props.Rerun > 0 {
 			fmt.Fprintf(w, "\tfor (int i = 0; i < %v; i++) {\n", call.Props.Rerun)
 			// Rerun invocations should not affect the result value.
-			ctx.emitCall(w, call, ci, false, false, initCall)
+			ctx.emitCall(w, call, ci, false, false, initCall, dataMmap)
 			fmt.Fprintf(w, "\t}\n")
 		}
 		// Copyout.
@@ -840,7 +841,8 @@ func isNative(sysTarget *targets.Target, callName string) bool {
 	return sysTarget.HasCallNumber(callName) && !trampoline
 }
 
-func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCopyout, trace bool, initCall bool) {
+func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCopyout, trace bool,
+	initCall, dataMmap bool) {
 	native := isNative(ctx.sysTarget, call.Meta.CallName)
 	fmt.Fprintf(w, "\t")
 	if !native {
@@ -858,7 +860,7 @@ func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCo
 	if haveCopyout || trace {
 		fmt.Fprintf(w, "res = ")
 	}
-	w.WriteString(ctx.fmtCallBody(call, initCall))
+	w.WriteString(ctx.fmtCallBody(call, initCall, dataMmap))
 	if !native {
 		fmt.Fprintf(w, ")") // close NONFAILING macro
 	}
@@ -884,16 +886,14 @@ func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCo
 }
 
 func valInMMapRange(ctx *context, val uint64) bool {
-	argValOffsetRangeMin := ctx.sysTarget.DataOffset - 0x1000
-	argValOffsetRangeMax := ctx.sysTarget.DataOffset + (ctx.target.NumPages * ctx.target.PageSize) + 0x1000
+	min := ctx.sysTarget.DataOffset
+	max := min + ctx.target.NumPages*ctx.target.PageSize
 
-	if val >= argValOffsetRangeMin && val <= argValOffsetRangeMax {
-		return true
-	}
-	return false
+	// The CSB mapping is exactly [min, max); adjacent values are not pointers into it.
+	return val >= min && val < max
 }
 
-func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool) string {
+func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) string {
 	native := isNative(ctx.sysTarget, call.Meta.CallName)
 	callName, ok := ctx.sysTarget.SyscallTrampolines[call.Meta.CallName]
 	if !ok {
@@ -1010,6 +1010,10 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool) string {
 			PTR_OFFSET_STR := ""
 
 			if ctx.opts.CSB {
+				// DataMmapProg includes adjacent guard pages that move with the mapping.
+				if dataMmap && i == 0 {
+					PTR_OFFSET_STR = "+PTR_OFFSET"
+				}
 				switch (*metaArg).(type) {
 				case *prog.PtrType:
 					if valInMMapRange(ctx, arg.Value) {
