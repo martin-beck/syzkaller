@@ -1141,6 +1141,8 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool, ci int, force
 
 			// DataMmapProg includes adjacent guard pages that move with the mapping.
 			if ctx.opts.CSB && ((dataMmap && i == 0) ||
+				(call.Meta.Name == "ioctl$auto_FIONBIO" && i == 2 &&
+					valInMMapRange(ctx, arg.Value)) ||
 				(arg.IsPointer && valInMMapRange(ctx, arg.Value))) {
 				PTR_OFFSET_STR = "+PTR_OFFSET"
 			}
