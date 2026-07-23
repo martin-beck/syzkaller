@@ -730,7 +730,7 @@ func TestAIOCallsUseBoundedLifecycles(t *testing.T) {
 func TestRtSigactionIsolatesDispositionChange(t *testing.T) {
 	p := parseSingleProg(t, `rt_sigaction(SIGUSR2, {sa_handler=0x1234, sa_mask=[USR1 TERM], sa_flags=0x10000000}, NULL, 8) = 0`)
 	if got := strings.TrimSpace(string(p.Serialize())); got !=
-		"syz_csb_rt_sigaction(0xc, 0x10000000, 0x4200, 0x0, 0x0, 0x0, 0x8)[0]" {
+		"syz_csb_rt_sigaction(0xc, 0x10000000, 0x4200, 0x0, 0x0, 0x0)[0]" {
 		t.Fatalf("got %q", got)
 	}
 	src, _, err := csource.Write(p, csource.Options{Slowdown: 1, CSB: true, Trace: true})
@@ -744,6 +744,13 @@ func TestRtSigactionIsolatesDispositionChange(t *testing.T) {
 		if !strings.Contains(string(src), want) {
 			t.Fatalf("generated helper missing %q", want)
 		}
+	}
+}
+
+func TestReservedRtSigactionIsDropped(t *testing.T) {
+	p := parseSingleProg(t, `rt_sigaction(SIGRTMIN, {sa_handler=0x1234}, NULL, 8) = 0`)
+	if len(p.Calls) != 0 {
+		t.Fatalf("generated %d calls for libc-reserved signal", len(p.Calls))
 	}
 }
 

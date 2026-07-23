@@ -279,11 +279,17 @@ func (ctx *context) genRtSigactionCall() *prog.Call {
 	if action, ok := traceCall.Args[1].(parser.Constant); ok && action.Val() == 0 {
 		return ctx.genCall()
 	}
+	sig := ctx.signalNumber(traceCall.Args[0])
+	// libc reserves signals 32 and 33, while its sigaction layout is not the
+	// kernel ABI required for safely bypassing the wrapper.
+	if sig == 32 || sig == 33 {
+		return nil
+	}
 	call := ctx.makeDefaultCall("syz_csb_rt_sigaction")
 	if call == nil {
 		return nil
 	}
-	ctx.setConstArg(call, 0, ctx.signalNumber(traceCall.Args[0]))
+	ctx.setConstArg(call, 0, sig)
 	if action, ok := traceCall.Args[1].(*parser.GroupType); ok {
 		if len(action.Elems) > 1 {
 			mask := ctx.sigsetMask(action.Elems[1])
@@ -295,11 +301,6 @@ func (ctx *context) genRtSigactionCall() *prog.Call {
 			ctx.setConstArg(call, 1, ctx.sigactionFlags(action.Elems[2]))
 		}
 	}
-	sigsetSize := uint64(8)
-	if ctx.target.Arch == "mips64le" {
-		sigsetSize = 16
-	}
-	ctx.setConstArg(call, 6, sigsetSize)
 	ctx.finishCall(call, traceCall)
 	return call
 }
