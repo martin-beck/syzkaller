@@ -709,15 +709,6 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				fmt.Fprintf(w, "\tNONFAILING(*(uint32*)(0x%x+PTR_OFFSET) = 1);\n", value.Value)
 			}
 		}
-		if ctx.opts.CSB && call.Meta.CallName == "openat2" {
-			how, howOK := call.Args[2].(prog.ExecArgConst)
-			size, sizeOK := call.Args[3].(prog.ExecArgConst)
-			if howOK && sizeOK && size.Value >= 8 && valInMMapRange(ctx, how.Value) {
-				fmt.Fprintf(w, "\tNONFAILING(if (!(*(uint64*)(0x%x+PTR_OFFSET) & %d)) *(uint64*)(0x%x+PTR_OFFSET) |= %d);\n",
-					how.Value, ctx.target.ConstMap["O_PATH"], how.Value, ctx.target.ConstMap["O_NONBLOCK"])
-			}
-		}
-
 		if call.Props.FailNth > 0 {
 			fmt.Fprintf(w, "\tinject_fault(%v);\n", call.Props.FailNth)
 		}
@@ -1139,6 +1130,10 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) str
 			}
 			com := ctx.argComment(call.Meta.Args[i], arg)
 			val := ctx.resultArgToStr(arg)
+			if ctx.opts.CSB && call.Meta.CallName == "fcntl" && i == 2 &&
+				fcntlCommand(call, ctx.target.ConstMap["F_SETFL"]) {
+				val = fmt.Sprintf("(%s | O_NONBLOCK)", val)
+			}
 			if native && ctx.target.PtrSize == 4 {
 				// syscall accepts args as ellipsis, resources are uint64
 				// and take 2 slots without the cast, which would be wrong.
