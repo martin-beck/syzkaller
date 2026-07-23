@@ -234,7 +234,7 @@ static long UNIQUE_FUNC(syz_csb_rt_sigqueueinfo)(void)
 		return -1;
 	}
 	UNIQUE_VAR(csb_signal_seen) = 0;
-	long ret = UNIQUE_FUNC(csb_queue_owned_signal)(0);
+	long ret = UNIQUE_FUNC(csb_queue_owned_signal)(syscall(__NR_gettid));
 	while (ret >= 0 && !UNIQUE_VAR(csb_signal_seen))
 		sched_yield();
 	if (sigprocmask(SIG_SETMASK, &old_mask, 0) < 0)

@@ -778,7 +778,6 @@ func TestRemainingRtSignalCallsUseOwnedSignals(t *testing.T) {
 			}
 			queueCall := "__NR_rt_tgsigqueueinfo"
 			if name == "rt_sigqueueinfo" {
-				queueCall = "__NR_rt_sigqueueinfo"
 				if !strings.Contains(string(src), "SIG_UNBLOCK") ||
 					!strings.Contains(string(src), "SIG_SETMASK") {
 					t.Fatal("queued signal mask is not restored")
