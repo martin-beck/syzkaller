@@ -938,7 +938,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			}
 		}
 		w := new(bytes.Buffer)
-		guardSQE := false
+		guardCondition := ""
 		if addComments {
 			w.WriteString(callComments[ci] + "\n")
 		}
@@ -956,16 +956,26 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 					ctx.target.ConstMap["IORING_SETUP_SQPOLL"])
 			}
 		}
-		if ctx.opts.CSB && call.Meta.Name == "ioctl$SECCOMP_IOCTL_NOTIF_ADDFD" {
+		if ctx.opts.CSB && isSeccompAddfd(call, ctx.target.ConstMap["SECCOMP_IOCTL_NOTIF_ADDFD"]) {
 			if arg, ok := call.Args[2].(prog.ExecArgConst); ok {
 				offset := ""
 				if valInMMapRange(ctx, arg.Value) {
 					offset = "+PTR_OFFSET"
 				}
-				fmt.Fprintf(w, "\tNONFAILING(if ((*(uint32*)(0x%x%s) & %d) && "+
-					"*(uint32*)(0x%x%s) <= 2) *(uint32*)(0x%x%s) &= ~%d);\n",
-					arg.Value+8, offset, ctx.target.ConstMap["SECCOMP_ADDFD_FLAG_SETFD"], arg.Value+16, offset,
-					arg.Value+8, offset, ctx.target.ConstMap["SECCOMP_ADDFD_FLAG_SETFD"])
+				fmt.Fprintf(w, "\tuint8 csb_seccomp_addfd_%d[24];\n", ci)
+				if ctx.opts.HandleSegv {
+					fmt.Fprintf(w, "\tint csb_seccomp_addfd_ok_%d = NONFAILING(memcpy(csb_seccomp_addfd_%d, "+
+						"(void*)(0x%x%s), 24));\n", ci, ci, arg.Value, offset)
+				} else {
+					fmt.Fprintf(w, "\tmemcpy(csb_seccomp_addfd_%d, (void*)(0x%x%s), 24);\n"+
+						"\tint csb_seccomp_addfd_ok_%d = 1;\n", ci, arg.Value, offset, ci)
+				}
+				fmt.Fprintf(w, "\tif ((*(uint32*)(csb_seccomp_addfd_%d + 8) & %d) && "+
+					"*(uint32*)(csb_seccomp_addfd_%d + 16) <= 2) "+
+					"*(uint32*)(csb_seccomp_addfd_%d + 8) &= ~%d;\n", ci,
+					ctx.target.ConstMap["SECCOMP_ADDFD_FLAG_SETFD"], ci, ci,
+					ctx.target.ConstMap["SECCOMP_ADDFD_FLAG_SETFD"])
+				guardCondition = fmt.Sprintf("csb_seccomp_addfd_ok_%d", ci)
 			}
 		}
 		if ctx.opts.CSB && call.Meta.Name == "syz_io_uring_submit" {
@@ -985,7 +995,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				// IORING_OP_CLOSE stores its fd at offset 4 in the SQE.
 				fmt.Fprintf(w, "\tif (csb_sqe_ok_%d && csb_sqe_%d[0] == 19 && *(int32*)(csb_sqe_%d + 4) <= 2) "+
 					"*(int32*)(csb_sqe_%d + 4) = -1;\n", ci, ci, ci, ci)
-				guardSQE = true
+				guardCondition = fmt.Sprintf("csb_sqe_ok_%d", ci)
 			}
 		}
 
@@ -1028,8 +1038,8 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			call.Args = args
 		}
 
-		if guardSQE {
-			fmt.Fprintf(w, "\tif (csb_sqe_ok_%d) {\n", ci)
+		if guardCondition != "" {
+			fmt.Fprintf(w, "\tif (%s) {\n", guardCondition)
 		}
 		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall, dataMmap)
 
@@ -1043,7 +1053,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		if resCopyout || argCopyout {
 			ctx.copyout(w, call, resCopyout)
 		}
-		if guardSQE {
+		if guardCondition != "" {
 			fmt.Fprint(w, "\n\t}")
 		}
 		calls = append(calls, w.String())
@@ -1148,6 +1158,14 @@ func ioUringResultArg(call prog.ExecCall, fds map[uint64]bool) bool {
 	}
 	fd, ok := call.Args[0].(prog.ExecArgResult)
 	return ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 && fds[fd.Index]
+}
+
+func isSeccompAddfd(call prog.ExecCall, command uint64) bool {
+	if call.Meta.CallName != "ioctl" || len(call.Args) < 3 {
+		return false
+	}
+	cmd, ok := call.Args[1].(prog.ExecArgConst)
+	return ok && uint32(cmd.Value) == uint32(command)
 }
 
 func fcntlCommand(call prog.ExecCall, command uint64) bool {
@@ -1266,6 +1284,12 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool, ci 
 		if ctx.opts.CSB && call.Meta.Name == "syz_io_uring_submit" && i == 2 {
 			if _, ok := arg.(prog.ExecArgConst); ok {
 				argsStrs = append(argsStrs, fmt.Sprintf("(intptr_t)csb_sqe_%d", ci))
+				continue
+			}
+		}
+		if ctx.opts.CSB && isSeccompAddfd(call, ctx.target.ConstMap["SECCOMP_IOCTL_NOTIF_ADDFD"]) && i == 2 {
+			if _, ok := arg.(prog.ExecArgConst); ok {
+				argsStrs = append(argsStrs, fmt.Sprintf("(intptr_t)csb_seccomp_addfd_%d", ci))
 				continue
 			}
 		}
