@@ -413,6 +413,34 @@ func TestGenArrayDirectBufferFixedLength(t *testing.T) {
 	}
 }
 
+func TestGenArgvArrayPreservesAllStrings(t *testing.T) {
+	str := &prog.BufferType{TypeCommon: prog.TypeCommon{TypeName: "string", IsVarlen: true}, Kind: prog.BufferString}
+	ptr := &prog.PtrType{TypeCommon: prog.TypeCommon{TypeName: "ptr", TypeSize: 8}, Elem: str}
+	array := &prog.ArrayType{TypeCommon: prog.TypeCommon{TypeName: "array", IsVarlen: true}, Elem: ptr}
+	zero := &prog.ConstType{IntTypeCommon: prog.IntTypeCommon{TypeCommon: prog.TypeCommon{TypeName: "const", TypeSize: 8}}}
+	argv := &prog.StructType{
+		TypeCommon: prog.TypeCommon{TypeName: "argv_array", IsVarlen: true},
+		Fields:     []prog.Field{{Name: "args", Type: array}, {Name: "z", Type: zero}},
+	}
+	prog.RestoreLinks(nil, nil, []prog.Type{str, ptr, array, zero, argv})
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := &context{builder: prog.MakeProgGen(target)}
+	trace := &parser.GroupType{Elems: []parser.IrType{
+		&parser.BufferType{Val: "first"}, &parser.BufferType{Val: "second"},
+	}}
+	arg := ctx.genStruct(argv, prog.DirIn, trace).(*prog.GroupArg)
+	strings := arg.Inner[0].(*prog.GroupArg).Inner
+	if len(strings) != 2 {
+		t.Fatalf("got %d argv strings, want 2", len(strings))
+	}
+	if got := arg.Inner[1].(*prog.ConstArg).Val; got != 0 {
+		t.Fatalf("got argv sentinel %#x, want 0", got)
+	}
+}
+
 func TestMadviseFromTrace(t *testing.T) {
 	p := parseSingleProg(t, `
 madvise(0xffff7fb57000, 8192, 0x4) = 0

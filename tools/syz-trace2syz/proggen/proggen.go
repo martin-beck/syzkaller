@@ -881,6 +881,16 @@ func (ctx *context) genStruct(syzType *prog.StructType, dir prog.Dir, traceType 
 		if ret, recursed := ctx.recurseStructs(syzType, dir, a); recursed {
 			return ret
 		}
+		if syzType.Name() == "argv_array" && len(syzType.Fields) != 0 {
+			// strace represents argv as one group, while argv_array wraps the
+			// complete array and a trailing NULL sentinel in a struct.
+			args = append(args, ctx.genArg(syzType.Fields[0].Type,
+				syzType.Fields[0].Dir(dir), a))
+			for _, field := range syzType.Fields[1:] {
+				args = append(args, field.DefaultArg(field.Dir(dir)))
+			}
+			return prog.MakeGroupArg(syzType, dir, args)
+		}
 		for i := range syzType.Fields {
 			fldDir := syzType.Fields[i].Dir(dir)
 			if prog.IsPad(syzType.Fields[i].Type) {
