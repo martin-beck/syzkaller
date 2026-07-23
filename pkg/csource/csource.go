@@ -823,11 +823,17 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			if src, ok := call.Args[0].(prog.ExecArgResult); ok && src.DivOp <= 1 && uint32(src.AddOp) == 0 &&
 				!futureRawIOUringFDs[src.Index] {
 				futureRawIOUringFDs[src.Index], changed = true, true
+			} else if src, ok := call.Args[0].(prog.ExecArgConst); ok &&
+				!futureRawIOUringConstants[int32(src.Value)] {
+				futureRawIOUringConstants[int32(src.Value)], changed = true, true
 			}
 			if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
 				if dst, ok := call.Args[1].(prog.ExecArgResult); ok && dst.DivOp <= 1 && uint32(dst.AddOp) == 0 &&
 					!futureRawIOUringFDs[dst.Index] {
 					futureRawIOUringFDs[dst.Index], changed = true, true
+				} else if dst, ok := call.Args[1].(prog.ExecArgConst); ok &&
+					!futureRawIOUringConstants[int32(dst.Value)] {
+					futureRawIOUringConstants[int32(dst.Value)], changed = true, true
 				}
 			}
 		}
