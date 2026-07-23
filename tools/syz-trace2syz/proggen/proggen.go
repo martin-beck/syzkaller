@@ -292,9 +292,14 @@ func (ctx *context) genRtSigactionCall() *prog.Call {
 			}
 		}
 		if len(action.Elems) > 2 {
-			ctx.setConstArg(call, 1, sigactionFlags(action.Elems[2]))
+			ctx.setConstArg(call, 1, ctx.sigactionFlags(action.Elems[2]))
 		}
 	}
+	sigsetSize := uint64(8)
+	if ctx.target.Arch == "mips64le" {
+		sigsetSize = 16
+	}
+	ctx.setConstArg(call, 6, sigsetSize)
 	ctx.finishCall(call, traceCall)
 	return call
 }
@@ -306,6 +311,15 @@ func (ctx *context) sigsetMask(arg parser.IrType) [4]uint64 {
 			elemMask := ctx.sigsetMask(elem)
 			for i := range mask {
 				mask[i] |= elemMask[i]
+			}
+		}
+		if group.Complement {
+			words := 2
+			if ctx.target.Arch == "mips64le" {
+				words = 4
+			}
+			for i := 0; i < words; i++ {
+				mask[i] = ^mask[i] & 0xffffffff
 			}
 		}
 		return mask
@@ -362,19 +376,18 @@ func (ctx *context) signalNumber(arg parser.IrType) uint64 {
 	}[name]
 }
 
-func sigactionFlags(arg parser.IrType) uint64 {
+func (ctx *context) sigactionFlags(arg parser.IrType) uint64 {
 	if value, ok := arg.(parser.Constant); ok {
 		return value.Val()
 	}
 	text := fmt.Sprint(arg)
 	var flags uint64
-	for name, value := range map[string]uint64{
-		"SA_NOCLDSTOP": 1, "SA_NOCLDWAIT": 2, "SA_SIGINFO": 4,
-		"SA_ONSTACK": 0x08000000, "SA_RESTART": 0x10000000,
-		"SA_NODEFER": 0x40000000, "SA_RESETHAND": 0x80000000,
+	for _, name := range []string{
+		"SA_NOCLDSTOP", "SA_NOCLDWAIT", "SA_SIGINFO", "SA_ONSTACK",
+		"SA_RESTART", "SA_NODEFER", "SA_RESETHAND",
 	} {
 		if strings.Contains(text, name) {
-			flags |= value
+			flags |= ctx.target.ConstMap[name]
 		}
 	}
 	return flags

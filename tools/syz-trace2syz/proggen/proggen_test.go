@@ -730,7 +730,7 @@ func TestAIOCallsUseBoundedLifecycles(t *testing.T) {
 func TestRtSigactionIsolatesDispositionChange(t *testing.T) {
 	p := parseSingleProg(t, `rt_sigaction(SIGUSR2, {sa_handler=0x1234, sa_mask=[USR1 TERM], sa_flags=0x10000000}, NULL, 8) = 0`)
 	if got := strings.TrimSpace(string(p.Serialize())); got !=
-		"syz_csb_rt_sigaction(0xc, 0x10000000, 0x4200, 0x0, 0x0, 0x0)[0]" {
+		"syz_csb_rt_sigaction(0xc, 0x10000000, 0x4200, 0x0, 0x0, 0x0, 0x8)[0]" {
 		t.Fatalf("got %q", got)
 	}
 	src, _, err := csource.Write(p, csource.Options{Slowdown: 1, CSB: true, Trace: true})
@@ -765,6 +765,10 @@ func TestSignalNumberUsesTargetABI(t *testing.T) {
 	mask := ctx.sigsetMask(&parser.GroupType{Elems: []parser.IrType{parser.Constant(65), parser.Constant(127)}})
 	if mask != [4]uint64{0, 0, 1, 1 << 30} {
 		t.Fatalf("MIPS high signal mask = %#v", mask)
+	}
+	complement := ctx.sigsetMask(&parser.GroupType{Complement: true})
+	if complement != [4]uint64{0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff} {
+		t.Fatalf("MIPS complemented mask = %#v", complement)
 	}
 }
 
