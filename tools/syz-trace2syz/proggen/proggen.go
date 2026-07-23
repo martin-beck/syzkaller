@@ -282,7 +282,7 @@ func (ctx *context) genRtSigactionCall() *prog.Call {
 	if call == nil {
 		return nil
 	}
-	ctx.setConstArg(call, 0, constArgValue(traceCall.Args[0], 0))
+	ctx.setConstArg(call, 0, signalNumber(traceCall.Args[0]))
 	if action, ok := traceCall.Args[1].(*parser.GroupType); ok {
 		if len(action.Elems) > 1 {
 			mask := sigsetMask(action.Elems[1])
@@ -305,11 +305,30 @@ func sigsetMask(arg parser.IrType) uint64 {
 		}
 		return mask
 	}
-	sig := constArgValue(arg, 0)
+	sig := signalNumber(arg)
 	if sig == 0 || sig > 64 {
 		return 0
 	}
 	return uint64(1) << (sig - 1)
+}
+
+func signalNumber(arg parser.IrType) uint64 {
+	if value, ok := arg.(parser.Constant); ok {
+		return value.Val()
+	}
+	buffer, ok := arg.(*parser.BufferType)
+	if !ok {
+		return 0
+	}
+	name := strings.TrimPrefix(buffer.Val, "SIG")
+	return map[string]uint64{
+		"HUP": 1, "INT": 2, "QUIT": 3, "ILL": 4, "TRAP": 5, "ABRT": 6,
+		"BUS": 7, "FPE": 8, "KILL": 9, "USR1": 10, "SEGV": 11, "USR2": 12,
+		"PIPE": 13, "ALRM": 14, "TERM": 15, "STKFLT": 16, "CHLD": 17,
+		"CONT": 18, "STOP": 19, "TSTP": 20, "TTIN": 21, "TTOU": 22,
+		"URG": 23, "XCPU": 24, "XFSZ": 25, "VTALRM": 26, "PROF": 27,
+		"WINCH": 28, "IO": 29, "PWR": 30, "SYS": 31,
+	}[name]
 }
 
 func sigactionFlags(arg parser.IrType) uint64 {
