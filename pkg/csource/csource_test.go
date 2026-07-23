@@ -142,6 +142,8 @@ func TestCSBInvalidatesResultsBeforeCalls(t *testing.T) {
 	}
 	assert.Contains(t, string(src), "for (call = 0; call < 5; call++) {\n\tswitch (call) {\n"+
 		"\tcase 0:\n\t\tUNIQUE_VAR(ctx->r)[0] = 0xffffffffffffffff;\n\t\tbreak;")
+	assert.Less(t, strings.Index(string(src), "__atomic_load_n(&UNIQUE_VAR(running), __ATOMIC_ACQUIRE)"),
+		strings.Index(string(src), "UNIQUE_VAR(ctx->r)[0] = 0xffffffffffffffff;"))
 	src, _, err = Write(p, Options{Slowdown: 1})
 	if err != nil {
 		t.Fatal(err)
