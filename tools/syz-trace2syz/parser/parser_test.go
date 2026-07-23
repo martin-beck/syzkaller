@@ -393,4 +393,7 @@ func TestRestartedResumedRecordIsSkipped(t *testing.T) {
 	if !shouldSkip(`1 <... wait4 resumed>) = ? ERESTARTSYS (To be restarted if SA_RESTART is set)`) {
 		t.Fatal("resumed restart record was not skipped")
 	}
+	if !shouldSkip(`1 read(3</tmp/a)>, "x", 1) = ? ERESTARTSYS (To be restarted)`) {
+		t.Fatal("restart after decoded fd annotation was not skipped")
+	}
 }

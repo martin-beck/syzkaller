@@ -88,7 +88,7 @@ func shouldSkip(line string) bool {
 	// The final result delimiter is outside quoted arguments. Traced buffers can
 	// contain arbitrary text that resembles a restart result.
 	result := ""
-	quoted, escaped, depth := false, false, 0
+	quoted, angled, escaped, depth := false, false, false, 0
 	if strings.HasPrefix(record, "<... ") && strings.Contains(record, " resumed>") {
 		// A resumed record contains the closing parenthesis but not its opener.
 		depth = 1
@@ -104,9 +104,21 @@ func shouldSkip(line string) bool {
 			}
 			continue
 		}
+		if angled {
+			if escaped {
+				escaped = false
+			} else if ch == '\\' {
+				escaped = true
+			} else if ch == '>' {
+				angled = false
+			}
+			continue
+		}
 		switch ch {
 		case '"':
 			quoted = true
+		case '<':
+			angled = true
 		case '(':
 			depth++
 		case ')':
