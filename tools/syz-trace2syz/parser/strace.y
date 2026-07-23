@@ -185,6 +185,8 @@ bpf_constant:
         }
     }
     | bpf_constant OR bpf_constant {$$ = $1 | $3}
+    | bpf_constant OR constant {$$ = $1 | $3}
+    | constant OR bpf_constant {$$ = $1 | $3}
 
 field_type:
     type COLON type {$$ = $3}
