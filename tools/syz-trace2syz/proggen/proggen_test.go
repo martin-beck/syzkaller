@@ -650,6 +650,32 @@ func TestTaskCreationLifecycleFromTrace(t *testing.T) {
 	}
 }
 
+func TestSchedSetaffinityUsesCurrentMask(t *testing.T) {
+	p := parseSingleProg(t, `sched_setaffinity(0, 8192, [0, 1, 2, ...]) = 0`)
+	if got, want := strings.TrimSpace(string(p.Serialize())), "syz_reapply_affinity()[0]"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	src, _, err := csource.Write(p, csource.Options{Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "syz_reapply_affinity()") {
+		t.Fatalf("generated source does not reapply affinity:\n%s", src)
+	}
+	bin, err := csource.Build(p.Target, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(bin)
+}
+
+func TestFailedSchedSetaffinityIsDropped(t *testing.T) {
+	p := parseSingleProg(t, `sched_setaffinity(0, 0, NULL) = -1 EINVAL (Invalid argument)`)
+	if len(p.Calls) != 0 {
+		t.Fatalf("failed affinity call must be dropped:\n%s", p.Serialize())
+	}
+}
+
 func TestFailedTaskCreationIsDropped(t *testing.T) {
 	p := parseSingleProg(t, `
 clone(child_stack=NULL, flags=0x7c021000|17) = -1 EPERM (Operation not permitted)

@@ -16,10 +16,65 @@ import (
 	"github.com/google/syzkaller/pkg/log"
 )
 
-func parseSyscall(scanner *bufio.Scanner) (int, *Syscall) {
-	lex := newStraceLexer(scanner.Bytes())
+func parseSyscall(data []byte) (int, *Syscall) {
+	lex := newStraceLexer(data)
 	ret := StraceParse(lex)
 	return ret, lex.result
+}
+
+func normalizeStraceLine(line string) string {
+	name, start := straceCall(line)
+	// Large CPU sets are truncated with a trailing ellipsis.
+	if name == "sched_setaffinity" {
+		line = strings.Replace(line, ", ...]", "]", 1)
+		line = strings.Replace(line, " ...]", "]", 1)
+	}
+	// strace 6.8 can render a zero statx flags argument as an empty field.
+	// Normalize only that known form so malformed arguments in other calls
+	// continue to fail parsing instead of being silently rewritten.
+	if name == "statx" {
+		lastComma, commas := start, 0
+		quoted, escaped := false, false
+		for i := lastComma + 1; i < len(line); i++ {
+			switch {
+			case escaped:
+				escaped = false
+			case quoted && line[i] == '\\':
+				escaped = true
+			case line[i] == '"':
+				quoted = !quoted
+			case !quoted && line[i] == ',':
+				commas++
+				if commas == 3 && strings.TrimSpace(line[lastComma+1:i]) == "" {
+					return line[:lastComma+1] + " 0" + line[i:]
+				}
+				lastComma = i
+			}
+		}
+	}
+	return line
+}
+
+func straceCall(line string) (string, int) {
+	quoted, escaped := false, false
+	for i := 0; i < len(line); i++ {
+		switch {
+		case escaped:
+			escaped = false
+		case quoted && line[i] == '\\':
+			escaped = true
+		case line[i] == '"':
+			quoted = !quoted
+		case !quoted && line[i] == '(':
+			start := i
+			for start > 0 && (line[start-1] == '_' || line[start-1] >= 'a' && line[start-1] <= 'z' ||
+				line[start-1] >= 'A' && line[start-1] <= 'Z' || line[start-1] >= '0' && line[start-1] <= '9') {
+				start--
+			}
+			return line[start:i], i
+		}
+	}
+	return "", -1
 }
 
 func shouldSkip(line string) bool {
@@ -100,7 +155,7 @@ func ParseData(data []byte, splitThreads bool, numLines int) (*TraceTree, *Trace
 			continue
 		}
 		log.Logf(4, "scanning call: %s", line)
-		ret, call := parseSyscall(scanner)
+		ret, call := parseSyscall([]byte(normalizeStraceLine(line)))
 		if call == nil || ret != 0 {
 			fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 			return nil, nil, fmt.Errorf("failed to parse line: %v", line)
