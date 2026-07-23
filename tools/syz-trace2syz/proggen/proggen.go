@@ -263,11 +263,64 @@ func (ctx *context) genCalls() []*prog.Call {
 		// Terminate a disposable child so the repeated CSB worker remains alive.
 		return singleCall(ctx.genDefaultSafeCall("syz_csb_" + ctx.currentStraceCall.CallName))
 	case "rt_sigaction":
-		// Handler addresses are not portable; install and restore a generated no-op handler.
-		return singleCall(ctx.genDefaultSafeCall("syz_csb_rt_sigaction"))
+		return singleCall(ctx.genRtSigactionCall())
 	default:
 		return singleCall(ctx.genCall())
 	}
+}
+
+func (ctx *context) genRtSigactionCall() *prog.Call {
+	traceCall := ctx.currentStraceCall
+	if len(traceCall.Args) < 2 {
+		return nil
+	}
+	// A NULL action is a read-only query and is safe to replay directly.
+	if action, ok := traceCall.Args[1].(parser.Constant); ok && action.Val() == 0 {
+		return ctx.genCall()
+	}
+	call := ctx.makeDefaultCall("syz_csb_rt_sigaction")
+	if call == nil {
+		return nil
+	}
+	ctx.setConstArg(call, 0, constArgValue(traceCall.Args[0], 0))
+	if action, ok := traceCall.Args[1].(*parser.GroupType); ok {
+		if len(action.Elems) > 1 {
+			ctx.setConstArg(call, 2, firstConstValue(action.Elems[1]))
+		}
+		if len(action.Elems) > 2 {
+			ctx.setConstArg(call, 1, sigactionFlags(action.Elems[2]))
+		}
+	}
+	ctx.finishCall(call, traceCall)
+	return call
+}
+
+func firstConstValue(arg parser.IrType) uint64 {
+	if group, ok := arg.(*parser.GroupType); ok {
+		if len(group.Elems) == 0 {
+			return 0
+		}
+		return firstConstValue(group.Elems[0])
+	}
+	return constArgValue(arg, 0)
+}
+
+func sigactionFlags(arg parser.IrType) uint64 {
+	if value, ok := arg.(parser.Constant); ok {
+		return value.Val()
+	}
+	text := fmt.Sprint(arg)
+	var flags uint64
+	for name, value := range map[string]uint64{
+		"SA_NOCLDSTOP": 1, "SA_NOCLDWAIT": 2, "SA_SIGINFO": 4,
+		"SA_ONSTACK": 0x08000000, "SA_RESTART": 0x10000000,
+		"SA_NODEFER": 0x40000000, "SA_RESETHAND": 0x80000000,
+	} {
+		if strings.Contains(text, name) {
+			flags |= value
+		}
+	}
+	return flags
 }
 
 var sanitizedCallMinArgs = map[string]int{

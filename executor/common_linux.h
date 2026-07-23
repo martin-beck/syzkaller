@@ -115,7 +115,7 @@ static void UNIQUE_FUNC(csb_noop_signal_handler)(int sig)
 }
 
 // Isolate the process-wide disposition change from concurrent benchmark workers.
-static long UNIQUE_FUNC(syz_csb_rt_sigaction)(void)
+static long UNIQUE_FUNC(syz_csb_rt_sigaction)(long sig, long flags, long mask)
 {
 	long pid = fork();
 	if (pid < 0)
@@ -125,10 +125,11 @@ static long UNIQUE_FUNC(syz_csb_rt_sigaction)(void)
 		struct sigaction old;
 		memset(&action, 0, sizeof(action));
 		action.sa_handler = UNIQUE_FUNC(csb_noop_signal_handler);
-		sigemptyset(&action.sa_mask);
-		long ret = sigaction(SIGUSR1, &action, &old);
+		action.sa_flags = flags;
+		memcpy(&action.sa_mask, &mask, sizeof(mask));
+		long ret = sigaction(sig, &action, &old);
 		if (ret == 0)
-			ret = sigaction(SIGUSR1, &old, 0);
+			ret = sigaction(sig, &old, 0);
 		_exit(ret == 0 ? 0 : 1);
 	}
 	int status;
