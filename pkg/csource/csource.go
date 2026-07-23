@@ -960,6 +960,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 					offset = "+PTR_OFFSET"
 				}
 				fmt.Fprintf(w, "\tuint32 csb_io_uring_flags_%[1]d;\n"+
+					"\tint csb_io_uring_flags_ok_%[1]d = 0;\n"+
 					"\tstruct { void* base; size_t len; } csb_io_uring_local_%[1]d = "+
 					"{&csb_io_uring_flags_%[1]d, sizeof(csb_io_uring_flags_%[1]d)};\n"+
 					"\tstruct { void* base; size_t len; } csb_io_uring_remote_%[1]d = "+
@@ -967,9 +968,11 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 					"\tif (syscall(SYS_process_vm_readv, getpid(), &csb_io_uring_local_%[1]d, 1, "+
 					"&csb_io_uring_remote_%[1]d, 1, 0) == sizeof(csb_io_uring_flags_%[1]d)) {\n"+
 					"\t\tcsb_io_uring_flags_%[1]d &= ~%[4]d;\n"+
-					"\t\tsyscall(SYS_process_vm_writev, getpid(), &csb_io_uring_local_%[1]d, 1, "+
-					"&csb_io_uring_remote_%[1]d, 1, 0);\n\t}\n",
+					"\t\tcsb_io_uring_flags_ok_%[1]d = syscall(SYS_process_vm_writev, getpid(), "+
+					"&csb_io_uring_local_%[1]d, 1, &csb_io_uring_remote_%[1]d, 1, 0) == "+
+					"sizeof(csb_io_uring_flags_%[1]d);\n\t}\n",
 					ci, params.Value+8, offset, ctx.target.ConstMap["IORING_SETUP_SQPOLL"])
+				guardCondition = fmt.Sprintf("csb_io_uring_flags_ok_%d", ci)
 			}
 		}
 		if ctx.opts.CSB && isSeccompAddfd(call, ctx.target.ConstMap["SECCOMP_IOCTL_NOTIF_ADDFD"]) {
