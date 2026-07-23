@@ -916,6 +916,10 @@ func localIOResources(p prog.ExecProg, target *prog.Target) map[uint64]bool {
 		case "fcntl":
 			duplicate := fcntlCommand(call, target.ConstMap["F_DUPFD"]) ||
 				fcntlCommand(call, target.ConstMap["F_DUPFD_CLOEXEC"])
+			if _, dynamic := call.Args[1].(prog.ExecArgResult); dynamic {
+				// A dynamic command may duplicate a local descriptor at runtime.
+				duplicate = true
+			}
 			if duplicate &&
 				call.Index != prog.ExecNoCopyout && localIOArg(call, local) {
 				local[call.Index] = true

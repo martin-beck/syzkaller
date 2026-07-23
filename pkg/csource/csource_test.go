@@ -299,7 +299,8 @@ func TestCSBDynamicOpenFlagsAndFcntlCommand(t *testing.T) {
 	p, err := target.Deserialize([]byte("r0 = getpid()\n"+
 		"r1 = openat(0xffffffffffffff9c, &(0x7f0000000000)='./fifo\\x00', 0x0, 0x0)\n"+
 		"creat(&(0x7f0000000040)='./fifo2\\x00', 0x0)\n"+
-		"fcntl$auto(r1, 0x0, 0x0)\n"), prog.NonStrict)
+		"r2 = fcntl$auto(r1, 0x0, 0x0)\n"+
+		"read(r2, &(0x7f0000000080), 0x1)\n"), prog.NonStrict)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,6 +316,8 @@ func TestCSBDynamicOpenFlagsAndFcntlCommand(t *testing.T) {
 	decoded.Calls[1].Args[2] = dynamic
 	decoded.Calls[2].Args[1] = dynamic
 	decoded.Calls[3].Args[1] = dynamic
+	local := localIOResources(decoded, target)
+	assert.True(t, local[decoded.Calls[3].Index])
 	ctx := &context{
 		p: p, opts: Options{CSB: true, Slowdown: 1}, target: target,
 		sysTarget: targets.Get(target.OS, target.Arch), calls: make(map[string]uint64),
