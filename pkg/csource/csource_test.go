@@ -274,8 +274,8 @@ func TestCSBProtectRawIoUring(t *testing.T) {
 		if guarded != csb {
 			t.Fatalf("CSB=%v: raw submission guarded=%v", csb, guarded)
 		}
-		if got := strings.Contains(string(src), "&= ~2"); got != csb {
-			t.Fatalf("CSB=%v: SQPOLL disabled=%v", csb, got)
+		if got := strings.Contains(string(src), "&= ~6"); got != csb {
+			t.Fatalf("CSB=%v: SQPOLL and SQ_AFF disabled=%v", csb, got)
 		}
 	}
 }
@@ -297,6 +297,8 @@ func TestCSBClearsSQPOLLAtAbsoluteParams(t *testing.T) {
 	assert.Contains(t, string(src), "SYS_process_vm_readv")
 	assert.Contains(t, string(src), "SYS_process_vm_writev")
 	assert.Contains(t, string(src),
+		"csb_io_uring_params_read_0 < 0 && csb_io_uring_params_errno_0 == EFAULT")
+	assert.Contains(t, string(src),
 		"csb_io_uring_params_ok_0 ? (intptr_t)csb_io_uring_params_0 : (intptr_t)(0x0)")
 	p, err = target.Deserialize([]byte("syz_io_uring_setup(0x1, &(0x7f0000000000)={0x0, 0x0, 0x2}, "+
 		"&(0x7f0000001000/0x1000)=nil, &(0x7f0000002000/0x1000)=nil)\n"), prog.NonStrict)
@@ -308,7 +310,7 @@ func TestCSBClearsSQPOLLAtAbsoluteParams(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Contains(t, string(src), "{(void*)(0x200000000000+PTR_OFFSET), sizeof(csb_io_uring_params_0)}")
-	assert.Contains(t, string(src), "*(uint32_t*)(csb_io_uring_params_0 + 1) &= ~2")
+	assert.Contains(t, string(src), "*(uint32_t*)(csb_io_uring_params_0 + 1) &= ~6")
 	assert.Contains(t, string(src), "(intptr_t)(0x200000000000+PTR_OFFSET)")
 }
 
@@ -1077,7 +1079,7 @@ syscall(SYS_csource8, /*num=*/(intptr_t)-1);
 }
 
 func generateSandboxFunctionSignatureTestCase(t *testing.T, sandbox string, sandboxArg int, expected, message string) {
-	actual := generateSandboxFunctionSignature(sandbox, sandboxArg, &context{})
+	actual := (&context{}).sourceDialect().sandboxCall(sandbox, sandboxArg)
 	assert.Equal(t, actual, expected, message)
 }
 
