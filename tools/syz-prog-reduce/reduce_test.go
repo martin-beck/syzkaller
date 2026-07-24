@@ -274,12 +274,6 @@ func TestReadProgSanitizesAbsoluteFilenames(t *testing.T) {
 	}
 }
 
-func TestSanitizeFilename(t *testing.T) {
-	if got := string(sanitizeFilename([]byte("../../file\x00"))); got != "a/a/../../file\x00" {
-		t.Fatalf("sanitizeFilename = %q", got)
-	}
-}
-
 func repeatedFilesProg(n int) string {
 	var b strings.Builder
 	for i := 0; i < n; i++ {

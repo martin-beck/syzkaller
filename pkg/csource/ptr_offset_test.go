@@ -37,7 +37,7 @@ func TestValInMMapRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := &context{target: target, sysTarget: targets.Get(target.OS, target.Arch)}
+	ctx := &context{opts: Options{CSB: true}, target: target, sysTarget: targets.Get(target.OS, target.Arch)}
 	min := target.DataOffset
 	max := min + target.NumPages*target.PageSize
 	tests := []struct {
@@ -47,8 +47,8 @@ func TestValInMMapRange(t *testing.T) {
 		{min - 1, false}, {min, true}, {max - 1, true}, {max, false}, {max + 0x1000, false},
 	}
 	for _, test := range tests {
-		if got := valInMMapRange(ctx, test.value); got != test.want {
-			t.Errorf("valInMMapRange(%#x)=%v, want %v", test.value, got, test.want)
+		if got := ctx.sourceDialect().pointerOffset(test.value) != ""; got != test.want {
+			t.Errorf("pointerOffset(%#x) present=%v, want %v", test.value, got, test.want)
 		}
 	}
 }
