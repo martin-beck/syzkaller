@@ -78,10 +78,70 @@ func straceCall(line string) (string, int) {
 }
 
 func shouldSkip(line string) bool {
-	return strings.Contains(line, "ERESTART") ||
-		strings.Contains(line, "+++") ||
-		strings.Contains(line, "---") ||
-		strings.Contains(line, "<ptrace(SYSCALL):No such process>")
+	record := strings.TrimSpace(line)
+	if space := strings.IndexByte(record, ' '); space >= 0 {
+		if _, err := strconv.ParseInt(record[:space], 10, 64); err == nil {
+			record = strings.TrimSpace(record[space+1:])
+		}
+	}
+	unfinished := strings.LastIndex(record, "<unfinished ...>")
+	// The final result delimiter is outside quoted arguments. Traced buffers can
+	// contain arbitrary text that resembles a restart result.
+	result := ""
+	quoted, angled, escaped, depth := false, false, false, 0
+	if strings.HasPrefix(record, "<... ") &&
+		(strings.Contains(record, " resumed>") || strings.HasPrefix(record, "<... resuming ")) {
+		// A resumed record contains the closing parenthesis but not its opener.
+		depth = 1
+	}
+	for i, ch := range record {
+		if quoted {
+			if escaped {
+				escaped = false
+			} else if ch == '\\' {
+				escaped = true
+			} else if ch == '"' {
+				quoted = false
+			}
+			continue
+		}
+		if angled {
+			if escaped {
+				escaped = false
+			} else if ch == '\\' {
+				escaped = true
+			} else if ch == '>' {
+				angled = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			quoted = true
+		case '<':
+			if !strings.HasPrefix(record[i:], "<<") && (i == 0 || record[i-1] != '<') {
+				angled = true
+			}
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+				if depth == 0 && result == "" {
+					result = strings.TrimLeft(record[i+1:], " \t")
+				}
+			}
+		}
+	}
+	resultFields := strings.Fields(result)
+	restart := len(resultFields) >= 3 && resultFields[0] == "=" &&
+		strings.HasPrefix(resultFields[2], "ERESTART")
+	return restart ||
+		(unfinished > strings.LastIndex(record, "\"") && strings.HasSuffix(record, " = ?")) ||
+		strings.HasPrefix(record, "????(") ||
+		strings.HasPrefix(record, "<... ???? resumed") ||
+		strings.HasPrefix(record, "+++") || strings.HasPrefix(record, "---") ||
+		strings.HasPrefix(record, "<ptrace(SYSCALL):No such process>")
 }
 
 func joinSplitValues(data []byte) ([]byte, int64) {
@@ -97,7 +157,7 @@ func joinSplitValues(data []byte) ([]byte, int64) {
 	var rootPid int64
 	for i, line := range lines {
 		fields := strings.Fields(line)
-		if rootPid == 0 && len(fields) != 0 && !shouldSkip(line) {
+		if rootPid == 0 && len(fields) != 0 {
 			rootPid = -1
 			if pid, err := strconv.ParseInt(fields[0], 10, 64); err == nil {
 				rootPid = pid
@@ -135,9 +195,6 @@ func ParseData(data []byte, splitThreads bool, numLines int) (*TraceTree, *Trace
 	var status string
 	data, rootPid := joinSplitValues(data)
 	tree := NewTraceTree()
-	if splitThreads {
-		tree.RootPid = rootPid
-	}
 	trace := new(Trace)
 	lastCalls := make(map[int64](*Syscall))
 	// Creating the process tree
@@ -187,6 +244,9 @@ func ParseData(data []byte, splitThreads bool, numLines int) (*TraceTree, *Trace
 	fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 	if err := scanner.Err(); err != nil {
 		return nil, nil, err
+	}
+	if splitThreads && tree.TraceMap[rootPid] != nil {
+		tree.RootPid = rootPid
 	}
 	if splitThreads && len(tree.TraceMap) == 0 {
 		return nil, nil, nil
