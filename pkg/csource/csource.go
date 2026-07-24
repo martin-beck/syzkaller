@@ -257,7 +257,8 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		excludeIdices = append(excludeIdices, netSrvCloseIdxs...)
 	}
 
-	calls, vars, err := ctx.generateProgCalls(ctx.p, ctx.opts.Trace, ctx.opts.CallComments, netSrvListenIdxs, false)
+	calls, vars, resultResets, err := ctx.generateProgCalls(ctx.p, ctx.opts.Trace, ctx.opts.CallComments,
+		netSrvListenIdxs, false)
 	if err != nil {
 		return nil, metaData, err
 	}
@@ -267,7 +268,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	// for a program and always very similar. Comments on these provide
 	// little-to-no additional context that can't be inferred from looking at
 	// the call arguments directly, and just make the source longer.
-	mmapCalls, _, err := ctx.generateProgCalls(mmapProg, false, false, []int{}, true)
+	mmapCalls, _, _, err := ctx.generateProgCalls(mmapProg, false, false, []int{}, true)
 	if err != nil {
 		return nil, metaData, err
 	}
@@ -306,7 +307,12 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		// only close file descriptors that are not part if the reg init function
 		// TODO: check the potential usage of initFDs below, and in the whole file.
 		if _, ok := listenFDs[fdRes]; !ok {
-			fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(ctx->r)[%v]);\n", fdRes)
+			if ctx.opts.CSB {
+				fmt.Fprintf(closeBuf,
+					"\t{ uint32 fd = (uint32)UNIQUE_VAR(ctx->r)[%[1]v]; if (fd > 2) close(fd); }\n", fdRes)
+			} else {
+				fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(ctx->r)[%v]);\n", fdRes)
+			}
 		}
 	}
 
@@ -327,7 +333,6 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	sandboxFunc := generateSandboxFunctionSignature(ctx.opts.Sandbox, ctx.opts.SandboxArg, ctx)
 
 	results := varsBuf.String()
-
 	// initialization of resource array in reg function
 	var callsNetSrvReg []string
 	if len(vars) > 0 {
@@ -353,6 +358,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 
 	// use all but reg and dereg syscalls
 	var callsNetSrvBody []string
+	var dispatchResultResets []string
 	for idx, call := range calls {
 		if slices.Contains(netSrvListenIdxs, idx) {
 			continue
@@ -364,8 +370,10 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 			continue
 		}
 		callsNetSrvBody = append(callsNetSrvBody, call)
+		dispatchResultResets = append(dispatchResultResets, resultResets[idx])
 	}
 	syscallsBody := ctx.generateSyscalls(callsNetSrvBody, len(vars) != 0)
+	resultResetsCode := generateResultResetSwitch(dispatchResultResets)
 
 	// Get number of listen annotations
 	var callsNetSrvDereg []string
@@ -391,6 +399,7 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		"SYSCALL_DEFINES":        ctx.generateSyscallDefines(),
 		"SANDBOX_FUNC":           sandboxFunc,
 		"RESULTS":                results,
+		"RESULT_RESETS":          resultResetsCode,
 		"SYSCALLS":               syscalls,
 		"SYSCALLS_NET_SRV_REG":   syscallsNetSrvReg,
 		"SYSCALLS_NET_SRV_DEREG": syscallsNetSrvDereg,
@@ -608,8 +617,8 @@ func generateComment(call *prog.Call) string {
 	return linesToCStyleComment(lines)
 }
 
-func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool, initIndices []int,
-	dataMmap bool) ([]string, []uint64, error) {
+func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool,
+	initIndices []int, dataMmap bool) ([]string, []uint64, []string, error) {
 	msgSizes := make([]uint64, len(p.Calls))
 	var comments []string
 	if addComments {
@@ -672,28 +681,370 @@ func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool, ini
 
 	exec, err := p.SerializeForExec()
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to serialize program: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to serialize program: %w", err)
 	}
 	decoded, err := ctx.target.DeserializeExec(exec, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	calls, vars := ctx.generateCalls(decoded, trace, addComments, comments, msgSizes, initIndices, dataMmap)
-	return calls, vars, nil
+	calls, vars, resets := ctx.generateCalls(decoded, trace, addComments, comments, msgSizes, initIndices, dataMmap)
+	return calls, vars, resets, nil
 }
 
 func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
-	callComments []string, msgSizes []uint64, initIndices []int, dataMmap bool) ([]string, []uint64) {
+	callComments []string, msgSizes []uint64, initIndices []int, dataMmap bool) ([]string, []uint64, []string) {
 	var calls []string
+	var resultResets []string
 	csumSeq := 0
+	localIO := localIOResources(p, ctx.target)
+	ioUringCreated := false
+	ioUringFDs := make(map[uint64]bool)
+	rawIOUringFDs := make(map[uint64]bool)
+	rawIOUringConstants := make(map[int32]bool)
+	rawUnknownIOUring := false
+	// Async calls can execute after later mappings, so collect their potentially raw rings up front.
+	futureRawIOUringFDs := make(map[uint64]bool)
+	futureRawIOUringConstants := make(map[int32]bool)
+	futureRawUnknownIOUring := false
+	hasIOUringSetup := false
+	for _, call := range p.Calls {
+		if call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup" {
+			hasIOUringSetup = true
+			if call.Meta.CallName == "io_uring_setup" && call.Index == prog.ExecNoCopyout {
+				if params, ok := call.Args[1].(prog.ExecArgConst); ok {
+					for _, copyin := range call.Copyin {
+						flags, ok := copyin.Arg.(prog.ExecArgConst)
+						if ok && copyin.Addr == params.Value+8 &&
+							flags.Value&ctx.target.ConstMap["IORING_SETUP_NO_MMAP"] != 0 {
+							futureRawUnknownIOUring = true
+						}
+					}
+				}
+			}
+		}
+	}
+	for _, call := range p.Calls {
+		rawMapping := call.Meta.Name == "mmap$IORING_OFF_SQ_RING" || call.Meta.Name == "mmap$IORING_OFF_SQES"
+		if !rawMapping && hasIOUringSetup && (call.Meta.CallName == "mmap" || call.Meta.CallName == "mmap2") &&
+			len(call.Args) > 5 {
+			offset, ok := call.Args[5].(prog.ExecArgConst)
+			sqRingOffset := ctx.target.ConstMap["IORING_OFF_SQ_RING"]
+			sqesOffset := ctx.target.ConstMap["IORING_OFF_SQES"]
+			if call.Meta.CallName == "mmap2" {
+				sqRingOffset /= ctx.target.PageSize
+				sqesOffset /= ctx.target.PageSize
+			}
+			rawMapping = ok && (offset.Value == sqRingOffset || offset.Value == sqesOffset)
+		}
+		if rawMapping && len(call.Args) > 4 {
+			if fd, ok := call.Args[4].(prog.ExecArgResult); ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
+				futureRawIOUringFDs[fd.Index] = true
+			} else if fd, ok := call.Args[4].(prog.ExecArgConst); ok && int32(fd.Value) > 2 {
+				futureRawIOUringConstants[int32(fd.Value)] = true
+			}
+		}
+	}
+	for i := len(p.Calls) - 1; i >= 0; i-- {
+		call := p.Calls[i]
+		duplicate := call.Meta.CallName == "dup" || call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3" ||
+			fcntlCommand(call, ctx.target.ConstMap["F_DUPFD"]) ||
+			fcntlCommand(call, ctx.target.ConstMap["F_DUPFD_CLOEXEC"])
+		if duplicate && call.Index != prog.ExecNoCopyout && futureRawIOUringFDs[call.Index] {
+			if fd, ok := call.Args[0].(prog.ExecArgResult); ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
+				futureRawIOUringFDs[fd.Index] = true
+			}
+		}
+		if duplicate && len(call.Args) != 0 {
+			if src, ok := call.Args[0].(prog.ExecArgConst); ok && futureRawIOUringConstants[int32(src.Value)] {
+				if call.Index != prog.ExecNoCopyout {
+					futureRawIOUringFDs[call.Index] = true
+				}
+				if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
+					if dst, ok := call.Args[1].(prog.ExecArgResult); ok && dst.DivOp <= 1 && uint32(dst.AddOp) == 0 {
+						futureRawIOUringFDs[dst.Index] = true
+					}
+				}
+			}
+		}
+		if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
+			if dst, ok := call.Args[1].(prog.ExecArgResult); ok && dst.DivOp <= 1 && uint32(dst.AddOp) == 0 &&
+				futureRawIOUringFDs[dst.Index] {
+				if src, ok := call.Args[0].(prog.ExecArgResult); ok && src.DivOp <= 1 && uint32(src.AddOp) == 0 {
+					futureRawIOUringFDs[src.Index] = true
+				}
+			}
+			if dst, ok := call.Args[1].(prog.ExecArgConst); ok && futureRawIOUringConstants[int32(dst.Value)] {
+				if src, ok := call.Args[0].(prog.ExecArgResult); ok && src.DivOp <= 1 && uint32(src.AddOp) == 0 {
+					futureRawIOUringFDs[src.Index] = true
+				}
+			}
+		}
+		if call.Meta.CallName == "pidfd_getfd" && call.Index != prog.ExecNoCopyout &&
+			futureRawIOUringFDs[call.Index] && len(call.Args) > 1 {
+			if src, ok := call.Args[1].(prog.ExecArgResult); ok && src.DivOp <= 1 && uint32(src.AddOp) == 0 {
+				futureRawIOUringFDs[src.Index] = true
+			}
+		}
+		if call.Meta.CallName == "pidfd_getfd" && call.Index != prog.ExecNoCopyout && len(call.Args) > 1 {
+			if src, ok := call.Args[1].(prog.ExecArgResult); ok && src.DivOp <= 1 && uint32(src.AddOp) == 0 &&
+				futureRawIOUringFDs[src.Index] {
+				futureRawIOUringFDs[call.Index] = true
+			}
+			if src, ok := call.Args[1].(prog.ExecArgConst); ok &&
+				(futureRawIOUringConstants[int32(src.Value)] || futureRawUnknownIOUring) {
+				futureRawIOUringFDs[call.Index] = true
+			}
+		}
+	}
+	// Duplicate relationships are aliases in both directions. Close the graph to handle
+	// mappings and async enters on either side regardless of source-program order.
+	for changed := true; changed; {
+		changed = false
+		for _, call := range p.Calls {
+			duplicate := call.Meta.CallName == "dup" || call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3" ||
+				fcntlCommand(call, ctx.target.ConstMap["F_DUPFD"]) ||
+				fcntlCommand(call, ctx.target.ConstMap["F_DUPFD_CLOEXEC"])
+			if !duplicate || len(call.Args) == 0 {
+				continue
+			}
+			rawAlias := call.Index != prog.ExecNoCopyout && futureRawIOUringFDs[call.Index]
+			if src, ok := call.Args[0].(prog.ExecArgResult); ok && src.DivOp <= 1 && uint32(src.AddOp) == 0 {
+				rawAlias = rawAlias || futureRawIOUringFDs[src.Index]
+			} else if src, ok := call.Args[0].(prog.ExecArgConst); ok {
+				rawAlias = rawAlias || futureRawIOUringConstants[int32(src.Value)]
+			}
+			if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
+				if dst, ok := call.Args[1].(prog.ExecArgResult); ok && dst.DivOp <= 1 && uint32(dst.AddOp) == 0 {
+					rawAlias = rawAlias || futureRawIOUringFDs[dst.Index]
+				} else if dst, ok := call.Args[1].(prog.ExecArgConst); ok {
+					rawAlias = rawAlias || futureRawIOUringConstants[int32(dst.Value)]
+				}
+			}
+			if !rawAlias {
+				continue
+			}
+			if call.Index != prog.ExecNoCopyout && !futureRawIOUringFDs[call.Index] {
+				futureRawIOUringFDs[call.Index], changed = true, true
+			}
+			if src, ok := call.Args[0].(prog.ExecArgResult); ok && src.DivOp <= 1 && uint32(src.AddOp) == 0 &&
+				!futureRawIOUringFDs[src.Index] {
+				futureRawIOUringFDs[src.Index], changed = true, true
+			} else if src, ok := call.Args[0].(prog.ExecArgConst); ok &&
+				!futureRawIOUringConstants[int32(src.Value)] {
+				futureRawIOUringConstants[int32(src.Value)], changed = true, true
+			}
+			if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
+				if dst, ok := call.Args[1].(prog.ExecArgResult); ok && dst.DivOp <= 1 && uint32(dst.AddOp) == 0 &&
+					!futureRawIOUringFDs[dst.Index] {
+					futureRawIOUringFDs[dst.Index], changed = true, true
+				} else if dst, ok := call.Args[1].(prog.ExecArgConst); ok &&
+					!futureRawIOUringConstants[int32(dst.Value)] {
+					futureRawIOUringConstants[int32(dst.Value)], changed = true, true
+				}
+			}
+		}
+	}
 	for ci, call := range p.Calls {
+		// Track raw rings in program order so later mappings don't suppress earlier submissions.
+		if call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup" {
+			ioUringCreated = true
+			if call.Meta.CallName == "io_uring_setup" {
+				if params, ok := call.Args[1].(prog.ExecArgConst); ok {
+					for _, copyin := range call.Copyin {
+						flags, ok := copyin.Arg.(prog.ExecArgConst)
+						if ok && copyin.Addr == params.Value+8 && flags.Value&ctx.target.ConstMap["IORING_SETUP_NO_MMAP"] != 0 {
+							if call.Index != prog.ExecNoCopyout {
+								rawIOUringFDs[call.Index] = true
+								futureRawIOUringFDs[call.Index] = true
+							} else {
+								rawUnknownIOUring = true
+								futureRawUnknownIOUring = true
+							}
+						}
+					}
+				}
+			}
+			if call.Index != prog.ExecNoCopyout {
+				ioUringFDs[call.Index] = true
+			}
+		}
+		duplicate := call.Meta.CallName == "dup" || call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3" ||
+			fcntlCommand(call, ctx.target.ConstMap["F_DUPFD"]) ||
+			fcntlCommand(call, ctx.target.ConstMap["F_DUPFD_CLOEXEC"])
+		if duplicate && ioUringResultArg(call, ioUringFDs) {
+			if call.Index != prog.ExecNoCopyout {
+				ioUringFDs[call.Index] = true
+			}
+			if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
+				if fd, ok := call.Args[1].(prog.ExecArgResult); ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
+					ioUringFDs[fd.Index] = true
+				}
+			}
+		}
+		if duplicate && ioUringResultArg(call, rawIOUringFDs) {
+			if call.Index != prog.ExecNoCopyout {
+				rawIOUringFDs[call.Index] = true
+			}
+			if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
+				if fd, ok := call.Args[1].(prog.ExecArgResult); ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
+					rawIOUringFDs[fd.Index] = true
+				}
+				if fd, ok := call.Args[1].(prog.ExecArgConst); ok {
+					rawIOUringConstants[int32(fd.Value)] = true
+				}
+			}
+		}
+		if duplicate && len(call.Args) != 0 {
+			if src, ok := call.Args[0].(prog.ExecArgConst); ok && rawIOUringConstants[int32(src.Value)] {
+				if call.Index != prog.ExecNoCopyout {
+					rawIOUringFDs[call.Index] = true
+				}
+				if (call.Meta.CallName == "dup2" || call.Meta.CallName == "dup3") && len(call.Args) > 1 {
+					if dst, ok := call.Args[1].(prog.ExecArgResult); ok && dst.DivOp <= 1 && uint32(dst.AddOp) == 0 {
+						rawIOUringFDs[dst.Index] = true
+					} else if dst, ok := call.Args[1].(prog.ExecArgConst); ok {
+						rawIOUringConstants[int32(dst.Value)] = true
+					}
+				}
+			}
+		}
+		if call.Meta.CallName == "pidfd_getfd" && call.Index != prog.ExecNoCopyout && len(call.Args) > 1 {
+			if src, ok := call.Args[1].(prog.ExecArgResult); ok && src.DivOp <= 1 && uint32(src.AddOp) == 0 &&
+				rawIOUringFDs[src.Index] {
+				rawIOUringFDs[call.Index] = true
+			}
+			if src, ok := call.Args[1].(prog.ExecArgConst); ok &&
+				(rawIOUringConstants[int32(src.Value)] || rawUnknownIOUring) {
+				rawIOUringFDs[call.Index] = true
+			}
+		}
+		if (call.Meta.Name == "recvmsg$unix" || call.Meta.Name == "recvmmsg$unix") &&
+			(len(rawIOUringFDs) != 0 || len(rawIOUringConstants) != 0 || rawUnknownIOUring ||
+				len(futureRawIOUringFDs) != 0 || len(futureRawIOUringConstants) != 0 || futureRawUnknownIOUring) {
+			// SCM_RIGHTS descriptors arrive through nested copyouts rather than the return value.
+			for _, copyout := range call.Copyout {
+				futureRawIOUringFDs[copyout.Index] = true
+				if len(rawIOUringFDs) != 0 || len(rawIOUringConstants) != 0 || rawUnknownIOUring {
+					rawIOUringFDs[copyout.Index] = true
+				}
+			}
+		}
+		if call.Meta.Name == "mmap$IORING_OFF_SQ_RING" || call.Meta.Name == "mmap$IORING_OFF_SQES" {
+			if fd, ok := call.Args[4].(prog.ExecArgResult); ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
+				rawIOUringFDs[fd.Index] = true
+			} else if fd, ok := call.Args[4].(prog.ExecArgConst); ok {
+				rawIOUringConstants[int32(fd.Value)] = true
+			}
+		} else if (call.Meta.CallName == "mmap" || call.Meta.CallName == "mmap2") && len(call.Args) > 5 {
+			fd, fdOK := call.Args[4].(prog.ExecArgResult)
+			constant, constantFD := call.Args[4].(prog.ExecArgConst)
+			offset, offsetOK := call.Args[5].(prog.ExecArgConst)
+			sqRingOffset := ctx.target.ConstMap["IORING_OFF_SQ_RING"]
+			sqesOffset := ctx.target.ConstMap["IORING_OFF_SQES"]
+			if call.Meta.CallName == "mmap2" {
+				sqRingOffset /= ctx.target.PageSize
+				sqesOffset /= ctx.target.PageSize
+			}
+			knownRingFD := (fdOK && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 && ioUringFDs[fd.Index]) ||
+				(fdOK && ioUringCreated) ||
+				(constantFD && int32(constant.Value) > 2 && ioUringCreated)
+			if knownRingFD && offsetOK &&
+				(offset.Value == sqRingOffset || offset.Value == sqesOffset) {
+				if fdOK && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
+					rawIOUringFDs[fd.Index] = true
+				} else if constantFD {
+					rawIOUringConstants[int32(constant.Value)] = true
+				}
+			}
+		}
 		w := new(bytes.Buffer)
+		guardCondition := ""
 		if addComments {
 			w.WriteString(callComments[ci] + "\n")
 		}
 		// Copyin.
 		for _, copyin := range call.Copyin {
 			ctx.copyin(w, &csumSeq, copyin)
+		}
+		if ctx.opts.CSB && call.Meta.CallName == "ioctl" && len(call.Args) > 2 && localIOArg(call, localIO) {
+			cmd, cmdOK := call.Args[1].(prog.ExecArgConst)
+			value, valueOK := call.Args[2].(prog.ExecArgConst)
+			if cmdOK && valueOK && cmd.Value == ctx.target.ConstMap["FIONBIO"] && valInMMapRange(ctx, value.Value) {
+				fmt.Fprintf(w, "\tNONFAILING(*(uint32*)(0x%x+PTR_OFFSET) = 1);\n", value.Value)
+			}
+		}
+		if ctx.opts.CSB && call.Meta.CallName == "openat2" {
+			if how, size, ok := ctx.openat2Snapshot(call); ok {
+				fmt.Fprintf(w, "\t{\n\tsize_t csb_open_how_size_%[1]d = %[3]s;\n"+
+					"\tuint8* csb_open_how_%[1]d = (uint8*)malloc(csb_open_how_size_%[1]d);\n"+
+					"\tstruct { void* base; size_t len; } csb_open_how_local_%[1]d = {csb_open_how_%[1]d, csb_open_how_size_%[1]d};\n"+
+					"\tstruct { void* base; size_t len; } csb_open_how_remote_%[1]d = {(void*)(0x%[2]x+PTR_OFFSET), csb_open_how_size_%[1]d};\n"+
+					"\tint csb_open_how_ok_%[1]d = csb_open_how_size_%[1]d >= 8 && csb_open_how_%[1]d && syscall(SYS_process_vm_readv, getpid(), &csb_open_how_local_%[1]d, 1, &csb_open_how_remote_%[1]d, 1, 0) == csb_open_how_size_%[1]d;\n"+
+					"\tif (csb_open_how_ok_%[1]d && !(*(uint64*)csb_open_how_%[1]d & %[4]d)) *(uint64*)csb_open_how_%[1]d |= %[5]d;\n",
+					ci, how, size, ctx.target.ConstMap["O_PATH"], ctx.target.ConstMap["O_NONBLOCK"])
+			}
+		}
+		if ctx.opts.CSB && (call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup") {
+			if params, ok := call.Args[1].(prog.ExecArgConst); ok {
+				offset := ""
+				if valInMMapRange(ctx, params.Value) {
+					offset = "+PTR_OFFSET"
+				}
+				fmt.Fprintf(w, "\tuint64 csb_io_uring_params_%[1]d[15];\n"+
+					"\tstruct { void* base; size_t len; } csb_io_uring_local_%[1]d = "+
+					"{csb_io_uring_params_%[1]d, sizeof(csb_io_uring_params_%[1]d)};\n"+
+					"\tstruct { void* base; size_t len; } csb_io_uring_remote_%[1]d = "+
+					"{(void*)(0x%[2]x%[3]s), sizeof(csb_io_uring_params_%[1]d)};\n"+
+					"\tint csb_io_uring_params_ok_%[1]d = syscall(SYS_process_vm_readv, getpid(), "+
+					"&csb_io_uring_local_%[1]d, 1, &csb_io_uring_remote_%[1]d, 1, 0) == "+
+					"sizeof(csb_io_uring_params_%[1]d) && "+
+					"syscall(SYS_process_vm_writev, getpid(), &csb_io_uring_local_%[1]d, 1, "+
+					"&csb_io_uring_remote_%[1]d, 1, 0) == sizeof(csb_io_uring_params_%[1]d);\n"+
+					"\tif (csb_io_uring_params_ok_%[1]d) *(uint32*)(csb_io_uring_params_%[1]d + 1) &= ~%[4]d;\n",
+					ci, params.Value, offset, ctx.target.ConstMap["IORING_SETUP_SQPOLL"])
+			}
+		}
+		if ctx.opts.CSB && isSeccompAddfd(call, ctx.target.ConstMap["SECCOMP_IOCTL_NOTIF_ADDFD"]) {
+			if arg, ok := call.Args[2].(prog.ExecArgConst); ok {
+				offset := ""
+				if valInMMapRange(ctx, arg.Value) {
+					offset = "+PTR_OFFSET"
+				}
+				fmt.Fprintf(w, "\tuint8 csb_seccomp_addfd_%d[24];\n", ci)
+				fmt.Fprintf(w, "\tstruct { void* base; size_t len; } csb_seccomp_local_%[1]d = "+
+					"{csb_seccomp_addfd_%[1]d, 24};\n"+
+					"\tstruct { void* base; size_t len; } csb_seccomp_remote_%[1]d = "+
+					"{(void*)(0x%[2]x%[3]s), 24};\n"+
+					"\tint csb_seccomp_addfd_ok_%[1]d = syscall(SYS_process_vm_readv, getpid(), "+
+					"&csb_seccomp_local_%[1]d, 1, &csb_seccomp_remote_%[1]d, 1, 0) == 24;\n",
+					ci, arg.Value, offset)
+				fmt.Fprintf(w, "\tif (csb_seccomp_addfd_ok_%d && (*(uint32*)(csb_seccomp_addfd_%d + 8) & %d) && "+
+					"*(uint32*)(csb_seccomp_addfd_%d + 16) <= 2) "+
+					"*(uint32*)(csb_seccomp_addfd_%d + 8) &= ~%d;\n", ci, ci,
+					ctx.target.ConstMap["SECCOMP_ADDFD_FLAG_SETFD"], ci, ci,
+					ctx.target.ConstMap["SECCOMP_ADDFD_FLAG_SETFD"])
+				guardCondition = fmt.Sprintf("csb_seccomp_addfd_ok_%d", ci)
+			}
+		}
+		if ctx.opts.CSB && call.Meta.Name == "syz_io_uring_submit" {
+			if sqe, ok := call.Args[2].(prog.ExecArgConst); ok {
+				offset := ""
+				if valInMMapRange(ctx, sqe.Value) {
+					offset = "+PTR_OFFSET"
+				}
+				fmt.Fprintf(w, "\tuint8 csb_sqe_%d[64];\n", ci)
+				if ctx.opts.HandleSegv {
+					fmt.Fprintf(w, "\tint csb_sqe_ok_%d = NONFAILING(memcpy(csb_sqe_%d, (void*)(0x%x%s), 64));\n",
+						ci, ci, sqe.Value, offset)
+				} else {
+					fmt.Fprintf(w, "\tmemcpy(csb_sqe_%d, (void*)(0x%x%s), 64);\n\tint csb_sqe_ok_%d = 1;\n",
+						ci, sqe.Value, offset, ci)
+				}
+				// IORING_OP_CLOSE stores its fd at offset 4 in the SQE.
+				fmt.Fprintf(w, "\tif (csb_sqe_ok_%d && csb_sqe_%d[0] == 19 && *(int32*)(csb_sqe_%d + 4) <= 2) "+
+					"*(int32*)(csb_sqe_%d + 4) = -1;\n", ci, ci, ci, ci)
+				guardCondition = fmt.Sprintf("csb_sqe_ok_%d", ci)
+			}
 		}
 
 		if call.Props.FailNth > 0 {
@@ -707,20 +1058,131 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		if slices.Contains(initIndices, ci) {
 			initCall = true
 		}
+		resetBuf := new(bytes.Buffer)
+		ctx.invalidateCSBResults(resetBuf, call, resCopyout, p.Vars)
+		w.Write(resetBuf.Bytes())
+		rawRing := false
+		if call.Meta.CallName == "io_uring_enter" && len(call.Args) != 0 {
+			fds, constants := rawIOUringFDs, rawIOUringConstants
+			unknown := rawUnknownIOUring
+			if call.Props.Async {
+				fds, constants = futureRawIOUringFDs, futureRawIOUringConstants
+				unknown = futureRawUnknownIOUring
+			}
+			if fd, ok := call.Args[0].(prog.ExecArgResult); ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 {
+				rawRing = fds[fd.Index]
+				// A stale result can hold the descriptor number of a ring created later.
+				rawRing = rawRing || len(fds) != 0 || len(constants) != 0 || unknown
+			} else if fd, ok := call.Args[0].(prog.ExecArgConst); ok {
+				rawRing = constants[int32(fd.Value)] || unknown
+			}
+			if flags, ok := call.Args[3].(prog.ExecArgConst); ok &&
+				flags.Value&ctx.target.ConstMap["IORING_ENTER_REGISTERED_RING"] != 0 {
+				// A registered-ring enter carries an index rather than a descriptor, so block it
+				// whenever its execution window contains a raw ring.
+				rawRing = len(fds) != 0 || len(constants) != 0 || unknown
+			}
+		}
+		if ctx.opts.CSB && rawRing {
+			args := append([]prog.ExecArg(nil), call.Args...)
+			toSubmit := args[1].(prog.ExecArgConst)
+			toSubmit.Value = 0
+			args[1] = toSubmit
+			call.Args = args
+		}
 
-		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall, dataMmap)
+		forceNonblockArg := -1
+		if ctx.opts.CSB && fcntlCommand(call, ctx.target.ConstMap["F_SETFL"]) && localIOArg(call, localIO) {
+			args := append([]prog.ExecArg(nil), call.Args...)
+			if flags, ok := args[2].(prog.ExecArgConst); ok {
+				flags.Value |= ctx.target.ConstMap["O_NONBLOCK"]
+				args[2], call.Args = flags, args
+			} else if _, ok := args[2].(prog.ExecArgResult); ok {
+				forceNonblockArg = 2
+			}
+		}
+		if ctx.opts.CSB && call.Meta.CallName == "mq_getsetattr" && localIOArg(call, localIO) {
+			if attr, ok := call.Args[1].(prog.ExecArgConst); ok && valInMMapRange(ctx, attr.Value) {
+				fmt.Fprintf(w, "\tNONFAILING(*(uint%d*)(0x%x+PTR_OFFSET) |= %d);\n",
+					ctx.target.PtrSize*8, attr.Value, ctx.target.ConstMap["O_NONBLOCK"])
+			}
+		}
+		if ctx.opts.CSB && ctx.target.OS == targets.Linux {
+			flagArg := -1
+			switch call.Meta.CallName {
+			case "open":
+				flagArg = 1
+			case "openat":
+				flagArg = 2
+			case "mq_open":
+				flagArg = 1
+			case "creat":
+				var flags prog.ExecArgConst
+				switch mode := call.Args[1].(type) {
+				case prog.ExecArgConst:
+					flags.Size, flags.Format = mode.Size, mode.Format
+				case prog.ExecArgResult:
+					flags.Size, flags.Format = mode.Size, mode.Format
+				}
+				flags.Value = ctx.target.ConstMap["O_WRONLY"] | ctx.target.ConstMap["O_CREAT"] |
+					ctx.target.ConstMap["O_TRUNC"] | ctx.target.ConstMap["O_NONBLOCK"]
+				call.Meta = ctx.target.SyscallMap["open"]
+				call.Args = []prog.ExecArg{call.Args[0], flags, call.Args[1]}
+			}
+			if flagArg != -1 {
+				args := append([]prog.ExecArg(nil), call.Args...)
+				if flags, ok := args[flagArg].(prog.ExecArgConst); ok {
+					flags.Value |= ctx.target.ConstMap["O_NONBLOCK"]
+					args[flagArg], call.Args = flags, args
+				} else if _, ok := args[flagArg].(prog.ExecArgResult); ok {
+					forceNonblockArg = flagArg
+				}
+			}
+		}
+		dynamicFcntlCommand := ctx.opts.CSB && call.Meta.CallName == "fcntl" &&
+			localIOArg(call, localIO) && len(call.Args) > 1
+		if dynamicFcntlCommand {
+			_, dynamicFcntlCommand = call.Args[1].(prog.ExecArgResult)
+		}
+		if dynamicFcntlCommand {
+			fmt.Fprintf(w, "\tintptr_t csb_fcntl_cmd_%d = %s;\n", ci,
+				ctx.resultArgToStr(call.Args[1].(prog.ExecArgResult)))
+		}
+
+		if guardCondition != "" {
+			fmt.Fprintf(w, "\tif (%s) {\n", guardCondition)
+		}
+		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall,
+			forceNonblockArg, dynamicFcntlCommand, dataMmap)
 
 		if call.Props.Rerun > 0 {
 			fmt.Fprintf(w, "\tfor (int i = 0; i < %v; i++) {\n", call.Props.Rerun)
 			// Rerun invocations should not affect the result value.
-			ctx.emitCall(w, call, ci, false, false, initCall, dataMmap)
+			ctx.emitCall(w, call, ci, false, false, initCall, forceNonblockArg,
+				dynamicFcntlCommand, dataMmap)
 			fmt.Fprintf(w, "\t}\n")
+		}
+		if ctx.opts.CSB && (call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup") {
+			if _, ok := call.Args[1].(prog.ExecArgConst); ok {
+				fmt.Fprintf(w, "\tif (csb_io_uring_params_ok_%[1]d) "+
+					"syscall(SYS_process_vm_writev, getpid(), &csb_io_uring_local_%[1]d, 1, "+
+					"&csb_io_uring_remote_%[1]d, 1, 0);\n", ci)
+			}
+		}
+		if ctx.opts.CSB && call.Meta.CallName == "openat2" {
+			if _, _, ok := ctx.openat2Snapshot(call); ok {
+				fmt.Fprintf(w, "\tfree(csb_open_how_%d);\n\t}\n", ci)
+			}
 		}
 		// Copyout.
 		if resCopyout || argCopyout {
-			ctx.copyout(w, call, resCopyout)
+			ctx.copyout(w, call, ci, resCopyout, localIO, dynamicFcntlCommand)
+		}
+		if guardCondition != "" {
+			fmt.Fprint(w, "\n\t}")
 		}
 		calls = append(calls, w.String())
+		resultResets = append(resultResets, resetBuf.String())
 
 		// get resource indices for filedescriptor related calls
 		if resCopyout {
@@ -813,7 +1275,100 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 
 	NetOpsFDsAccept = tmpOps
 
-	return calls, p.Vars
+	return calls, p.Vars, resultResets
+}
+
+func (ctx *context) invalidateCSBResults(w *bytes.Buffer, call prog.ExecCall, resCopyout bool, defaults []uint64) {
+	if !ctx.opts.CSB {
+		return
+	}
+	if resCopyout {
+		fmt.Fprintf(w, "\t%v[%v] = 0x%x;\n", ctx.resultArrayName(), call.Index, defaults[call.Index])
+	}
+	for _, copyout := range call.Copyout {
+		fmt.Fprintf(w, "\t%v[%v] = 0x%x;\n", ctx.resultArrayName(), copyout.Index, defaults[copyout.Index])
+	}
+}
+
+func generateResultResetSwitch(resets []string) string {
+	buf := new(bytes.Buffer)
+	for call, reset := range resets {
+		if reset == "" {
+			continue
+		}
+		if buf.Len() == 0 {
+			buf.WriteString("\tswitch (call) {\n")
+		}
+		fmt.Fprintf(buf, "\tcase %d:\n%s\t\tbreak;\n", call, strings.ReplaceAll(reset, "\t", "\t\t"))
+	}
+	if buf.Len() != 0 {
+		buf.WriteString("\t}\n")
+	}
+	return buf.String()
+}
+
+func ioUringResultArg(call prog.ExecCall, fds map[uint64]bool) bool {
+	if len(call.Args) == 0 {
+		return false
+	}
+	fd, ok := call.Args[0].(prog.ExecArgResult)
+	return ok && fd.DivOp <= 1 && uint32(fd.AddOp) == 0 && fds[fd.Index]
+}
+
+func isSeccompAddfd(call prog.ExecCall, command uint64) bool {
+	if call.Meta.CallName != "ioctl" || len(call.Args) < 3 {
+		return false
+	}
+	cmd, ok := call.Args[1].(prog.ExecArgConst)
+	return ok && uint32(cmd.Value) == uint32(command)
+}
+
+func fcntlCommand(call prog.ExecCall, command uint64) bool {
+	if call.Meta.CallName != "fcntl" || len(call.Args) < 2 {
+		return false
+	}
+	arg, ok := call.Args[1].(prog.ExecArgConst)
+	return ok && arg.Value == command
+}
+
+func localIOResources(p prog.ExecProg, target *prog.Target) map[uint64]bool {
+	local := make(map[uint64]bool)
+	for _, call := range p.Calls {
+		switch call.Meta.CallName {
+		case "open", "openat", "openat2", "creat", "mq_open",
+			"eventfd", "eventfd2", "timerfd_create", "inotify_init", "inotify_init1",
+			"fanotify_init", "userfaultfd", "signalfd", "signalfd4":
+			if call.Index != prog.ExecNoCopyout {
+				local[call.Index] = true
+			}
+		case "pipe", "pipe2", "socketpair":
+			for _, copyout := range call.Copyout {
+				local[copyout.Index] = true
+			}
+		case "dup", "dup2", "dup3":
+			if call.Index != prog.ExecNoCopyout && localIOArg(call, local) {
+				local[call.Index] = true
+			}
+		case "fcntl":
+			duplicate := fcntlCommand(call, target.ConstMap["F_DUPFD"]) ||
+				fcntlCommand(call, target.ConstMap["F_DUPFD_CLOEXEC"])
+			if _, dynamic := call.Args[1].(prog.ExecArgResult); dynamic {
+				duplicate = true
+			}
+			if duplicate && call.Index != prog.ExecNoCopyout && localIOArg(call, local) {
+				local[call.Index] = true
+			}
+		}
+	}
+	return local
+}
+
+func localIOArg(call prog.ExecCall, local map[uint64]bool) bool {
+	if len(call.Args) == 0 {
+		return false
+	}
+	arg, ok := call.Args[0].(prog.ExecArgResult)
+	return ok && arg.DivOp == 0 && arg.AddOp == 0 && local[arg.Index]
 }
 
 func loopIdenticalCalls(calls []string, minRun int) []string {
@@ -841,8 +1396,8 @@ func isNative(sysTarget *targets.Target, callName string) bool {
 	return sysTarget.HasCallNumber(callName) && !trampoline
 }
 
-func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCopyout, trace bool,
-	initCall, dataMmap bool) {
+func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCopyout, trace, initCall bool,
+	forceNonblockArg int, dynamicFcntlCommand, dataMmap bool) {
 	native := isNative(ctx.sysTarget, call.Meta.CallName)
 	fmt.Fprintf(w, "\t")
 	if !native {
@@ -860,7 +1415,7 @@ func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCo
 	if haveCopyout || trace {
 		fmt.Fprintf(w, "res = ")
 	}
-	w.WriteString(ctx.fmtCallBody(call, initCall, dataMmap))
+	w.WriteString(ctx.fmtCallBody(call, initCall, ci, forceNonblockArg, dynamicFcntlCommand, dataMmap))
 	if !native {
 		fmt.Fprintf(w, ")") // close NONFAILING macro
 	}
@@ -893,7 +1448,26 @@ func valInMMapRange(ctx *context, val uint64) bool {
 	return val >= min && val < max
 }
 
-func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) string {
+func (ctx *context) openat2Snapshot(call prog.ExecCall) (uint64, string, bool) {
+	if len(call.Args) < 4 {
+		return 0, "", false
+	}
+	how, ok := call.Args[2].(prog.ExecArgConst)
+	if !ok || !valInMMapRange(ctx, how.Value) {
+		return 0, "", false
+	}
+	switch size := call.Args[3].(type) {
+	case prog.ExecArgConst:
+		return how.Value, fmt.Sprintf("%d", size.Value), true
+	case prog.ExecArgResult:
+		return how.Value, ctx.resultArgToStr(size), true
+	default:
+		return 0, "", false
+	}
+}
+
+func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool, ci int, forceNonblockArg int,
+	dynamicFcntlCommand, dataMmap bool) string {
 	native := isNative(ctx.sysTarget, call.Meta.CallName)
 	callName, ok := ctx.sysTarget.SyscallTrampolines[call.Meta.CallName]
 	if !ok {
@@ -908,8 +1482,8 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) str
 		funcName = callName
 		// Multiple generated CSB headers share a translation unit, so calls must
 		// use the same header-local name as their UNIQUE_FUNC declarations.
-		if ctx.opts.CSB && (strings.HasPrefix(callName, "syz_csb_exec") ||
-			callName == "syz_csb_fexecve" || callName == "syz_reapply_affinity") {
+		if ctx.opts.CSB && (strings.HasPrefix(callName, "syz_csb_") ||
+			callName == "syz_reapply_affinity") {
 			funcName = fmt.Sprintf("UNIQUE_FUNC(%v)", callName)
 		}
 	} else {
@@ -921,6 +1495,31 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) str
 	}
 
 	for i, arg := range call.Args {
+		if ctx.opts.CSB && (call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup") && i == 1 {
+			if params, ok := arg.(prog.ExecArgConst); ok {
+				offset := ""
+				if valInMMapRange(ctx, params.Value) {
+					offset = "+PTR_OFFSET"
+				}
+				argsStrs = append(argsStrs, fmt.Sprintf(
+					"csb_io_uring_params_ok_%[1]d ? (intptr_t)csb_io_uring_params_%[1]d : "+
+						"(intptr_t)(0x%[2]x%[3]s)", ci, params.Value, offset))
+				continue
+			}
+		}
+		if ctx.opts.CSB && call.Meta.Name == "syz_io_uring_submit" && i == 2 {
+			if _, ok := arg.(prog.ExecArgConst); ok {
+				argsStrs = append(argsStrs, fmt.Sprintf("(intptr_t)csb_sqe_%d", ci))
+				continue
+			}
+		}
+		if ctx.opts.CSB && isSeccompAddfd(call, ctx.target.ConstMap["SECCOMP_IOCTL_NOTIF_ADDFD"]) && i == 2 {
+			if _, ok := arg.(prog.ExecArgConst); ok {
+				argsStrs = append(argsStrs, fmt.Sprintf("(intptr_t)csb_seccomp_addfd_%d", ci))
+				continue
+			}
+		}
+
 		if ctx.opts.CSB {
 			switch i {
 			// argument index 0
@@ -1010,11 +1609,25 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) str
 
 			// DataMmapProg includes adjacent guard pages that move with the mapping.
 			if ctx.opts.CSB && ((dataMmap && i == 0) ||
+				(call.Meta.Name == "ioctl$auto_FIONBIO" && i == 2 && valInMMapRange(ctx, arg.Value)) ||
 				(arg.IsPointer && valInMMapRange(ctx, arg.Value))) {
 				PTR_OFFSET_STR = "+PTR_OFFSET"
 			}
 
-			argsStrs = append(argsStrs, com+handleBigEndian(arg, ctx.constArgToStr(arg, native))+PTR_OFFSET_STR)
+			val := handleBigEndian(arg, ctx.constArgToStr(arg, native)) + PTR_OFFSET_STR
+			if ctx.opts.CSB && call.Meta.CallName == "openat2" && i == 2 && len(call.Args) > 3 {
+				if _, _, ok := ctx.openat2Snapshot(call); ok {
+					val = fmt.Sprintf("(csb_open_how_ok_%[1]d ? (intptr_t)csb_open_how_%[1]d : 0)", ci)
+				}
+			}
+			if dynamicFcntlCommand && i == 2 {
+				val = fmt.Sprintf("(csb_fcntl_cmd_%d == F_SETFL ? (%s | O_NONBLOCK) : %s)", ci, val, val)
+			}
+			if forceNonblockArg == i {
+				val = fmt.Sprintf("(%s | O_NONBLOCK)", val)
+			}
+			val = ctx.boundWaitArg(callName, i, val)
+			argsStrs = append(argsStrs, ctx.protectCSBControlFD(callName, i, com+val))
 		case prog.ExecArgResult:
 			if initCall {
 				initFDs[arg.Index] = true
@@ -1024,12 +1637,22 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) str
 			}
 			com := ctx.argComment(call.Meta.Args[i], arg)
 			val := ctx.resultArgToStr(arg)
+			if dynamicFcntlCommand && i == 1 {
+				val = fmt.Sprintf("csb_fcntl_cmd_%d", ci)
+			}
+			if dynamicFcntlCommand && i == 2 {
+				val = fmt.Sprintf("(csb_fcntl_cmd_%d == F_SETFL ? (%s | O_NONBLOCK) : %s)", ci, val, val)
+			}
+			if forceNonblockArg == i {
+				val = fmt.Sprintf("(%s | O_NONBLOCK)", val)
+			}
 			if native && ctx.target.PtrSize == 4 {
 				// syscall accepts args as ellipsis, resources are uint64
 				// and take 2 slots without the cast, which would be wrong.
 				val = "(intptr_t)" + val
 			}
-			argsStrs = append(argsStrs, com+val)
+			val = ctx.boundWaitArg(callName, i, val)
+			argsStrs = append(argsStrs, ctx.protectCSBControlFD(callName, i, com+val))
 		default:
 			panic(fmt.Sprintf("unknown arg type: %+v", arg))
 		}
@@ -1037,7 +1660,32 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) str
 	for i := 0; i < call.Meta.MissingArgs; i++ {
 		argsStrs = append(argsStrs, "0")
 	}
+	if ctx.opts.CSB && (callName == "dup2" || callName == "dup3") {
+		argOffset := 0
+		if native {
+			argOffset = 1
+		}
+		src, dst := argsStrs[argOffset], argsStrs[argOffset+1]
+		argsStrs[argOffset] = "csb_dup_src"
+		argsStrs[argOffset+1] = "((uint32)csb_dup_dst <= 2 && (uint32)csb_dup_src != (uint32)csb_dup_dst ? -1 : csb_dup_dst)"
+		return fmt.Sprintf("({ intptr_t csb_dup_src = (%s); intptr_t csb_dup_dst = (%s); %v(%v); })",
+			src, dst, funcName, strings.Join(argsStrs, ", "))
+	}
 	return fmt.Sprintf("%v(%v)", funcName, strings.Join(argsStrs, ", "))
+}
+
+func (ctx *context) protectCSBControlFD(callName string, arg int, val string) string {
+	if !ctx.opts.CSB {
+		return val
+	}
+	// CSB uses stdin/stdout/stderr to control and report benchmark operations.
+	if callName == "close" && arg == 0 {
+		return fmt.Sprintf("({ intptr_t csb_fd = (%s); (uint32)csb_fd <= 2 ? -1 : csb_fd; })", val)
+	}
+	if callName == "close_range" && arg == 0 {
+		return fmt.Sprintf("({ intptr_t csb_fd = (%s); (uint32)csb_fd <= 2 ? 3 : csb_fd; })", val)
+	}
+	return val
 }
 
 func (ctx *context) generateCsumInet(w *bytes.Buffer, addr uint64, arg prog.ExecArgCsum, csumSeq int) {
@@ -1122,6 +1770,14 @@ func (ctx *context) copyin(w *bytes.Buffer, csumSeq *int, copyin prog.ExecCopyin
 	}
 }
 
+func (ctx *context) boundWaitArg(callName string, arg int, val string) string {
+	if !ctx.opts.CSB || !((callName == "poll" && arg == 2) ||
+		((callName == "epoll_wait" || callName == "epoll_pwait") && arg == 3)) {
+		return val
+	}
+	return fmt.Sprintf("((int32_t)(%[1]s) < 0 || (int32_t)(%[1]s) > CSB_MAX_WAIT_MS ? CSB_MAX_WAIT_MS : (%[1]s))", val)
+}
+
 func (ctx *context) copyinVal(w *bytes.Buffer, addr, size uint64, val string, bf prog.BinaryFormat,
 	relocateValue bool) {
 	PTR_OFFSET_STR_ADDR := ""
@@ -1158,7 +1814,8 @@ func (ctx *context) copyinVal(w *bytes.Buffer, addr, size uint64, val string, bf
 	}
 }
 
-func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, resCopyout bool) {
+func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, ci int, resCopyout bool,
+	localIO map[uint64]bool, dynamicFcntlCommand bool) {
 	if ctx.sysTarget.OS == targets.Fuchsia {
 		// On fuchsia we have real system calls that return ZX_OK on success,
 		// and libc calls that are casted to function returning intptr_t,
@@ -1171,13 +1828,26 @@ func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, resCopyout bool
 	} else {
 		fmt.Fprintf(w, "\tif (res != -1)")
 	}
-	copyoutMultiple := len(call.Copyout) > 1 || resCopyout && len(call.Copyout) > 0
+	copyoutMultiple := len(call.Copyout) > 1 || resCopyout && len(call.Copyout) > 0 ||
+		resCopyout && ctx.opts.CSB && ctx.target.OS == targets.Linux && localIO[call.Index]
 	if copyoutMultiple {
 		fmt.Fprintf(w, " {")
 	}
 	fmt.Fprintf(w, "\n")
 	if resCopyout {
 		initFDs[call.Index] = true
+		if ctx.opts.CSB && ctx.target.OS == targets.Linux && localIO[call.Index] {
+			// Set nonblocking mode before publishing the descriptor to concurrent calls.
+			if dynamicFcntlCommand {
+				fmt.Fprintf(w, "\t\tif (csb_fcntl_cmd_%[1]d == F_DUPFD || "+
+					"csb_fcntl_cmd_%[1]d == F_DUPFD_CLOEXEC) "+
+					"{ int flags = fcntl(res, F_GETFL); if (flags != -1) "+
+					"fcntl(res, F_SETFL, flags | O_NONBLOCK); }\n", ci)
+			} else {
+				fmt.Fprintf(w, "\t\t{ int flags = fcntl(res, F_GETFL); "+
+					"if (flags != -1) fcntl(res, F_SETFL, flags | O_NONBLOCK); }\n")
+			}
+		}
 		fmt.Fprintf(w, "\t\t%v[%v] = res;\n", ctx.resultArrayName(), call.Index)
 	}
 	for _, copyout := range call.Copyout {
@@ -1185,8 +1855,14 @@ func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, resCopyout bool
 		if ctx.opts.CSB && valInMMapRange(ctx, copyout.Addr) {
 			PTR_OFFSET_STR_ADDR = "+PTR_OFFSET"
 		}
-		fmt.Fprintf(w, "\t\tNONFAILING(%v[%v] = *(uint%v*)(0x%xul%v));\n",
-			ctx.resultArrayName(), copyout.Index, copyout.Size*8, copyout.Addr, PTR_OFFSET_STR_ADDR)
+		value := fmt.Sprintf("*(uint%v*)(0x%xul%v)", copyout.Size*8, copyout.Addr, PTR_OFFSET_STR_ADDR)
+		if ctx.opts.CSB && ctx.target.OS == targets.Linux && localIO[copyout.Index] {
+			fmt.Fprintf(w, "\t\tNONFAILING({ int fd = %[1]s; int flags = fcntl(fd, F_GETFL); "+
+				"if (flags != -1) fcntl(fd, F_SETFL, flags | O_NONBLOCK); %[2]v[%[3]v] = fd; });\n",
+				value, ctx.resultArrayName(), copyout.Index)
+			continue
+		}
+		fmt.Fprintf(w, "\t\tNONFAILING(%v[%v] = %v);\n", ctx.resultArrayName(), copyout.Index, value)
 	}
 	if copyoutMultiple {
 		fmt.Fprintf(w, "\t}\n")
