@@ -274,8 +274,8 @@ func TestCSBProtectRawIoUring(t *testing.T) {
 		if guarded != csb {
 			t.Fatalf("CSB=%v: raw submission guarded=%v", csb, guarded)
 		}
-		if got := strings.Contains(string(src), "&= ~2"); got != csb {
-			t.Fatalf("CSB=%v: SQPOLL disabled=%v", csb, got)
+		if got := strings.Contains(string(src), "&= ~6"); got != csb {
+			t.Fatalf("CSB=%v: SQPOLL and SQ_AFF disabled=%v", csb, got)
 		}
 	}
 }
@@ -308,7 +308,7 @@ func TestCSBClearsSQPOLLAtAbsoluteParams(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Contains(t, string(src), "{(void*)(0x200000000000+PTR_OFFSET), sizeof(csb_io_uring_params_0)}")
-	assert.Contains(t, string(src), "*(uint32_t*)(csb_io_uring_params_0 + 1) &= ~2")
+	assert.Contains(t, string(src), "*(uint32_t*)(csb_io_uring_params_0 + 1) &= ~6")
 	assert.Contains(t, string(src), "(intptr_t)(0x200000000000+PTR_OFFSET)")
 }
 
