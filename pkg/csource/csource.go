@@ -971,14 +971,19 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 					"{csb_io_uring_params_%[1]d, sizeof(csb_io_uring_params_%[1]d)};\n"+
 					"\tstruct { void* base; size_t len; } csb_io_uring_remote_%[1]d = "+
 					"{(void*)(0x%[2]x%[3]s), sizeof(csb_io_uring_params_%[1]d)};\n"+
-					"\tint csb_io_uring_params_ok_%[1]d = syscall(SYS_process_vm_readv, getpid(), "+
-					"&csb_io_uring_local_%[1]d, 1, &csb_io_uring_remote_%[1]d, 1, 0) == "+
-					"sizeof(csb_io_uring_params_%[1]d) && "+
+					"\tssize_t csb_io_uring_params_read_%[1]d = syscall(SYS_process_vm_readv, getpid(), "+
+					"&csb_io_uring_local_%[1]d, 1, &csb_io_uring_remote_%[1]d, 1, 0);\n"+
+					"\tint csb_io_uring_params_errno_%[1]d = "+
+					"csb_io_uring_params_read_%[1]d < 0 ? errno : 0;\n"+
+					"\tint csb_io_uring_params_ok_%[1]d = "+
+					"csb_io_uring_params_read_%[1]d == sizeof(csb_io_uring_params_%[1]d) && "+
 					"syscall(SYS_process_vm_writev, getpid(), &csb_io_uring_local_%[1]d, 1, "+
 					"&csb_io_uring_remote_%[1]d, 1, 0) == sizeof(csb_io_uring_params_%[1]d);\n"+
 					"\tif (csb_io_uring_params_ok_%[1]d) *(uint32*)(csb_io_uring_params_%[1]d + 1) &= ~%[4]d;\n",
 					ci, params.Value, offset, ctx.target.ConstMap["IORING_SETUP_SQPOLL"]|
 						ctx.target.ConstMap["IORING_SETUP_SQ_AFF"])
+				guardCondition = fmt.Sprintf("csb_io_uring_params_ok_%[1]d || "+
+					"(csb_io_uring_params_read_%[1]d < 0 && csb_io_uring_params_errno_%[1]d == EFAULT)", ci)
 			}
 		}
 		if ctx.opts.CSB && isSeccompAddfd(call, ctx.target.ConstMap["SECCOMP_IOCTL_NOTIF_ADDFD"]) {
