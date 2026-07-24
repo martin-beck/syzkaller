@@ -242,6 +242,23 @@ func TestParseLoopPid(t *testing.T) {
 	}
 }
 
+func TestSkippedLeadingRecordPreservesRootPid(t *testing.T) {
+	tree := parseTestData(t, []byte(`1 --- SIGCHLD {si_signo=SIGCHLD} ---
+2 close(3) = 0
+1 getpid() = 1`))
+	if tree.RootPid != 1 || len(tree.TraceMap[1].Calls) != 1 {
+		t.Fatalf("root PID %d, root calls %v", tree.RootPid, tree.TraceMap[1])
+	}
+}
+
+func TestSkippedOnlyRootRecordFallsBack(t *testing.T) {
+	tree := parseTestData(t, []byte(`1 +++ exited with 0 +++
+2 getpid() = 2`))
+	if tree.RootPid != 2 {
+		t.Fatalf("root PID %d, want 2", tree.RootPid)
+	}
+}
+
 func TestParseLoop1Child(t *testing.T) {
 	data1Child := `1 open() = 3
 				   1 clone() = 2
@@ -336,5 +353,53 @@ func TestParseBPFFilterMacros(t *testing.T) {
 	if got, want := filter.String(),
 		"[[0x20,0x0,0x0,0x4,],[0x6,0x0,0x0,0x5000d,],[0x15,0x0,0x1,0x1,],]"; got != want {
 		t.Fatalf("filter = %q, want %q", got, want)
+	}
+}
+
+func TestSkipUnusableRecords(t *testing.T) {
+	tree := parseTestData(t, []byte(`1 open() = 3
+1 ????( <unfinished ...>
+1 <... ???? resumed>) = ?
+2 nanosleep({tv_sec=0}, <unfinished ...>) = ?
+2 nanosleep({tv_sec=0})   = ? ERESTART_RESTARTBLOCK (Interrupted by signal)
+1 close(3) = 0`))
+	if calls := tree.TraceMap[1].Calls; len(calls) != 2 {
+		t.Fatalf("got %d surrounding calls, want 2", len(calls))
+	}
+	if _, ok := tree.TraceMap[2]; ok {
+		t.Fatal("terminal unfinished call was not skipped")
+	}
+}
+
+func TestUnusableMarkersInArgumentsAreParsed(t *testing.T) {
+	for _, line := range []string{
+		`1 write(1, "????(", 5) = 5`,
+		`1 write(1, "<unfinished ...>", 16) = ?`,
+		`1 write(1, "---", 3) = 3`,
+		`1 write(1, "x) = ERESTART", 13) = 13`,
+		`1 openat(AT_FDCWD, "/tmp/x", O_RDONLY) = 3</tmp/ERESTART-file>`,
+	} {
+		if shouldSkip(line) {
+			t.Errorf("skipped syscall argument in %q", line)
+		}
+	}
+	tree := parseTestData(t, []byte(`1 write(1, "ERESTART", 8) = 8`))
+	if calls := tree.TraceMap[1].Calls; len(calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(calls))
+	}
+}
+
+func TestRestartedResumedRecordIsSkipped(t *testing.T) {
+	if !shouldSkip(`1 <... wait4 resumed>) = ? ERESTARTSYS (To be restarted if SA_RESTART is set)`) {
+		t.Fatal("resumed restart record was not skipped")
+	}
+	if !shouldSkip(`1 <... resuming interrupted wait4 ...>) = ? ERESTARTSYS (To be restarted if SA_RESTART is set)`) {
+		t.Fatal("alternate resumed restart record was not skipped")
+	}
+	if !shouldSkip(`1 read(3</tmp/a)>, "x", 1) = ? ERESTARTSYS (To be restarted)`) {
+		t.Fatal("restart after decoded fd annotation was not skipped")
+	}
+	if !shouldSkip(`1 nanosleep(1 << 5) = ? ERESTARTSYS (To be restarted)`) {
+		t.Fatal("restart after shift expression was not skipped")
 	}
 }
