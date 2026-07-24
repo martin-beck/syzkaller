@@ -307,7 +307,12 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		// only close file descriptors that are not part if the reg init function
 		// TODO: check the potential usage of initFDs below, and in the whole file.
 		if _, ok := listenFDs[fdRes]; !ok {
-			fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(ctx->r)[%v]);\n", fdRes)
+			if ctx.opts.CSB {
+				fmt.Fprintf(closeBuf,
+					"\t{ uint32 fd = (uint32)UNIQUE_VAR(ctx->r)[%[1]v]; if (fd > 2) close(fd); }\n", fdRes)
+			} else {
+				fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(ctx->r)[%v]);\n", fdRes)
+			}
 		}
 	}
 
@@ -1053,7 +1058,8 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) str
 				PTR_OFFSET_STR = "+PTR_OFFSET"
 			}
 
-			argsStrs = append(argsStrs, com+handleBigEndian(arg, ctx.constArgToStr(arg, native))+PTR_OFFSET_STR)
+			val := com + handleBigEndian(arg, ctx.constArgToStr(arg, native)) + PTR_OFFSET_STR
+			argsStrs = append(argsStrs, ctx.protectCSBControlFD(callName, i, val))
 		case prog.ExecArgResult:
 			if initCall {
 				initFDs[arg.Index] = true
@@ -1068,7 +1074,7 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) str
 				// and take 2 slots without the cast, which would be wrong.
 				val = "(intptr_t)" + val
 			}
-			argsStrs = append(argsStrs, com+val)
+			argsStrs = append(argsStrs, ctx.protectCSBControlFD(callName, i, com+val))
 		default:
 			panic(fmt.Sprintf("unknown arg type: %+v", arg))
 		}
@@ -1076,7 +1082,32 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall, dataMmap bool) str
 	for i := 0; i < call.Meta.MissingArgs; i++ {
 		argsStrs = append(argsStrs, "0")
 	}
+	if ctx.opts.CSB && (callName == "dup2" || callName == "dup3") {
+		argOffset := 0
+		if native {
+			argOffset = 1
+		}
+		src, dst := argsStrs[argOffset], argsStrs[argOffset+1]
+		argsStrs[argOffset] = "csb_dup_src"
+		argsStrs[argOffset+1] = "((uint32)csb_dup_dst <= 2 && (uint32)csb_dup_src != (uint32)csb_dup_dst ? -1 : csb_dup_dst)"
+		return fmt.Sprintf("({ intptr_t csb_dup_src = (%s); intptr_t csb_dup_dst = (%s); %v(%v); })",
+			src, dst, funcName, strings.Join(argsStrs, ", "))
+	}
 	return fmt.Sprintf("%v(%v)", funcName, strings.Join(argsStrs, ", "))
+}
+
+func (ctx *context) protectCSBControlFD(callName string, arg int, val string) string {
+	if !ctx.opts.CSB {
+		return val
+	}
+	// CSB uses stdin/stdout/stderr to control and report benchmark operations.
+	if callName == "close" && arg == 0 {
+		return fmt.Sprintf("({ intptr_t csb_fd = (%s); (uint32)csb_fd <= 2 ? -1 : csb_fd; })", val)
+	}
+	if callName == "close_range" && arg == 0 {
+		return fmt.Sprintf("({ intptr_t csb_fd = (%s); (uint32)csb_fd <= 2 ? 3 : csb_fd; })", val)
+	}
+	return val
 }
 
 func (ctx *context) generateCsumInet(w *bytes.Buffer, addr uint64, arg prog.ExecArgCsum, csumSeq int) {
