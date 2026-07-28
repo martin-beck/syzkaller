@@ -192,6 +192,9 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 			assert.Contains(t, string(src), "csb_open_how_0 = {2048, 0, 0}")
 			assert.Contains(t, string(src), "(intptr_t)&csb_open_how_0")
 			assert.Contains(t, string(src), "sizeof(csb_open_how_0)")
+			declaration := strings.Index(string(src), "csb_open_how_0 = {2048, 0, 0}")
+			invocation := strings.Index(string(src), "syscall(__NR_openat2")
+			assert.Less(t, declaration, invocation)
 			assert.NotContains(t, string(src), "process_vm_readv")
 		}
 		src, _, err = Write(p, Options{Slowdown: 1})
@@ -252,6 +255,36 @@ func TestCSBOpenat2Fallback(t *testing.T) {
 	}
 	assert.Contains(t, string(src), "csb_open_how_0 = {2621440, 0, 0}")
 	assert.NotContains(t, string(src), "process_vm_readv")
+}
+
+func TestCSBOpenat2DynamicSizeUsesSnapshotSize(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("r0 = getpid()\n"+
+		"openat2(0xffffffffffffff9c, &(0x7f0000000000)='./file\\x00', "+
+		"&(0x7f0000000040)={0x0, 0x0, 0x0}, 0x18)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec, err := p.SerializeForExec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := target.DeserializeExec(exec, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded.Calls[1].Args[3] = prog.ExecArgResult{Size: 8, Index: 0}
+	ctx := &context{
+		p: p, opts: Options{CSB: true, Slowdown: 1}, target: target,
+		sysTarget: targets.Get(target.OS, target.Arch), calls: make(map[string]uint64),
+	}
+	calls, _ := ctx.generateCalls(decoded, false, false, nil, nil, nil, false)
+	assert.Contains(t, calls[1], "(intptr_t)&csb_open_how_1")
+	assert.Contains(t, calls[1], "sizeof(csb_open_how_1)")
+	assert.NotContains(t, calls[1], "/*size=*/UNIQUE_VAR(ctx->r)[0]")
 }
 
 func TestCSBPreservesNonblockAfterOpen(t *testing.T) {

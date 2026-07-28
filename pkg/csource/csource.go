@@ -710,12 +710,12 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			}
 		}
 		if ctx.opts.CSB && call.Meta.CallName == "openat2" {
-			flags, mode, resolve, known := ctx.openat2How(ci)
-			if known && flags&ctx.target.ConstMap["O_PATH"] == 0 {
-				flags |= ctx.target.ConstMap["O_NONBLOCK"]
+			how, known := ctx.openat2How(ci)
+			if known && how[0]&ctx.target.ConstMap["O_PATH"] == 0 {
+				how[0] |= ctx.target.ConstMap["O_NONBLOCK"]
 			}
 			fmt.Fprintf(w, "\t{\n\tstruct { uint64 flags; uint64 mode; uint64 resolve; } "+
-				"csb_open_how_%[1]d = {%[2]d, %[3]d, %[4]d};\n", ci, flags, mode, resolve)
+				"csb_open_how_%[1]d = {%[2]d, %[3]d, %[4]d};\n", ci, how[0], how[1], how[2])
 		}
 		if call.Props.FailNth > 0 {
 			fmt.Fprintf(w, "\tinject_fault(%v);\n", call.Props.FailNth)
@@ -1026,28 +1026,42 @@ func valInMMapRange(ctx *context, val uint64) bool {
 	return val >= min && val < max
 }
 
-func (ctx *context) openat2How(ci int) (uint64, uint64, uint64, bool) {
-	fallback := ctx.target.ConstMap["O_PATH"] | ctx.target.ConstMap["O_CLOEXEC"]
+func (ctx *context) openat2How(ci int) ([3]uint64, bool) {
+	fallback := [3]uint64{ctx.target.ConstMap["O_PATH"] | ctx.target.ConstMap["O_CLOEXEC"]}
 	if ci >= len(ctx.p.Calls) || len(ctx.p.Calls[ci].Args) < 3 {
-		return fallback, 0, 0, false
+		return fallback, false
 	}
 	ptr, ok := ctx.p.Calls[ci].Args[2].(*prog.PointerArg)
 	if !ok || ptr.Res == nil {
-		return fallback, 0, 0, false
+		return fallback, false
 	}
 	how, ok := ptr.Res.(*prog.GroupArg)
 	if !ok || len(how.Inner) < 3 {
-		return fallback, 0, 0, false
+		return fallback, false
 	}
 	values := [3]uint64{}
 	for i := range values {
 		field, ok := how.Inner[i].(*prog.ConstArg)
 		if !ok {
-			return fallback, 0, 0, false
+			return fallback, false
 		}
 		values[i] = field.Val
 	}
-	return values[0], values[1], values[2], true
+	return values, true
+}
+
+func (ctx *context) rewriteCSBOpenat2Arg(call prog.ExecCall, argIndex, callIndex int, value string) string {
+	if !ctx.opts.CSB || call.Meta.CallName != "openat2" {
+		return value
+	}
+	switch argIndex {
+	case 2:
+		return fmt.Sprintf("(intptr_t)&csb_open_how_%d", callIndex)
+	case 3:
+		return fmt.Sprintf("sizeof(csb_open_how_%d)", callIndex)
+	default:
+		return value
+	}
 }
 
 func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool, ci int, forceNonblockArg int,
@@ -1175,12 +1189,7 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool, ci int, force
 			}
 
 			value := handleBigEndian(arg, ctx.constArgToStr(arg, native)) + PTR_OFFSET_STR
-			if ctx.opts.CSB && call.Meta.CallName == "openat2" && i == 2 && len(call.Args) > 3 {
-				value = fmt.Sprintf("(intptr_t)&csb_open_how_%d", ci)
-			}
-			if ctx.opts.CSB && call.Meta.CallName == "openat2" && i == 3 {
-				value = fmt.Sprintf("sizeof(csb_open_how_%d)", ci)
-			}
+			value = ctx.rewriteCSBOpenat2Arg(call, i, ci, value)
 			if dynamicFcntlCommand && i == 2 {
 				value = fmt.Sprintf("(csb_fcntl_cmd_%d == F_SETFL ? (%s | O_NONBLOCK) : %s)", ci, value, value)
 			}
@@ -1203,6 +1212,7 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool, ci int, force
 			if forceNonblockArg == i {
 				val = fmt.Sprintf("(%s | O_NONBLOCK)", val)
 			}
+			val = ctx.rewriteCSBOpenat2Arg(call, i, ci, val)
 			if native && ctx.target.PtrSize == 4 {
 				// syscall accepts args as ellipsis, resources are uint64
 				// and take 2 slots without the cast, which would be wrong.
