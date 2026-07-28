@@ -701,12 +701,14 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		for _, copyin := range call.Copyin {
 			ctx.copyin(w, &csumSeq, copyin)
 		}
+		csbFIONBIO := false
 		if ctx.opts.CSB && call.Meta.CallName == "ioctl" && len(call.Args) > 2 &&
 			localIOArg(call, localIO) {
 			cmd, cmdOK := call.Args[1].(prog.ExecArgConst)
 			value, valueOK := call.Args[2].(prog.ExecArgConst)
 			if cmdOK && valueOK && cmd.Value == ctx.target.ConstMap["FIONBIO"] && valInMMapRange(ctx, value.Value) {
-				fmt.Fprintf(w, "\tNONFAILING(*(uint32*)(0x%x+PTR_OFFSET) = 1);\n", value.Value)
+				csbFIONBIO = true
+				fmt.Fprintf(w, "\tuint32 csb_fionbio_%d = 1;\n", ci)
 			}
 		}
 		if ctx.opts.CSB && call.Meta.CallName == "openat2" {
@@ -739,10 +741,13 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				forceNonblockArg = 2
 			}
 		}
+		csbMQAttr := false
 		if ctx.opts.CSB && call.Meta.CallName == "mq_getsetattr" && localIOArg(call, localIO) {
 			if attr, ok := call.Args[1].(prog.ExecArgConst); ok && valInMMapRange(ctx, attr.Value) {
-				fmt.Fprintf(w, "\tNONFAILING(*(uint%d*)(0x%x+PTR_OFFSET) |= %d);\n",
-					ctx.target.PtrSize*8, attr.Value, ctx.target.ConstMap["O_NONBLOCK"])
+				csbMQAttr = true
+				fmt.Fprintf(w, "\tstruct { intptr_t flags; intptr_t maxmsg; intptr_t msgsize; intptr_t curmsgs; "+
+					"intptr_t reserved[4]; } "+
+					"csb_mq_attr_%[1]d = {%[2]d, 0, 0, 0};\n", ci, ctx.target.ConstMap["O_NONBLOCK"])
 			}
 		}
 		if ctx.opts.CSB && ctx.target.OS == targets.Linux {
@@ -790,12 +795,12 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			fmt.Fprintf(w, "\tintptr_t csb_fcntl_cmd_%d = %s;\n", ci, cmd)
 		}
 		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall,
-			forceNonblockArg, dynamicFcntlCommand, dataMmap)
+			forceNonblockArg, dynamicFcntlCommand, csbFIONBIO, csbMQAttr, dataMmap)
 		if call.Props.Rerun > 0 {
 			fmt.Fprintf(w, "\tfor (int i = 0; i < %v; i++) {\n", call.Props.Rerun)
 			// Rerun invocations should not affect the result value.
 			ctx.emitCall(w, call, ci, false, false, initCall, forceNonblockArg,
-				dynamicFcntlCommand, dataMmap)
+				dynamicFcntlCommand, csbFIONBIO, csbMQAttr, dataMmap)
 			fmt.Fprintf(w, "\t}\n")
 		}
 		if ctx.opts.CSB && call.Meta.CallName == "openat2" {
@@ -975,7 +980,7 @@ func isNative(sysTarget *targets.Target, callName string) bool {
 }
 
 func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCopyout, trace, initCall bool,
-	forceNonblockArg int, dynamicFcntlCommand, dataMmap bool) {
+	forceNonblockArg int, dynamicFcntlCommand, csbFIONBIO, csbMQAttr, dataMmap bool) {
 	native := isNative(ctx.sysTarget, call.Meta.CallName)
 	fmt.Fprintf(w, "\t")
 	if !native {
@@ -993,7 +998,8 @@ func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCo
 	if haveCopyout || trace {
 		fmt.Fprintf(w, "res = ")
 	}
-	w.WriteString(ctx.fmtCallBody(call, initCall, ci, forceNonblockArg, dynamicFcntlCommand, dataMmap))
+	w.WriteString(ctx.fmtCallBody(call, initCall, ci, forceNonblockArg, dynamicFcntlCommand,
+		csbFIONBIO, csbMQAttr, dataMmap))
 	if !native {
 		fmt.Fprintf(w, ")") // close NONFAILING macro
 	}
@@ -1065,7 +1071,7 @@ func (ctx *context) rewriteCSBOpenat2Arg(call prog.ExecCall, argIndex, callIndex
 }
 
 func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool, ci int, forceNonblockArg int,
-	dynamicFcntlCommand, dataMmap bool) string {
+	dynamicFcntlCommand, csbFIONBIO, csbMQAttr, dataMmap bool) string {
 	native := isNative(ctx.sysTarget, call.Meta.CallName)
 	callName, ok := ctx.sysTarget.SyscallTrampolines[call.Meta.CallName]
 	if !ok {
@@ -1190,6 +1196,12 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool, ci int, force
 
 			value := handleBigEndian(arg, ctx.constArgToStr(arg, native)) + PTR_OFFSET_STR
 			value = ctx.rewriteCSBOpenat2Arg(call, i, ci, value)
+			if csbFIONBIO && i == 2 {
+				value = fmt.Sprintf("(intptr_t)&csb_fionbio_%d", ci)
+			}
+			if csbMQAttr && i == 1 {
+				value = fmt.Sprintf("(intptr_t)&csb_mq_attr_%d", ci)
+			}
 			if dynamicFcntlCommand && i == 2 {
 				value = fmt.Sprintf("(csb_fcntl_cmd_%d == F_SETFL ? (%s | O_NONBLOCK) : %s)", ci, value, value)
 			}

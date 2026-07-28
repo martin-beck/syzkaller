@@ -181,12 +181,13 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 			assert.Contains(t, string(src), "0x800")
 		}
 		if strings.Contains(input, "FIONBIO") {
-			assert.Contains(t, string(src), "NONFAILING(*(uint32_t*)")
-			assert.Contains(t, string(src), "+PTR_OFFSET) = 1")
-			assert.Contains(t, string(src), "/*arg=*/0x200000000040ul+PTR_OFFSET")
+			assert.Contains(t, string(src), "uint32_t csb_fionbio_1 = 1")
+			assert.Contains(t, string(src), "/*arg=*/(intptr_t)&csb_fionbio_1")
+			assert.NotContains(t, string(src), "/*arg=*/0x200000000040ul+PTR_OFFSET")
 		}
 		if strings.Contains(input, "mq_getsetattr") {
-			assert.Contains(t, string(src), "+PTR_OFFSET) |= 2048")
+			assert.Contains(t, string(src), "csb_mq_attr_1 = {2048, 0, 0, 0}")
+			assert.Contains(t, string(src), "/*attr=*/(intptr_t)&csb_mq_attr_1")
 		}
 		if strings.HasPrefix(input, "openat2") {
 			assert.Contains(t, string(src), "csb_open_how_0 = {2048, 0, 0}")
@@ -398,7 +399,7 @@ func TestCSBTwoArgumentIoctl(t *testing.T) {
 	}
 }
 
-func TestCSBMQFlagsUsesTargetPointerWidth(t *testing.T) {
+func TestCSBMQAttrUsesTargetPointerWidth(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.I386)
 	if err != nil {
 		t.Fatal(err)
@@ -412,8 +413,11 @@ func TestCSBMQFlagsUsesTargetPointerWidth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Contains(t, string(src), "*(uint32_t*)(0x80000040+PTR_OFFSET) |= 2048")
-	assert.NotContains(t, string(src), "*(uint64_t*)(0x80000040+PTR_OFFSET)")
+	assert.Contains(t, string(src),
+		"intptr_t flags; intptr_t maxmsg; intptr_t msgsize; intptr_t curmsgs; intptr_t reserved[4];")
+	assert.Contains(t, string(src), "csb_mq_attr_1 = {2048, 0, 0, 0}")
+	assert.Contains(t, string(src), "/*attr=*/(intptr_t)&csb_mq_attr_1")
+	assert.NotContains(t, string(src), "/*attr=*/0x80000040ul+PTR_OFFSET")
 }
 
 func TestLocalIONonblockingLifetime(t *testing.T) {
