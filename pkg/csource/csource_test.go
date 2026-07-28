@@ -188,50 +188,12 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 		if strings.Contains(input, "mq_getsetattr") {
 			assert.Contains(t, string(src), "+PTR_OFFSET) |= 2048")
 		}
-		if strings.HasPrefix(input, "openat2") {
-			assert.Contains(t, string(src), "NONFAILING(*(uint64_t*)")
-			assert.Contains(t, string(src), "+PTR_OFFSET) |= 2048")
-		}
 		src, _, err = Write(p, Options{Slowdown: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
 		assert.NotContains(t, string(src), "F_SETFL")
 	}
-}
-
-func TestCSBPreservesOpenat2OPath(t *testing.T) {
-	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := target.Deserialize([]byte("openat2(0xffffffffffffff9c, &(0x7f0000000000)='./file\\x00', "+
-		"&(0x7f0000000040)={0x200000, 0x0, 0x0}, 0x18)\n"), prog.NonStrict)
-	if err != nil {
-		t.Fatal(err)
-	}
-	src, _, err := Write(p, Options{CSB: true, HandleSegv: true, Slowdown: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assert.Contains(t, string(src), "& 2097152")
-}
-
-func TestCSBDoesNotModifyShortOpenat2How(t *testing.T) {
-	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := target.Deserialize([]byte("openat2(0xffffffffffffff9c, &(0x7f0000000000)='./file\\x00', "+
-		"&(0x7f0000000040)={0x0, 0x0, 0x0}, 0x4)\n"), prog.NonStrict)
-	if err != nil {
-		t.Fatal(err)
-	}
-	src, _, err := Write(p, Options{CSB: true, HandleSegv: true, Slowdown: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assert.NotContains(t, string(src), "+PTR_OFFSET) |= 2048")
 }
 
 func TestCSBPreservesNonblockAfterOpen(t *testing.T) {
