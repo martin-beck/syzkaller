@@ -709,6 +709,14 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 				fmt.Fprintf(w, "\tNONFAILING(*(uint32*)(0x%x+PTR_OFFSET) = 1);\n", value.Value)
 			}
 		}
+		if ctx.opts.CSB && call.Meta.CallName == "openat2" {
+			flags, mode, resolve, known := ctx.openat2How(ci)
+			if known && flags&ctx.target.ConstMap["O_PATH"] == 0 {
+				flags |= ctx.target.ConstMap["O_NONBLOCK"]
+			}
+			fmt.Fprintf(w, "\t{\n\tstruct { uint64 flags; uint64 mode; uint64 resolve; } "+
+				"csb_open_how_%[1]d = {%[2]d, %[3]d, %[4]d};\n", ci, flags, mode, resolve)
+		}
 		if call.Props.FailNth > 0 {
 			fmt.Fprintf(w, "\tinject_fault(%v);\n", call.Props.FailNth)
 		}
@@ -788,6 +796,9 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			// Rerun invocations should not affect the result value.
 			ctx.emitCall(w, call, ci, false, false, initCall, forceNonblockArg,
 				dynamicFcntlCommand, dataMmap)
+			fmt.Fprintf(w, "\t}\n")
+		}
+		if ctx.opts.CSB && call.Meta.CallName == "openat2" {
 			fmt.Fprintf(w, "\t}\n")
 		}
 		// Copyout.
@@ -1015,6 +1026,30 @@ func valInMMapRange(ctx *context, val uint64) bool {
 	return val >= min && val < max
 }
 
+func (ctx *context) openat2How(ci int) (uint64, uint64, uint64, bool) {
+	fallback := ctx.target.ConstMap["O_PATH"] | ctx.target.ConstMap["O_CLOEXEC"]
+	if ci >= len(ctx.p.Calls) || len(ctx.p.Calls[ci].Args) < 3 {
+		return fallback, 0, 0, false
+	}
+	ptr, ok := ctx.p.Calls[ci].Args[2].(*prog.PointerArg)
+	if !ok || ptr.Res == nil {
+		return fallback, 0, 0, false
+	}
+	how, ok := ptr.Res.(*prog.GroupArg)
+	if !ok || len(how.Inner) < 3 {
+		return fallback, 0, 0, false
+	}
+	values := [3]uint64{}
+	for i := range values {
+		field, ok := how.Inner[i].(*prog.ConstArg)
+		if !ok {
+			return fallback, 0, 0, false
+		}
+		values[i] = field.Val
+	}
+	return values[0], values[1], values[2], true
+}
+
 func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool, ci int, forceNonblockArg int,
 	dynamicFcntlCommand, dataMmap bool) string {
 	native := isNative(ctx.sysTarget, call.Meta.CallName)
@@ -1140,6 +1175,12 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, initCall bool, ci int, force
 			}
 
 			value := handleBigEndian(arg, ctx.constArgToStr(arg, native)) + PTR_OFFSET_STR
+			if ctx.opts.CSB && call.Meta.CallName == "openat2" && i == 2 && len(call.Args) > 3 {
+				value = fmt.Sprintf("(intptr_t)&csb_open_how_%d", ci)
+			}
+			if ctx.opts.CSB && call.Meta.CallName == "openat2" && i == 3 {
+				value = fmt.Sprintf("sizeof(csb_open_how_%d)", ci)
+			}
 			if dynamicFcntlCommand && i == 2 {
 				value = fmt.Sprintf("(csb_fcntl_cmd_%d == F_SETFL ? (%s | O_NONBLOCK) : %s)", ci, value, value)
 			}
@@ -1355,7 +1396,13 @@ func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, ci int, resCopy
 					"if (flags != -1) fcntl(res, F_SETFL, flags | O_NONBLOCK); }\n")
 			}
 		}
-		fmt.Fprintf(w, "\t\t%v[%v] = res;\n", ctx.resultArrayName(), call.Index)
+		if dynamicFcntlCommand && localIO[call.Index] {
+			fmt.Fprintf(w, "\t\t%[1]v[%[2]v] = "+
+				"(csb_fcntl_cmd_%[3]d == F_DUPFD || csb_fcntl_cmd_%[3]d == F_DUPFD_CLOEXEC) ? res : -1;\n",
+				ctx.resultArrayName(), call.Index, ci)
+		} else {
+			fmt.Fprintf(w, "\t\t%v[%v] = res;\n", ctx.resultArrayName(), call.Index)
+		}
 	}
 	for _, copyout := range call.Copyout {
 		PTR_OFFSET_STR_ADDR := ""

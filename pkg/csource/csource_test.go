@@ -188,12 +188,70 @@ func TestCSBBoundsLocalIO(t *testing.T) {
 		if strings.Contains(input, "mq_getsetattr") {
 			assert.Contains(t, string(src), "+PTR_OFFSET) |= 2048")
 		}
+		if strings.HasPrefix(input, "openat2") {
+			assert.Contains(t, string(src), "csb_open_how_0 = {2048, 0, 0}")
+			assert.Contains(t, string(src), "(intptr_t)&csb_open_how_0")
+			assert.Contains(t, string(src), "sizeof(csb_open_how_0)")
+			assert.NotContains(t, string(src), "process_vm_readv")
+		}
 		src, _, err = Write(p, Options{Slowdown: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
 		assert.NotContains(t, string(src), "F_SETFL")
 	}
+}
+
+func TestCSBPreservesOpenat2OPath(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("openat2(0xffffffffffffff9c, &(0x7f0000000000)='./file\\x00', "+
+		"&(0x7f0000000040)={0x200000, 0x0, 0x0}, 0x18)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, HandleSegv: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "csb_open_how_0 = {2097152, 0, 0}")
+}
+
+func TestCSBPreservesExtendedOpenat2How(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("openat2(0xffffffffffffff9c, &(0x7f0000000000)='./file\\x00', "+
+		"&(0x7f0000000040)={0x0, 0x0, 0x0}, 0x20)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "csb_open_how_0 = {2048, 0, 0}")
+	assert.Contains(t, string(src), "sizeof(csb_open_how_0)")
+}
+
+func TestCSBOpenat2Fallback(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("openat2(0xffffffffffffff9c, &(0x7f0000000000)='./file\\x00', 0x0, 0x18)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(src), "csb_open_how_0 = {2621440, 0, 0}")
+	assert.NotContains(t, string(src), "process_vm_readv")
 }
 
 func TestCSBPreservesNonblockAfterOpen(t *testing.T) {
@@ -290,6 +348,7 @@ func TestCSBDynamicOpenFlagsAndFcntlCommand(t *testing.T) {
 	assert.Contains(t, calls[3], "intptr_t csb_fcntl_cmd_3 = UNIQUE_VAR(ctx->r)[0]")
 	assert.Contains(t, calls[3], "csb_fcntl_cmd_3 == F_SETFL ? (0 | O_NONBLOCK) : 0")
 	assert.Contains(t, calls[3], "csb_fcntl_cmd_3 == F_DUPFD")
+	assert.Contains(t, calls[3], "? res : -1")
 }
 
 func TestCSBTwoArgumentIoctl(t *testing.T) {
