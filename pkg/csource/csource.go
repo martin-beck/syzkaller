@@ -894,21 +894,13 @@ func localIOResources(p prog.ExecProg, target *prog.Target) map[uint64]bool {
 	local := make(map[uint64]bool)
 	for _, call := range p.Calls {
 		switch call.Meta.CallName {
-		case "open", "openat", "openat2", "creat", "mq_open":
+		case "open", "openat", "openat2", "creat", "mq_open", "eventfd", "eventfd2", "timerfd_create", "inotify_init", "inotify_init1", "fanotify_init", "userfaultfd", "signalfd", "signalfd4":
 			if call.Index != prog.ExecNoCopyout {
 				local[call.Index] = true
 			}
 		case "pipe", "pipe2", "socketpair":
 			for _, copyout := range call.Copyout {
 				local[copyout.Index] = true
-			}
-		case "eventfd", "eventfd2", "timerfd_create", "inotify_init", "inotify_init1", "fanotify_init", "userfaultfd":
-			if call.Index != prog.ExecNoCopyout {
-				local[call.Index] = true
-			}
-		case "signalfd", "signalfd4":
-			if call.Index != prog.ExecNoCopyout {
-				local[call.Index] = true
 			}
 		case "dup", "dup2", "dup3":
 			if call.Index != prog.ExecNoCopyout && localIOArg(call, local) {
