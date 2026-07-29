@@ -165,6 +165,11 @@ jobs:
            cd ../../
            go env -w GOBIN=$HOME/.local/bin
 
+           # Short components increase the generated CSB corpus. Keep the
+           # original benchmark-selection stage bounded in CI.
+           sed -i 's/"duration": 60/"duration": 1/' \
+             bm-generator/templates/fg_single.json.in
+
            cd bm-generator
            ./test.sh
        - name: Fix permissions
