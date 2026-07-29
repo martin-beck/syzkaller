@@ -305,6 +305,26 @@ func TestCSBPreservesNonblockAfterOpen(t *testing.T) {
 	assert.Contains(t, string(src), "/*flags=O_NONBLOCK*/0x800")
 }
 
+func TestCSBConstantFDDoesNotPanic(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, data := range []string{
+		"close(0xffffffffffffffff)\n",
+		"read(0xffffffffffffffff, &(0x7f0000000000), 0x1)\n",
+		"write(0xffffffffffffffff, &(0x7f0000000000)=\"61\", 0x1)\n",
+	} {
+		p, err := target.Deserialize([]byte(data), prog.NonStrict)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := Write(p, Options{CSB: true, Slowdown: 1}); err != nil {
+			t.Fatalf("Write(%q) failed: %v", data, err)
+		}
+	}
+}
+
 func TestLocalIOArgRejectsTransforms(t *testing.T) {
 	local := map[uint64]bool{1: true}
 	for _, arg := range []prog.ExecArgResult{{Index: 1, DivOp: 2}, {Index: 1, AddOp: 1}} {

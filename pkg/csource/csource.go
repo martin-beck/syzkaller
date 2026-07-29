@@ -823,55 +823,49 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			callName = call.Meta.CallName
 		}
 		if callName == "close" {
-			arg := call.Args[0]
-			fdRes := arg.(prog.ExecArgResult).Index
-			missedFDResources[fdRes] = false
+			if fdRes, ok := execArgResultIndex(call.Args[0]); ok {
+				missedFDResources[fdRes] = false
+			}
 		}
 
 		if callName == "read" || callName == "pread" || callName == "pread64" || callName == "recv" || callName == "recvfrom" {
-			arg0 := call.Args[0]
-			fdRes := arg0.(prog.ExecArgResult).Index
-
-			arg2 := call.Args[2]
-			size := arg2.(prog.ExecArgConst).Value
-			AddToNetOps(fdRes, NetRead, size)
+			if fdRes, ok := execArgResultIndex(call.Args[0]); ok {
+				arg2 := call.Args[2]
+				size := arg2.(prog.ExecArgConst).Value
+				AddToNetOps(fdRes, NetRead, size)
+			}
 		}
 
 		if callName == "recvmsg" {
-			arg0 := call.Args[0]
-			fdRes := arg0.(prog.ExecArgResult).Index
-
-			AddToNetOps(fdRes, NetRead, msgSizes[ci])
+			if fdRes, ok := execArgResultIndex(call.Args[0]); ok {
+				AddToNetOps(fdRes, NetRead, msgSizes[ci])
+			}
 		}
 
 		if callName == "write" || callName == "pwrite" || callName == "pwrite64" || callName == "send" || callName == "sendto" {
-			arg0 := call.Args[0]
-			fdRes := arg0.(prog.ExecArgResult).Index
-
-			arg2 := call.Args[2]
-			size := arg2.(prog.ExecArgConst).Value
-			AddToNetOps(fdRes, NetWrite, size)
+			if fdRes, ok := execArgResultIndex(call.Args[0]); ok {
+				arg2 := call.Args[2]
+				size := arg2.(prog.ExecArgConst).Value
+				AddToNetOps(fdRes, NetWrite, size)
+			}
 		}
 
 		if callName == "sendmsg" {
-			arg0 := call.Args[0]
-			fdRes := arg0.(prog.ExecArgResult).Index
-
-			AddToNetOps(fdRes, NetWrite, msgSizes[ci])
+			if fdRes, ok := execArgResultIndex(call.Args[0]); ok {
+				AddToNetOps(fdRes, NetWrite, msgSizes[ci])
+			}
 		}
 
 		if callName == "connect" {
-			arg0 := call.Args[0]
-			fdRes := arg0.(prog.ExecArgResult).Index
-
-			connectFDs[fdRes] = true
+			if fdRes, ok := execArgResultIndex(call.Args[0]); ok {
+				connectFDs[fdRes] = true
+			}
 		}
 
 		if callName == "listen" {
-			arg0 := call.Args[0]
-			fdRes := arg0.(prog.ExecArgResult).Index
-
-			listenFDs[fdRes] = true
+			if fdRes, ok := execArgResultIndex(call.Args[0]); ok {
+				listenFDs[fdRes] = true
+			}
 		}
 
 		if callName == "accept" || callName == "accept4" {
@@ -904,6 +898,11 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	NetOpsFDsAccept = tmpOps
 
 	return calls, p.Vars
+}
+
+func execArgResultIndex(arg prog.ExecArg) (uint64, bool) {
+	result, ok := arg.(prog.ExecArgResult)
+	return result.Index, ok
 }
 
 func localIOResources(p prog.ExecProg, target *prog.Target) map[uint64]bool {
