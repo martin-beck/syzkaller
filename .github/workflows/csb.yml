@@ -169,6 +169,9 @@ jobs:
            # original benchmark-selection stage bounded in CI.
            sed -i 's/"duration": 60/"duration": 1/' \
              bm-generator/templates/fg_single.json.in
+           sed -i \
+             's#^\./scripts/fg-diff/select-benchmarks.sh .*#mapfile -t configs < <(find ./config/"$group" -maxdepth 1 -name "fg_*.json" | sort | head -n 16); ./scripts/fg-diff/select-benchmarks.sh "${configs[@]}"#' \
+             bm-generator/06_select.sh
 
            cd bm-generator
            ./test.sh
