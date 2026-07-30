@@ -33,7 +33,9 @@ var (
 		"set_tid_address": true,
 		"set_robust_list": true,
 		// kill syscall signals are not handled yet properly
-		"kill":   true,
-		"tgkill": true,
+		"kill":              true,
+		"tkill":             true,
+		"tgkill":            true,
+		"rt_tgsigqueueinfo": true,
 	}
 )
