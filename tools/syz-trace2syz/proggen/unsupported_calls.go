@@ -37,5 +37,6 @@ var (
 		"tkill":             true,
 		"tgkill":            true,
 		"rt_tgsigqueueinfo": true,
+		"pidfd_send_signal": true,
 	}
 )
