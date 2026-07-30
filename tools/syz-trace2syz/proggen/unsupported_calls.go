@@ -31,5 +31,7 @@ var (
 		"io_destroy":    true,
 		"io_submit":     true,
 		"io_cancel":     true,
+		// set_tid_address will likely get the parten thread's join stuck
+		"set_tid_address": true,
 	}
 )
