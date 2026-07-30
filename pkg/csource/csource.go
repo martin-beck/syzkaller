@@ -863,7 +863,8 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			}
 		}
 
-		if callName == "connect" {
+		if callName == "connect" &&
+			(call.Meta.Name == "connect$inet" || call.Meta.Name == "connect$inet6") {
 			if fdRes, ok := execArgResultIndex(call.Args[0]); ok {
 				connectFDs[fdRes] = true
 			}
@@ -875,7 +876,9 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			}
 		}
 
-		if callName == "accept" || callName == "accept4" {
+		if (callName == "accept" || callName == "accept4") &&
+			(call.Meta.Name == "accept$inet" || call.Meta.Name == "accept4$inet" ||
+				call.Meta.Name == "accept$inet6" || call.Meta.Name == "accept4$inet6") {
 			fdRes := call.Index
 
 			acceptFDs[fdRes] = true

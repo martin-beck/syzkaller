@@ -134,6 +134,17 @@ func TestCSBEmptyNetworkMetadata(t *testing.T) {
 				"accept$inet(r0, 0x0, 0x0)\n",
 			meta: "SERVER_SEQ=\"1r1\"\n",
 		},
+		{
+			name: "unix_connect_only",
+			prog: "r0 = socket$unix(0x1, 0x1, 0x0)\n" +
+				"connect$unix(r0, &(0x7f0000000000)=@file={0x1, 'temp\\x00'}, 0x6e)\n",
+		},
+		{
+			name: "unix_accept_only",
+			prog: "r0 = socket$unix(0x1, 0x1, 0x0)\n" +
+				"listen(r0, 0x1)\n" +
+				"accept$unix(r0, 0x0, 0x0)\n",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
