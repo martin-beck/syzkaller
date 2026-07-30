@@ -32,5 +32,8 @@ var (
 		// set robust list is also used by libc internally
 		"set_tid_address": true,
 		"set_robust_list": true,
+		// kill syscall signals are not handled yet properly
+		"kill":   true,
+		"tgkill": true,
 	}
 )
