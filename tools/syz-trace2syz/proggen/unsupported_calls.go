@@ -28,5 +28,7 @@ var (
 		"io_destroy":    true,
 		"io_submit":     true,
 		"io_cancel":     true,
+		// set_tid_address is used by libc internally, causes parent join to hang
+		"set_tid_address": true,
 	}
 )
