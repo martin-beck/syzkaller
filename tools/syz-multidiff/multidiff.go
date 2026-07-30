@@ -174,6 +174,7 @@ func main() {
 		mode = prog.StrictUnsafe
 	}
 	files := make([]inputProgram, 0, len(inputNames))
+	fmt.Fprintf(os.Stderr, "Parsing programs...\n");
 	for _, name := range inputNames {
 		data, err := os.ReadFile(name)
 		if err != nil {
@@ -225,6 +226,7 @@ func fatalf(format string, args ...any) {
 
 func analyze(files []inputProgram) analysis {
 	result := analysis{files: files}
+	fmt.Fprintf(os.Stderr, "Processing programs...\n");
 	for fileIdx := range files {
 		found := false
 		for clusterIdx := range result.clusters {
@@ -242,6 +244,7 @@ func analyze(files []inputProgram) analysis {
 			})
 		}
 	}
+	fmt.Fprintf(os.Stderr, "Processing clusters...\n");
 	for left := range result.clusters {
 		for right := left + 1; right < len(result.clusters); right++ {
 			leftRep := result.clusters[left].representative
@@ -940,6 +943,7 @@ func writeFileList(w io.Writer, result analysis, transitive bool, fold int) {
 	for _, name := range names {
 		fmt.Fprintln(w, name)
 	}
+	fmt.Fprintf(os.Stderr, "Reduced %d -> %d\n", len(result.files), len(names));
 }
 
 func writeGraphviz(w io.Writer, result analysis, transitive bool, fold int) {
@@ -997,6 +1001,7 @@ func writeGraphviz(w io.Writer, result analysis, transitive bool, fold int) {
 
 func foldedOutputNodes(result analysis, selection reportSelection, fold int) map[int]bool {
 	hidden := make(map[int]bool)
+	fmt.Fprintf(os.Stderr, "Folding nodes...\n");
 	if foldsRelation(fold, relationSame) {
 		for _, cluster := range result.clusters {
 			for _, member := range cluster.members {
