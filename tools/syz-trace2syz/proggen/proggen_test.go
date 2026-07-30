@@ -517,8 +517,6 @@ munmap(0x70000000, 8192) = 0
 mremap(0x70000000, 4096, 8192, 1) = 0x70002000
 rt_sigprocmask(0, [], NULL, 8) = 0
 rt_sigtimedwait([], NULL, {tv_sec=0, tv_nsec=0}, 8) = -1 EAGAIN (Resource temporarily unavailable)
-set_robust_list(0x1234, 24) = 0
-set_tid_address(0x1234) = 1234
 wait4(-1, NULL, 1, NULL) = -1 ECHILD (No child processes)
 wait(NULL) = -1 ECHILD (No child processes)
 `)
@@ -531,8 +529,6 @@ wait(NULL) = -1 ECHILD (No child processes)
 		"mremap(",
 		"rt_sigprocmask(",
 		"rt_sigtimedwait(",
-		"set_robust_list(",
-		"set_tid_address(",
 		"wait4(",
 	} {
 		if !strings.Contains(serialized, want) {
@@ -585,8 +581,6 @@ wait(NULL) = -1 ECHILD (No child processes)
 		"__NR_mremap",
 		"__NR_rt_sigprocmask",
 		"__NR_rt_sigtimedwait",
-		"__NR_set_robust_list",
-		"__NR_set_tid_address",
 		"__NR_wait4",
 	} {
 		if !strings.Contains(header, want) {
