@@ -372,7 +372,10 @@ func mustMkdir(t *testing.T, path string) {
 
 func runOK(t *testing.T, command string, args ...string) {
 	t.Helper()
-	if output, err := run(command, args...); err != nil {
+	output, err := run(command, args...)
+	if ex_err, ok := err.(*exec.ExitError); ok {
+		t.Fatalf("%s %s failed: %v\n%s", command, strings.Join(args, " "), ex_err, ex_err.Stderr)
+	} else if err != nil {
 		t.Fatalf("%s %s failed: %v\n%s", command, strings.Join(args, " "), err, output)
 	}
 }
@@ -393,7 +396,7 @@ func run(command string, args ...string) ([]byte, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = repoRoot
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output()
 	if ctx.Err() != nil {
 		return output, fmt.Errorf("timed out: %w", ctx.Err())
 	}
