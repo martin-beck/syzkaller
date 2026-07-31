@@ -111,6 +111,56 @@ func TestCSBReappliesCurrentAffinity(t *testing.T) {
 	assert.Contains(t, string(src), "sched_getaffinity(0, mask_size, mask)")
 }
 
+func TestCSBEmptyNetworkMetadata(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		prog string
+		meta string
+	}{
+		{
+			name: "connect_only",
+			prog: "r0 = socket$inet(0x2, 0x1, 0x0)\n" +
+				"connect$inet(r0, &(0x7f0000000000)={0x2, 0x1f90}, 0x10)\n",
+			meta: "CLIENT_SEQ=\"1r1\"\n",
+		},
+		{
+			name: "accept_only",
+			prog: "r0 = socket$inet(0x2, 0x1, 0x0)\n" +
+				"listen(r0, 0x1)\n" +
+				"accept$inet(r0, 0x0, 0x0)\n",
+			meta: "SERVER_SEQ=\"1r1\"\n",
+		},
+		{
+			name: "unix_connect_only",
+			prog: "r0 = socket$unix(0x1, 0x1, 0x0)\n" +
+				"connect$unix(r0, &(0x7f0000000000)=@file={0x1, 'temp\\x00'}, 0x6e)\n",
+		},
+		{
+			name: "unix_accept_only",
+			prog: "r0 = socket$unix(0x1, 0x1, 0x0)\n" +
+				"listen(r0, 0x1)\n" +
+				"accept$unix(r0, 0x0, 0x0)\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			p, err := target.Deserialize([]byte(test.prog), prog.NonStrict)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, meta, err := Write(p, Options{CSB: true, Slowdown: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, test.meta, meta)
+		})
+	}
+}
+
 func TestCSBBoundsLocalIO(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {
