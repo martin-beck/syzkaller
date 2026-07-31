@@ -25,6 +25,7 @@ package csource
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math/bits"
 	"regexp"
@@ -39,6 +40,8 @@ import (
 )
 
 type NetOp int
+
+var ErrUnsupportedCSBNetwork = errors.New("unsupported CSB network topology")
 
 const (
 	NetRead NetOp = iota
@@ -55,6 +58,7 @@ var (
 	missedFDResources = make(map[uint64](bool))
 	connectFDs        = make(map[uint64](bool))
 	acceptFDs         = make(map[uint64](bool))
+	acceptCalls       int
 	readFDSizes       = make(map[uint64](uint64))
 	NetOpsFDs         = make(map[uint64]([]NetOpSize))
 	NetOpsFDsConnect  = make(map[uint64]([]NetOpSize))
@@ -152,12 +156,31 @@ func resetGenerationState() {
 	missedFDResources = make(map[uint64]bool)
 	connectFDs = make(map[uint64]bool)
 	acceptFDs = make(map[uint64]bool)
+	acceptCalls = 0
 	readFDSizes = make(map[uint64]uint64)
 	NetOpsFDs = make(map[uint64][]NetOpSize)
 	NetOpsFDsConnect = make(map[uint64][]NetOpSize)
 	NetOpsFDsAccept = make(map[uint64][]NetOpSize)
 	listenFDs = make(map[uint64]bool)
 	initFDs = make(map[uint64]bool)
+}
+
+func validateCSBNetwork() error {
+	if len(NetOpsFDsConnect) != 0 && len(NetOpsFDsAccept) != 0 {
+		return fmt.Errorf("%w: both client and server sequences", ErrUnsupportedCSBNetwork)
+	}
+	if acceptCalls > 1 {
+		return fmt.Errorf("%w: multiple server sequences", ErrUnsupportedCSBNetwork)
+	}
+	var first []NetOpSize
+	for _, fd := range sortedUint64AnyKeys(NetOpsFDsConnect) {
+		if first == nil {
+			first = NetOpsFDsConnect[fd]
+		} else if !slices.Equal(first, NetOpsFDsConnect[fd]) {
+			return fmt.Errorf("%w: different client sequences", ErrUnsupportedCSBNetwork)
+		}
+	}
+	return nil
 }
 
 type context struct {
@@ -267,6 +290,11 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	calls, vars, err := ctx.generateProgCalls(ctx.p, ctx.opts.Trace, ctx.opts.CallComments, netSrvListenIdxs, false)
 	if err != nil {
 		return nil, metaData, err
+	}
+	if ctx.opts.CSB {
+		if err := validateCSBNetwork(); err != nil {
+			return nil, metaData, err
+		}
 	}
 
 	mmapProg := ctx.p.Target.DataMmapProg()
@@ -879,6 +907,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		if (callName == "accept" || callName == "accept4") &&
 			(call.Meta.Name == "accept$inet" || call.Meta.Name == "accept4$inet" ||
 				call.Meta.Name == "accept$inet6" || call.Meta.Name == "accept4$inet6") {
+			acceptCalls++
 			fdRes := call.Index
 
 			acceptFDs[fdRes] = true

@@ -549,6 +549,10 @@ func main() {
 
 	src, metaData, err := csource.Write(p, opts)
 	if err != nil {
+		if *flagCSB && errors.Is(err, csource.ErrUnsupportedCSBNetwork) {
+			log.Printf("Skipping %s: %v", *flagProg, err)
+			return
+		}
 		fmt.Fprintf(os.Stderr, "failed to generate C source: %v\n", err)
 		os.Exit(1)
 	}
