@@ -9,6 +9,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/google/syzkaller/pkg/hash"
@@ -291,8 +292,22 @@ func ForEachRelatedCallComponentForThread(p *Prog, tid int64, callIndices []int,
 		}
 		for _, i := range keepCalls {
 			nonStartCalls[i] = true
+
 		}
-		yield(component)
+
+		ok := true
+		// Ignore AF_NETLINK
+		name := p.Calls[callIndex].Meta.Name
+		if (name == "socket" || strings.HasPrefix(name, "socket$")) && len(p.Calls[callIndex].Args) > 0 {
+			switch a := p.Calls[callIndex].Args[0].(type) {
+			case *ConstArg:
+				ok = a.Val != p.Target.ConstMap["AF_NETLINK"]
+			}
+		}
+		if ok {
+			yield(component)
+		}
+
 	}
 }
 
