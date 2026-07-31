@@ -132,25 +132,28 @@ func TestReduceProgRestoresMotifFrequenciesWithRerun(t *testing.T) {
 	}
 }
 
-func TestReduceProgKeepsArgumentDistinctCallsStructural(t *testing.T) {
+func TestReduceProgReducesArgumentDistinctMotifs(t *testing.T) {
 	p := testProg(t, repeatedFilesProg(4))
 	reduced, stats := reduceProg(p, reduceOptions{
-		MaxCalls:          1,
+		MaxCalls:          0,
 		MaxMotifInstances: 1,
-		MaxLiveResources:  1,
+		MaxLiveResources:  0,
 		IncludeConsts:     true,
 	})
-	if len(reduced.Calls) != len(p.Calls) {
-		t.Fatalf("kept %d calls, want all %d argument-distinct calls:\n%s",
-			len(reduced.Calls), len(p.Calls), reduced.Serialize())
+	if len(reduced.Calls) != 2 {
+		t.Fatalf("kept %d calls, want one dependency-valid motif instance:\n%s",
+			len(reduced.Calls), reduced.Serialize())
 	}
 	for _, call := range reduced.Calls {
 		if call.Props.Rerun != 0 {
 			t.Fatalf("argument-distinct call was weighted:\n%s", reduced.Serialize())
 		}
 	}
-	if stats.WeightedCalls != len(p.Calls) {
-		t.Fatalf("weighted calls = %d, want %d", stats.WeightedCalls, len(p.Calls))
+	if stats.WeightedCalls != len(reduced.Calls) {
+		t.Fatalf("weighted calls = %d, want %d", stats.WeightedCalls, len(reduced.Calls))
+	}
+	if _, err := reduced.SerializeForExec(); err != nil {
+		t.Fatalf("reduced program is not executable: %v\n%s", err, reduced.Serialize())
 	}
 }
 
@@ -173,16 +176,16 @@ func TestReduceProgDoesNotCombineFailNthAndRerun(t *testing.T) {
 		}
 		weighted += 1 + call.Props.Rerun
 	}
-	if weighted != len(p.Calls) || stats.WeightedCalls != len(p.Calls) {
+	if weighted != len(reduced.Calls) || stats.WeightedCalls != len(reduced.Calls) {
 		t.Fatalf("weighted calls = %d/%d, want %d\n%s", weighted, stats.WeightedCalls,
-			len(p.Calls), reduced.Serialize())
+			len(reduced.Calls), reduced.Serialize())
 	}
 	if _, err := reduced.SerializeForExec(); err != nil {
 		t.Fatalf("reduced program is not executable: %v\n%s", err, reduced.Serialize())
 	}
 }
 
-func TestReduceProgKeepsAsyncCallsStructural(t *testing.T) {
+func TestReduceProgSamplesAsyncCallsWithoutRerun(t *testing.T) {
 	p := testProg(t, ""+
 		"test() (async)\n"+
 		"test() (async)\n"+
@@ -191,21 +194,21 @@ func TestReduceProgKeepsAsyncCallsStructural(t *testing.T) {
 		MaxMotifInstances: 1,
 		IncludeConsts:     true,
 	})
-	if len(reduced.Calls) != len(p.Calls) {
-		t.Fatalf("kept %d calls, want all %d asynchronous calls structural:\n%s",
-			len(reduced.Calls), len(p.Calls), reduced.Serialize())
+	if len(reduced.Calls) != 1 {
+		t.Fatalf("kept %d calls, want one sampled asynchronous call:\n%s",
+			len(reduced.Calls), reduced.Serialize())
 	}
 	for _, call := range reduced.Calls {
 		if call.Props.Rerun != 0 {
 			t.Fatalf("asynchronous call was collapsed into rerun:\n%s", reduced.Serialize())
 		}
 	}
-	if stats.WeightedCalls != len(p.Calls) {
-		t.Fatalf("weighted calls = %d, want %d", stats.WeightedCalls, len(p.Calls))
+	if stats.WeightedCalls != len(reduced.Calls) {
+		t.Fatalf("weighted calls = %d, want %d", stats.WeightedCalls, len(reduced.Calls))
 	}
 }
 
-func TestReduceProgKeepsCopiedInCallsStructural(t *testing.T) {
+func TestReduceProgSamplesCopiedInCallsWithoutRerun(t *testing.T) {
 	p := testProg(t, ""+
 		"r0 = test$res2()\n"+
 		"mutate6(r0, &(0x7f0000000040)=\"abcd\", 0x4)\n"+
@@ -214,17 +217,17 @@ func TestReduceProgKeepsCopiedInCallsStructural(t *testing.T) {
 		MaxMotifInstances: 1,
 		IncludeConsts:     true,
 	})
-	if len(reduced.Calls) != len(p.Calls) {
-		t.Fatalf("kept %d calls, want all %d copied-in calls structural:\n%s",
-			len(reduced.Calls), len(p.Calls), reduced.Serialize())
+	if len(reduced.Calls) != 2 {
+		t.Fatalf("kept %d calls, want producer and one sampled copied-in call:\n%s",
+			len(reduced.Calls), reduced.Serialize())
 	}
 	for _, call := range reduced.Calls {
 		if call.Props.Rerun != 0 {
 			t.Fatalf("copied-in call was collapsed into rerun:\n%s", reduced.Serialize())
 		}
 	}
-	if stats.WeightedCalls != len(p.Calls) {
-		t.Fatalf("weighted calls = %d, want %d", stats.WeightedCalls, len(p.Calls))
+	if stats.WeightedCalls != len(reduced.Calls) {
+		t.Fatalf("weighted calls = %d, want %d", stats.WeightedCalls, len(reduced.Calls))
 	}
 }
 
