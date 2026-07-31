@@ -199,10 +199,8 @@ func TestCSBRejectsUnsupportedNetworkTopology(t *testing.T) {
 			name: "multiple_servers",
 			prog: "r0 = socket$inet(0x2, 0x1, 0x0)\n" +
 				"listen(r0, 0x1)\n" +
-				"r1 = accept$inet(r0, 0x0, 0x0)\n" +
-				"read(r1, &(0x7f0000000000), 0x1)\n" +
-				"r2 = accept$inet(r0, 0x0, 0x0)\n" +
-				"read(r2, &(0x7f0000000040), 0x1)\n",
+				"accept$inet(r0, 0x0, 0x0)\n" +
+				"accept$inet(r0, 0x0, 0x0)\n",
 		},
 	}
 	for _, test := range tests {

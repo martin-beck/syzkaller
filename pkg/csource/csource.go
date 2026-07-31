@@ -58,6 +58,7 @@ var (
 	missedFDResources = make(map[uint64](bool))
 	connectFDs        = make(map[uint64](bool))
 	acceptFDs         = make(map[uint64](bool))
+	acceptCalls       int
 	readFDSizes       = make(map[uint64](uint64))
 	NetOpsFDs         = make(map[uint64]([]NetOpSize))
 	NetOpsFDsConnect  = make(map[uint64]([]NetOpSize))
@@ -155,6 +156,7 @@ func resetGenerationState() {
 	missedFDResources = make(map[uint64]bool)
 	connectFDs = make(map[uint64]bool)
 	acceptFDs = make(map[uint64]bool)
+	acceptCalls = 0
 	readFDSizes = make(map[uint64]uint64)
 	NetOpsFDs = make(map[uint64][]NetOpSize)
 	NetOpsFDsConnect = make(map[uint64][]NetOpSize)
@@ -167,7 +169,7 @@ func validateCSBNetwork() error {
 	if len(NetOpsFDsConnect) != 0 && len(NetOpsFDsAccept) != 0 {
 		return fmt.Errorf("%w: both client and server sequences", ErrUnsupportedCSBNetwork)
 	}
-	if len(NetOpsFDsAccept) > 1 {
+	if acceptCalls > 1 {
 		return fmt.Errorf("%w: multiple server sequences", ErrUnsupportedCSBNetwork)
 	}
 	var first []NetOpSize
@@ -905,6 +907,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		if (callName == "accept" || callName == "accept4") &&
 			(call.Meta.Name == "accept$inet" || call.Meta.Name == "accept4$inet" ||
 				call.Meta.Name == "accept$inet6" || call.Meta.Name == "accept4$inet6") {
+			acceptCalls++
 			fdRes := call.Index
 
 			acceptFDs[fdRes] = true
