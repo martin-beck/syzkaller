@@ -25,6 +25,7 @@ package csource
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math/bits"
 	"regexp"
@@ -39,6 +40,8 @@ import (
 )
 
 type NetOp int
+
+var ErrUnsupportedCSBNetwork = errors.New("unsupported CSB network topology")
 
 const (
 	NetRead NetOp = iota
@@ -160,6 +163,24 @@ func resetGenerationState() {
 	initFDs = make(map[uint64]bool)
 }
 
+func validateCSBNetwork() error {
+	if len(NetOpsFDsConnect) != 0 && len(NetOpsFDsAccept) != 0 {
+		return fmt.Errorf("%w: both client and server sequences", ErrUnsupportedCSBNetwork)
+	}
+	if len(NetOpsFDsAccept) > 1 {
+		return fmt.Errorf("%w: multiple server sequences", ErrUnsupportedCSBNetwork)
+	}
+	var first []NetOpSize
+	for _, fd := range sortedUint64AnyKeys(NetOpsFDsConnect) {
+		if first == nil {
+			first = NetOpsFDsConnect[fd]
+		} else if !slices.Equal(first, NetOpsFDsConnect[fd]) {
+			return fmt.Errorf("%w: different client sequences", ErrUnsupportedCSBNetwork)
+		}
+	}
+	return nil
+}
+
 type context struct {
 	p         *prog.Prog
 	opts      Options
@@ -267,6 +288,11 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	calls, vars, err := ctx.generateProgCalls(ctx.p, ctx.opts.Trace, ctx.opts.CallComments, netSrvListenIdxs, false)
 	if err != nil {
 		return nil, metaData, err
+	}
+	if ctx.opts.CSB {
+		if err := validateCSBNetwork(); err != nil {
+			return nil, metaData, err
+		}
 	}
 
 	mmapProg := ctx.p.Target.DataMmapProg()
