@@ -594,6 +594,26 @@ func TestCSBSetsNonblockingBeforePublishingDescriptor(t *testing.T) {
 	}
 }
 
+func TestCSBClosesUnusedDupResults(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("dup(0x3)\n"+
+		"dup3(0x3, 0x5, 0x0)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, opts := range []Options{{CSB: true, Slowdown: 1}, {CSB: true, Threaded: true, Slowdown: 1}} {
+		src, _, err := Write(p, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Contains(t, string(src), "intptr_t res = 0;\n\tV_UNUSED(res);")
+		assert.Equal(t, 2, strings.Count(string(src), "if (res > 2) close((int)res);"))
+	}
+}
+
 func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {
 	t.Helper()
 	// Strip text that cannot declare or reference a C identifier. In particular,
