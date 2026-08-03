@@ -75,8 +75,13 @@ func sanitizeMaxWriteSize(call *prog.Call, idxBuffer int, idxSize int, maxWriteS
 		newMaxWriteSize = a.Val
 	}
 
-	a2 := call.Args[idxBuffer].(*prog.PointerArg).Res.(*prog.DataArg)
-	a2.SetData([]byte(""))
+	buffer, ok := call.Args[idxBuffer].(*prog.PointerArg)
+	if !ok || buffer.Res == nil {
+		return newMaxWriteSize
+	}
+	if data, ok := buffer.Res.(*prog.DataArg); ok {
+		data.SetData([]byte(""))
+	}
 
 	return newMaxWriteSize
 

@@ -145,6 +145,17 @@ func TestSanitizeProgramOpenAndPwrite(t *testing.T) {
 	}
 }
 
+func TestSanitizeMaxWriteSizeNullBuffer(t *testing.T) {
+	p := deserializeTestProg(t, `
+write(0xffffffffffffffff, 0x0, 0x20)
+`)
+
+	got := sanitizeMaxWriteSize(p.Calls[0], 1, 2, 0)
+	if got != 0x20 {
+		t.Fatalf("max write size = %#x, want 0x20", got)
+	}
+}
+
 func TestSanitizeProgramOpenFlagsRecordedArchMatrix(t *testing.T) {
 	for _, recordedArch := range []string{targets.AMD64, targets.ARM64} {
 		for _, generationArch := range []string{targets.AMD64, targets.ARM64} {
