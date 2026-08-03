@@ -601,7 +601,9 @@ func TestCSBClosesDiscardedDupResults(t *testing.T) {
 	}
 	p, err := target.Deserialize([]byte("r0 = openat(0xffffffffffffff9c, &(0x7f0000000000), 0x0, 0x0)\n"+
 		"dup(r0)\n"+
-		"dup3(r0, 0x5, 0x0)\n"), prog.NonStrict)
+		"dup3(r0, 0x5, 0x0)\n"+
+		"r1 = dup(r0) (rerun: 2)\n"+
+		"fcntl$getflags(r1, 0x3)\n"), prog.NonStrict)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -616,6 +618,10 @@ func TestCSBClosesDiscardedDupResults(t *testing.T) {
 		assert.Contains(t, got, result+" = ")
 		assert.Contains(t, got, "if ("+result+" > 2) close((int)"+result+");")
 	}
+	assert.Contains(t, got, "res = syscall(__NR_dup")
+	assert.Contains(t, got, "UNIQUE_VAR(ctx->r)[1] = res")
+	assert.Contains(t, got, "csb_dup_res_3 = syscall(__NR_dup")
+	assert.Contains(t, got, "if (csb_dup_res_3 > 2) close((int)csb_dup_res_3);")
 	assert.NotContains(t, got, "if (res > 2) close((int)res);")
 }
 
