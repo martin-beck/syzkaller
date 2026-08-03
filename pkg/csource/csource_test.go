@@ -625,6 +625,29 @@ func TestCSBClosesDiscardedDupResults(t *testing.T) {
 	assert.NotContains(t, got, "if (res > 2) close((int)res);")
 }
 
+func TestCSBPreservesLiveDup3Destinations(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("r0 = openat(0xffffffffffffff9c, &(0x7f0000000000), 0x0, 0x0)\n"+
+		"r1 = dup(r0)\n"+
+		"dup3(r0, r1, 0x0)\n"+
+		"read(r1, &(0x7f0000000040), 0x1)\n"+
+		"r2 = dup3(r0, 0x5, 0x0) (rerun: 2)\n"+
+		"read(r2, &(0x7f0000000080), 0x1)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(src)
+	assert.NotContains(t, got, "csb_dup_res_2")
+	assert.NotContains(t, got, "csb_dup_res_4")
+}
+
 func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {
 	t.Helper()
 	// Strip text that cannot declare or reference a C identifier. In particular,

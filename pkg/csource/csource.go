@@ -761,8 +761,10 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		resCopyout := call.Index != prog.ExecNoCopyout
 		argCopyout := len(call.Copyout) != 0
 		isDup := ctx.opts.CSB && (call.Meta.CallName == "dup" || call.Meta.CallName == "dup3")
-		closeInitialDup := isDup && !resCopyout
-		closeRerunDup := isDup && call.Props.Rerun > 0
+		preserveDup3 := call.Meta.CallName == "dup3" &&
+			(resCopyout || execResultUsed(call.Args[1], p.Calls[ci+1:]))
+		closeInitialDup := isDup && !resCopyout && !preserveDup3
+		closeRerunDup := isDup && call.Props.Rerun > 0 && !preserveDup3
 		dupResultVar := fmt.Sprintf("csb_dup_res_%d", ci)
 		if closeInitialDup || closeRerunDup {
 			fmt.Fprintf(w, "\tintptr_t %s;\n", dupResultVar)
@@ -953,6 +955,26 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 func execArgResultIndex(arg prog.ExecArg) (uint64, bool) {
 	result, ok := arg.(prog.ExecArgResult)
 	return result.Index, ok
+}
+
+func execResultUsed(arg prog.ExecArg, calls []prog.ExecCall) bool {
+	result, ok := arg.(prog.ExecArgResult)
+	if !ok {
+		return false
+	}
+	for _, call := range calls {
+		for _, arg := range call.Args {
+			if other, ok := arg.(prog.ExecArgResult); ok && other.Index == result.Index {
+				return true
+			}
+		}
+		for _, copyin := range call.Copyin {
+			if other, ok := copyin.Arg.(prog.ExecArgResult); ok && other.Index == result.Index {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func localIOResources(p prog.ExecProg, target *prog.Target) map[uint64]bool {
