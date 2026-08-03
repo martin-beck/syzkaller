@@ -989,7 +989,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			fdCleanup = csbDiscardedFDCleanupFor(call, p.Calls[ci+1:])
 		}
 		fdResultVar := fmt.Sprintf("csb_discarded_fd_%d", ci)
-		if fdCleanup.initial || fdCleanup.rerun {
+		if fdCleanup.initialReturn || fdCleanup.rerunReturn || fdCleanup.overwriteCopyout {
 			fmt.Fprintf(w, "\tintptr_t %s;\n", fdResultVar)
 		}
 
@@ -1091,23 +1091,32 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			fmt.Fprintf(w, "\tif (%s) {\n", guardCondition)
 		}
 		resultVar := "res"
-		if fdCleanup.initial {
+		if fdCleanup.initialReturn {
 			resultVar = fdResultVar
 		}
-		ctx.emitCall(w, call, ci, resCopyout || argCopyout || fdCleanup.initial, trace, initCall,
+		ctx.emitCall(w, call, ci, resCopyout || argCopyout || fdCleanup.initialReturn, trace, initCall,
 			resultVar, forceNonblockArg, dynamicFcntlCommand, dataMmap)
-		if fdCleanup.initial {
+		if fdCleanup.initialReturn {
 			fmt.Fprintf(w, "\tif (%[1]s > 2) close((int)%[1]s);\n", resultVar)
 		}
 		if call.Props.Rerun > 0 {
+			if fdCleanup.overwriteCopyout {
+				fmt.Fprintf(w, "\t%s = res;\n", fdResultVar)
+			}
 			fmt.Fprintf(w, "\tfor (int i = 0; i < %v; i++) {\n", call.Props.Rerun)
+			if fdCleanup.overwriteCopyout {
+				ctx.emitCSBOverwriteFDCleanup(w, call, fdResultVar)
+			}
 			// Rerun invocations should not affect the result value.
-			ctx.emitCall(w, call, ci, fdCleanup.rerun, false, initCall, fdResultVar,
-				forceNonblockArg, dynamicFcntlCommand, dataMmap)
-			if fdCleanup.rerun {
+			ctx.emitCall(w, call, ci, fdCleanup.rerunReturn || fdCleanup.overwriteCopyout,
+				false, initCall, fdResultVar, forceNonblockArg, dynamicFcntlCommand, dataMmap)
+			if fdCleanup.rerunReturn {
 				fmt.Fprintf(w, "\tif (%[1]s > 2) close((int)%[1]s);\n", fdResultVar)
 			}
 			fmt.Fprintf(w, "\t}\n")
+			if fdCleanup.overwriteCopyout {
+				fmt.Fprintf(w, "\tres = %s;\n", fdResultVar)
+			}
 		}
 		if ctx.opts.CSB && (call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup") {
 			if _, ok := call.Args[1].(prog.ExecArgConst); ok {
