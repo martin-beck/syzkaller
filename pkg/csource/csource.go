@@ -760,6 +760,8 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		// Call itself.
 		resCopyout := call.Index != prog.ExecNoCopyout
 		argCopyout := len(call.Copyout) != 0
+		closeUnusedDup := ctx.opts.CSB && !resCopyout &&
+			(call.Meta.CallName == "dup" || call.Meta.CallName == "dup3")
 
 		initCall := false
 		if slices.Contains(initIndices, ci) {
@@ -829,8 +831,11 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			cmd := ctx.resultArgToStr(call.Args[1].(prog.ExecArgResult))
 			fmt.Fprintf(w, "\tintptr_t csb_fcntl_cmd_%d = %s;\n", ci, cmd)
 		}
-		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall,
+		ctx.emitCall(w, call, ci, resCopyout || argCopyout || closeUnusedDup, trace, initCall,
 			forceNonblockArg, dynamicFcntlCommand, csbFIONBIO, csbMQAttr, dataMmap)
+		if closeUnusedDup {
+			fmt.Fprintf(w, "\tif (res > 2) close((int)res);\n")
+		}
 		if call.Props.Rerun > 0 {
 			fmt.Fprintf(w, "\tfor (int i = 0; i < %v; i++) {\n", call.Props.Rerun)
 			// Rerun invocations should not affect the result value.
