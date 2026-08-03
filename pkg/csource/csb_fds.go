@@ -3,40 +3,61 @@
 
 package csource
 
-import "github.com/google/syzkaller/prog"
+import (
+	"bytes"
+	"fmt"
+
+	"github.com/google/syzkaller/prog"
+)
 
 var missedFDResources = make(map[uint64]bool)
 
 type csbFDPolicy struct {
-	discardedReturn bool
-	copyoutFDs      bool
-	fixedReturnArg  int
+	returnFDs          bool
+	copyoutFDs         bool
+	fixedReturnArg     int
+	overwritesCopyouts bool
 }
 
 var csbFDPolicies = map[string]csbFDPolicy{
-	"dup":   {discardedReturn: true, fixedReturnArg: -1},
-	"dup3":  {discardedReturn: true, fixedReturnArg: 1},
-	"pipe":  {copyoutFDs: true, fixedReturnArg: -1},
-	"pipe2": {copyoutFDs: true, fixedReturnArg: -1},
+	"dup":   {returnFDs: true, fixedReturnArg: -1},
+	"dup3":  {returnFDs: true, fixedReturnArg: 1},
+	"pipe":  {copyoutFDs: true, fixedReturnArg: -1, overwritesCopyouts: true},
+	"pipe2": {copyoutFDs: true, fixedReturnArg: -1, overwritesCopyouts: true},
 }
 
 type csbDiscardedFDCleanup struct {
-	initial bool
-	rerun   bool
+	initialReturn    bool
+	rerunReturn      bool
+	overwriteCopyout bool
 }
 
 func csbDiscardedFDCleanupFor(call prog.ExecCall, later []prog.ExecCall) csbDiscardedFDCleanup {
 	policy, ok := csbFDPolicies[call.Meta.CallName]
-	if !ok || !policy.discardedReturn {
+	if !ok {
 		return csbDiscardedFDCleanup{}
 	}
 	resultStored := call.Index != prog.ExecNoCopyout
 	preserveFixed := policy.fixedReturnArg >= 0 && policy.fixedReturnArg < len(call.Args) &&
-		(resultStored || execResultUsed(call.Args[policy.fixedReturnArg], later))
+		(resultStored || execArgUsed(call.Args[policy.fixedReturnArg], later))
 	return csbDiscardedFDCleanup{
-		initial: !resultStored && !preserveFixed,
-		rerun:   call.Props.Rerun > 0 && !preserveFixed,
+		initialReturn:    policy.returnFDs && !resultStored && !preserveFixed,
+		rerunReturn:      policy.returnFDs && call.Props.Rerun > 0 && !preserveFixed,
+		overwriteCopyout: policy.overwritesCopyouts && call.Props.Rerun > 0,
 	}
+}
+
+func (ctx *context) emitCSBOverwriteFDCleanup(w *bytes.Buffer, call prog.ExecCall, statusVar string) {
+	fmt.Fprintf(w, "\tif (%s != -1) {\n", statusVar)
+	for _, copyout := range call.Copyout {
+		ptrOffset := ""
+		if valInMMapRange(ctx, copyout.Addr) {
+			ptrOffset = "+PTR_OFFSET"
+		}
+		fmt.Fprintf(w, "\t\tNONFAILING({ uint64 fd = *(uint%d*)(0x%xul%s); "+
+			"if (fd > 2) close((int)fd); });\n", copyout.Size*8, copyout.Addr, ptrOffset)
+	}
+	fmt.Fprintf(w, "\t}\n")
 }
 
 func resetCSBFDResources() {
@@ -63,19 +84,27 @@ func markCSBFDResourceClosed(call prog.ExecCall, callName string) {
 	}
 }
 
-func execResultUsed(arg prog.ExecArg, calls []prog.ExecCall) bool {
-	result, ok := arg.(prog.ExecArgResult)
-	if !ok {
-		return false
+func execArgUsed(arg prog.ExecArg, calls []prog.ExecCall) bool {
+	matches := func(other prog.ExecArg) bool {
+		switch arg := arg.(type) {
+		case prog.ExecArgResult:
+			other, ok := other.(prog.ExecArgResult)
+			return ok && other.Index == arg.Index
+		case prog.ExecArgConst:
+			other, ok := other.(prog.ExecArgConst)
+			return ok && other.Value == arg.Value
+		default:
+			return false
+		}
 	}
 	for _, call := range calls {
 		for _, arg := range call.Args {
-			if other, ok := arg.(prog.ExecArgResult); ok && other.Index == result.Index {
+			if matches(arg) {
 				return true
 			}
 		}
 		for _, copyin := range call.Copyin {
-			if other, ok := copyin.Arg.(prog.ExecArgResult); ok && other.Index == result.Index {
+			if matches(copyin.Arg) {
 				return true
 			}
 		}
