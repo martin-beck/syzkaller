@@ -604,12 +604,14 @@ func TestCSBClosesUnusedDupResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
-	if err != nil {
-		t.Fatal(err)
+	for _, opts := range []Options{{CSB: true, Slowdown: 1}, {CSB: true, Threaded: true, Slowdown: 1}} {
+		src, _, err := Write(p, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Contains(t, string(src), "intptr_t res = 0;\n\tV_UNUSED(res);")
+		assert.Equal(t, 2, strings.Count(string(src), "if (res > 2) close((int)res);"))
 	}
-	assert.Contains(t, string(src), "intptr_t res = 0;")
-	assert.Equal(t, 2, strings.Count(string(src), "if (res > 2) close((int)res);"))
 }
 
 func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {

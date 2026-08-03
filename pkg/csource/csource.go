@@ -579,6 +579,9 @@ func (ctx *context) generateSyscalls(calls []string, hasVars bool) string {
 	} else if len(calls) > 0 {
 		if hasVars || opts.Trace {
 			fmt.Fprintf(buf, "\tintptr_t res = 0;\n")
+			if opts.CSB {
+				fmt.Fprintf(buf, "\tV_UNUSED(res);\n")
+			}
 		}
 		fmt.Fprintf(buf, "\tswitch (call) {\n")
 		for i, c := range calls {
