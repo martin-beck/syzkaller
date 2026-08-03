@@ -1128,6 +1128,12 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			}
 		}
 
+		if callName == "pipe" || callName == "pipe2" {
+			for i := range call.Copyout {
+				missedFDResources[call.Copyout[i].Index] = true
+			}
+		}
+
 		if callName == "read" || callName == "pread" || callName == "pread64" || callName == "recv" || callName == "recvfrom" {
 			fdRes, fdOK := resultIndex(call.Args, 0)
 			size, sizeOK := constValue(call.Args, 2)
