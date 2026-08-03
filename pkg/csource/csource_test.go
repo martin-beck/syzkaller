@@ -599,9 +599,8 @@ func TestCSBClosesUnusedDupResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := target.Deserialize([]byte("r0 = openat(0xffffffffffffff9c, &(0x7f0000000000), 0x0, 0x0)\n"+
-		"dup(r0)\n"+
-		"dup3(r0, 0x5, 0x0)\n"), prog.NonStrict)
+	p, err := target.Deserialize([]byte("dup(0x3)\n"+
+		"dup3(0x3, 0x5, 0x0)\n"), prog.NonStrict)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -609,6 +608,7 @@ func TestCSBClosesUnusedDupResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assert.Contains(t, string(src), "intptr_t res = 0;")
 	assert.Equal(t, 2, strings.Count(string(src), "if (res > 2) close((int)res);"))
 }
 

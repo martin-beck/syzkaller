@@ -552,6 +552,7 @@ func (ctx *context) filterCalls() {
 
 func (ctx *context) generateSyscalls(calls []string, hasVars bool) string {
 	opts := ctx.opts
+	hasVars = hasVars || opts.CSB
 	buf := new(bytes.Buffer)
 	if !opts.Threaded && !opts.Collide {
 		// Keep generateCalls' one-to-one mapping between program calls and
