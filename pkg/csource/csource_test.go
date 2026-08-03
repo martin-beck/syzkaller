@@ -613,15 +613,15 @@ func TestCSBClosesDiscardedDupResults(t *testing.T) {
 	}
 	got := string(src)
 	for _, call := range []int{1, 2} {
-		result := fmt.Sprintf("csb_dup_res_%d", call)
+		result := fmt.Sprintf("csb_discarded_fd_%d", call)
 		assert.Contains(t, got, "intptr_t "+result+";")
 		assert.Contains(t, got, result+" = ")
 		assert.Contains(t, got, "if ("+result+" > 2) close((int)"+result+");")
 	}
 	assert.Contains(t, got, "res = syscall(__NR_dup")
 	assert.Contains(t, got, "UNIQUE_VAR(ctx->r)[1] = res")
-	assert.Contains(t, got, "csb_dup_res_3 = syscall(__NR_dup")
-	assert.Contains(t, got, "if (csb_dup_res_3 > 2) close((int)csb_dup_res_3);")
+	assert.Contains(t, got, "csb_discarded_fd_3 = syscall(__NR_dup")
+	assert.Contains(t, got, "if (csb_discarded_fd_3 > 2) close((int)csb_discarded_fd_3);")
 	assert.NotContains(t, got, "if (res > 2) close((int)res);")
 }
 
@@ -644,8 +644,28 @@ func TestCSBPreservesLiveDup3Destinations(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(src)
-	assert.NotContains(t, got, "csb_dup_res_2")
-	assert.NotContains(t, got, "csb_dup_res_4")
+	assert.NotContains(t, got, "csb_discarded_fd_2")
+	assert.NotContains(t, got, "csb_discarded_fd_4")
+}
+
+func TestCSBClosesPipeCopyouts(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("pipe2(&(0x7f0000000000)={<r0=>0x0, <r1=>0x0}, 0x0)\n"+
+		"fcntl$getflags(r0, 0x3)\n"+
+		"fcntl$getflags(r1, 0x3)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(src)
+	assert.Contains(t, got, "UNIQUE_VAR(ctx->r)[0]; if (fd > 2) close(fd);")
+	assert.Contains(t, got, "UNIQUE_VAR(ctx->r)[1]; if (fd > 2) close(fd);")
 }
 
 func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {
