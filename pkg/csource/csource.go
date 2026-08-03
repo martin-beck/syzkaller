@@ -52,15 +52,14 @@ type NetOpSize struct {
 }
 
 var (
-	missedFDResources = make(map[uint64](bool))
-	connectFDs        = make(map[uint64](bool))
-	acceptFDs         = make(map[uint64](bool))
-	readFDSizes       = make(map[uint64](uint64))
-	NetOpsFDs         = make(map[uint64]([]NetOpSize))
-	NetOpsFDsConnect  = make(map[uint64]([]NetOpSize))
-	NetOpsFDsAccept   = make(map[uint64]([]NetOpSize))
-	listenFDs         = make(map[uint64](bool))
-	initFDs           = make(map[uint64](bool))
+	connectFDs       = make(map[uint64](bool))
+	acceptFDs        = make(map[uint64](bool))
+	readFDSizes      = make(map[uint64](uint64))
+	NetOpsFDs        = make(map[uint64]([]NetOpSize))
+	NetOpsFDsConnect = make(map[uint64]([]NetOpSize))
+	NetOpsFDsAccept  = make(map[uint64]([]NetOpSize))
+	listenFDs        = make(map[uint64](bool))
+	initFDs          = make(map[uint64](bool))
 )
 
 func AddToNetOps(res uint64, op NetOp, size uint64) {
@@ -142,7 +141,7 @@ func Write(p *prog.Prog, opts Options) (program []byte, metaData string, err err
 }
 
 func resetGenerationState() {
-	missedFDResources = make(map[uint64]bool)
+	resetCSBFDResources()
 	connectFDs = make(map[uint64]bool)
 	acceptFDs = make(map[uint64]bool)
 	readFDSizes = make(map[uint64]uint64)
@@ -985,14 +984,13 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		// Call itself.
 		resCopyout := call.Index != prog.ExecNoCopyout
 		argCopyout := len(call.Copyout) != 0
-		isDup := ctx.opts.CSB && (call.Meta.CallName == "dup" || call.Meta.CallName == "dup3")
-		preserveDup3 := call.Meta.CallName == "dup3" &&
-			(resCopyout || execResultUsed(call.Args[1], p.Calls[ci+1:]))
-		closeInitialDup := isDup && !resCopyout && !preserveDup3
-		closeRerunDup := isDup && call.Props.Rerun > 0 && !preserveDup3
-		dupResultVar := fmt.Sprintf("csb_dup_res_%d", ci)
-		if closeInitialDup || closeRerunDup {
-			fmt.Fprintf(w, "\tintptr_t %s;\n", dupResultVar)
+		fdCleanup := csbDiscardedFDCleanup{}
+		if ctx.opts.CSB {
+			fdCleanup = csbDiscardedFDCleanupFor(call, p.Calls[ci+1:])
+		}
+		fdResultVar := fmt.Sprintf("csb_discarded_fd_%d", ci)
+		if fdCleanup.initial || fdCleanup.rerun {
+			fmt.Fprintf(w, "\tintptr_t %s;\n", fdResultVar)
 		}
 
 		initCall := false
@@ -1093,21 +1091,21 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			fmt.Fprintf(w, "\tif (%s) {\n", guardCondition)
 		}
 		resultVar := "res"
-		if closeInitialDup {
-			resultVar = dupResultVar
+		if fdCleanup.initial {
+			resultVar = fdResultVar
 		}
-		ctx.emitCall(w, call, ci, resCopyout || argCopyout || closeInitialDup, trace, initCall,
+		ctx.emitCall(w, call, ci, resCopyout || argCopyout || fdCleanup.initial, trace, initCall,
 			resultVar, forceNonblockArg, dynamicFcntlCommand, dataMmap)
-		if closeInitialDup {
+		if fdCleanup.initial {
 			fmt.Fprintf(w, "\tif (%[1]s > 2) close((int)%[1]s);\n", resultVar)
 		}
 		if call.Props.Rerun > 0 {
 			fmt.Fprintf(w, "\tfor (int i = 0; i < %v; i++) {\n", call.Props.Rerun)
 			// Rerun invocations should not affect the result value.
-			ctx.emitCall(w, call, ci, closeRerunDup, false, initCall, dupResultVar,
+			ctx.emitCall(w, call, ci, fdCleanup.rerun, false, initCall, fdResultVar,
 				forceNonblockArg, dynamicFcntlCommand, dataMmap)
-			if closeRerunDup {
-				fmt.Fprintf(w, "\tif (%[1]s > 2) close((int)%[1]s);\n", dupResultVar)
+			if fdCleanup.rerun {
+				fmt.Fprintf(w, "\tif (%[1]s > 2) close((int)%[1]s);\n", fdResultVar)
 			}
 			fmt.Fprintf(w, "\t}\n")
 		}
@@ -1133,27 +1131,13 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		calls = append(calls, w.String())
 		resultResets = append(resultResets, resetBuf.String())
 
-		// get resource indices for filedescriptor related calls
-		if resCopyout {
-			fdRes := call.Index
-			missedFDResources[fdRes] = true
-		}
+		trackCSBFDResources(call)
 
 		callName, ok := ctx.sysTarget.SyscallTrampolines[call.Meta.CallName]
 		if !ok {
 			callName = call.Meta.CallName
 		}
-		if callName == "close" {
-			if fdRes, ok := resultIndex(call.Args, 0); ok {
-				missedFDResources[fdRes] = false
-			}
-		}
-
-		if callName == "pipe" || callName == "pipe2" {
-			for i := range call.Copyout {
-				missedFDResources[call.Copyout[i].Index] = true
-			}
-		}
+		markCSBFDResourceClosed(call, callName)
 
 		if callName == "read" || callName == "pread" || callName == "pread64" || callName == "recv" || callName == "recvfrom" {
 			fdRes, fdOK := resultIndex(call.Args, 0)
@@ -1294,26 +1278,6 @@ func fcntlCommand(call prog.ExecCall, command uint64) bool {
 	}
 	arg, ok := call.Args[1].(prog.ExecArgConst)
 	return ok && arg.Value == command
-}
-
-func execResultUsed(arg prog.ExecArg, calls []prog.ExecCall) bool {
-	result, ok := arg.(prog.ExecArgResult)
-	if !ok {
-		return false
-	}
-	for _, call := range calls {
-		for _, arg := range call.Args {
-			if other, ok := arg.(prog.ExecArgResult); ok && other.Index == result.Index {
-				return true
-			}
-		}
-		for _, copyin := range call.Copyin {
-			if other, ok := copyin.Arg.(prog.ExecArgResult); ok && other.Index == result.Index {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func localIOResources(p prog.ExecProg, target *prog.Target) map[uint64]bool {
