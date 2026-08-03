@@ -450,6 +450,7 @@ func (ctx *context) filterCalls() {
 
 func (ctx *context) generateSyscalls(calls []string, hasVars bool) string {
 	opts := ctx.opts
+	hasVars = hasVars || opts.CSB
 	buf := new(bytes.Buffer)
 	if !opts.Threaded && !opts.Collide {
 		// Keep generateCalls' one-to-one mapping between program calls and
@@ -469,6 +470,9 @@ func (ctx *context) generateSyscalls(calls []string, hasVars bool) string {
 	} else if len(calls) > 0 {
 		if hasVars || opts.Trace {
 			fmt.Fprintf(buf, "\tintptr_t res = 0;\n")
+			if opts.CSB {
+				fmt.Fprintf(buf, "\tV_UNUSED(res);\n")
+			}
 		}
 		fmt.Fprintf(buf, "\tswitch (call) {\n")
 		for i, c := range calls {
@@ -981,6 +985,8 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		// Call itself.
 		resCopyout := call.Index != prog.ExecNoCopyout
 		argCopyout := len(call.Copyout) != 0
+		closeUnusedDup := ctx.opts.CSB && !resCopyout &&
+			(call.Meta.CallName == "dup" || call.Meta.CallName == "dup3")
 
 		initCall := false
 		if slices.Contains(initIndices, ci) {
@@ -1080,9 +1086,11 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		if guardCondition != "" {
 			fmt.Fprintf(w, "\tif (%s) {\n", guardCondition)
 		}
-		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall,
+		ctx.emitCall(w, call, ci, resCopyout || argCopyout || closeUnusedDup, trace, initCall,
 			forceNonblockArg, dynamicFcntlCommand, dataMmap)
-
+		if closeUnusedDup {
+			fmt.Fprintf(w, "\tif (res > 2) close((int)res);\n")
+		}
 		if call.Props.Rerun > 0 {
 			fmt.Fprintf(w, "\tfor (int i = 0; i < %v; i++) {\n", call.Props.Rerun)
 			// Rerun invocations should not affect the result value.
