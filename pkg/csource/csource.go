@@ -869,6 +869,12 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			}
 		}
 
+		if callName == "pipe" || callName == "pipe2" {
+			for i := range call.Copyout {
+				missedFDResources[call.Copyout[i].Index] = true
+			}
+		}
+
 		if callName == "read" || callName == "pread" || callName == "pread64" || callName == "recv" || callName == "recvfrom" {
 			if fdRes, ok := execArgResultIndex(call.Args[0]); ok {
 				arg2 := call.Args[2]
