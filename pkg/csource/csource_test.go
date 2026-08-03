@@ -111,6 +111,33 @@ func TestCSBReappliesCurrentAffinity(t *testing.T) {
 	assert.Contains(t, string(src), "sched_getaffinity(0, mask_size, mask)")
 }
 
+func TestCSBTemporaryDirectoryCleanupIsBestEffort(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte("getpid()\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(string(src), "UNIQUE_FUNC(remove_tmp_dir)(const char* dir)")
+	if start == -1 {
+		t.Fatal("generated source has no temporary-directory cleanup")
+	}
+	cleanup := string(src)[start:]
+	end := strings.Index(cleanup, "\n}\n")
+	if end == -1 {
+		t.Fatal("generated cleanup function has no end")
+	}
+	cleanup = cleanup[:end]
+	assert.NotContains(t, cleanup, "exitf(")
+	assert.NotContains(t, cleanup, "assert(")
+}
+
 func TestCSBEmptyNetworkMetadata(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {

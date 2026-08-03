@@ -282,17 +282,8 @@ static void __attribute__((noinline)) UNIQUE_FUNC(remove_tmp_dir)(const char* di
 {
 	DIR* dp = opendir(dir);
 	if (dp == NULL) {
-		if (errno == EACCES) {
-			// We could end up here in a recursive call to remove_dir() below.
-			// One of executed syscall could end up creating a directory rooted
-			// in the current working directory created by loop() with zero
-			// permissions. Try to perform a best effort removal of the
-			// directory.
-			if (rmdir(dir))
-				exitf("rmdir(%s) failed", dir);
-			return;
-		}
-		exitf("opendir(%s) failed", dir);
+		(void)rmdir(dir);
+		return;
 	}
 	struct dirent* ep = 0;
 	while ((ep = readdir(dp))) {
@@ -302,19 +293,15 @@ static void __attribute__((noinline)) UNIQUE_FUNC(remove_tmp_dir)(const char* di
 		snprintf(filename, sizeof(filename), "%s/%s", dir, ep->d_name);
 		struct stat st;
 		if (lstat(filename, &st))
-			exitf("lstat(%s) failed", filename);
+			continue;
 		if (S_ISDIR(st.st_mode)) {
 			UNIQUE_FUNC(remove_tmp_dir)(filename);
 			continue;
 		}
-		if (unlink(filename)) {
-			exitf("unlink(%s) failed", filename);
-		}
+		(void)unlink(filename);
 	}
 	closedir(dp);
-	while (rmdir(dir)) {
-		exitf("rmdir(%s) failed", dir);
-	}
+	(void)rmdir(dir);
 }
 
 #endif
