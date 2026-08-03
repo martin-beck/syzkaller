@@ -760,6 +760,8 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		// Call itself.
 		resCopyout := call.Index != prog.ExecNoCopyout
 		argCopyout := len(call.Copyout) != 0
+		closeDiscardedDup := ctx.opts.CSB && !resCopyout &&
+			(call.Meta.CallName == "dup" || call.Meta.CallName == "dup3")
 
 		initCall := false
 		if slices.Contains(initIndices, ci) {
@@ -831,11 +833,17 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		}
 		ctx.emitCall(w, call, ci, resCopyout || argCopyout, trace, initCall,
 			forceNonblockArg, dynamicFcntlCommand, csbFIONBIO, csbMQAttr, dataMmap)
+		if closeDiscardedDup {
+			fmt.Fprintf(w, "\tif (res > 2) close((int)res);\n")
+		}
 		if call.Props.Rerun > 0 {
 			fmt.Fprintf(w, "\tfor (int i = 0; i < %v; i++) {\n", call.Props.Rerun)
 			// Rerun invocations should not affect the result value.
 			ctx.emitCall(w, call, ci, false, false, initCall, forceNonblockArg,
 				dynamicFcntlCommand, csbFIONBIO, csbMQAttr, dataMmap)
+			if closeDiscardedDup {
+				fmt.Fprintf(w, "\tif (res > 2) close((int)res);\n")
+			}
 			fmt.Fprintf(w, "\t}\n")
 		}
 		if ctx.opts.CSB && call.Meta.CallName == "openat2" {
