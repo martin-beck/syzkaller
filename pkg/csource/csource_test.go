@@ -746,7 +746,14 @@ func TestCSBClosesDiscardedDupResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Equal(t, 2, strings.Count(string(src), "if (res > 2) close((int)res);"))
+	got := string(src)
+	for _, call := range []int{1, 2} {
+		result := fmt.Sprintf("csb_dup_res_%d", call)
+		assert.Contains(t, got, "intptr_t "+result+";")
+		assert.Contains(t, got, result+" = ")
+		assert.Contains(t, got, "if ("+result+" > 2) close((int)"+result+");")
+	}
+	assert.NotContains(t, got, "if (res > 2) close((int)res);")
 }
 
 func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {

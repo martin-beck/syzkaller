@@ -985,8 +985,13 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		// Call itself.
 		resCopyout := call.Index != prog.ExecNoCopyout
 		argCopyout := len(call.Copyout) != 0
-		closeUnusedDup := ctx.opts.CSB && !resCopyout &&
+		closeDiscardedDup := ctx.opts.CSB && !resCopyout &&
 			(call.Meta.CallName == "dup" || call.Meta.CallName == "dup3")
+		resultVar := "res"
+		if closeDiscardedDup {
+			resultVar = fmt.Sprintf("csb_dup_res_%d", ci)
+			fmt.Fprintf(w, "\tintptr_t %s;\n", resultVar)
+		}
 
 		initCall := false
 		if slices.Contains(initIndices, ci) {
@@ -1082,22 +1087,21 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			fmt.Fprintf(w, "\tintptr_t csb_fcntl_cmd_%d = %s;\n", ci,
 				ctx.resultArgToStr(call.Args[1].(prog.ExecArgResult)))
 		}
-
 		if guardCondition != "" {
 			fmt.Fprintf(w, "\tif (%s) {\n", guardCondition)
 		}
-		ctx.emitCall(w, call, ci, resCopyout || argCopyout || closeUnusedDup, trace, initCall,
-			forceNonblockArg, dynamicFcntlCommand, dataMmap)
-		if closeUnusedDup {
-			fmt.Fprintf(w, "\tif (res > 2) close((int)res);\n")
+		ctx.emitCall(w, call, ci, resCopyout || argCopyout || closeDiscardedDup, trace, initCall,
+			resultVar, forceNonblockArg, dynamicFcntlCommand, dataMmap)
+		if closeDiscardedDup {
+			fmt.Fprintf(w, "\tif (%[1]s > 2) close((int)%[1]s);\n", resultVar)
 		}
 		if call.Props.Rerun > 0 {
 			fmt.Fprintf(w, "\tfor (int i = 0; i < %v; i++) {\n", call.Props.Rerun)
 			// Rerun invocations should not affect the result value.
-			ctx.emitCall(w, call, ci, false, false, initCall, forceNonblockArg,
-				dynamicFcntlCommand, dataMmap)
-			if closeUnusedDup {
-				fmt.Fprintf(w, "\tif (res > 2) close((int)res);\n")
+			ctx.emitCall(w, call, ci, closeDiscardedDup, false, initCall, resultVar,
+				forceNonblockArg, dynamicFcntlCommand, dataMmap)
+			if closeDiscardedDup {
+				fmt.Fprintf(w, "\tif (%[1]s > 2) close((int)%[1]s);\n", resultVar)
 			}
 			fmt.Fprintf(w, "\t}\n")
 		}
@@ -1352,7 +1356,7 @@ func isNative(sysTarget *targets.Target, callName string) bool {
 }
 
 func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCopyout, trace, initCall bool,
-	forceNonblockArg int, dynamicFcntlCommand, dataMmap bool) {
+	resultVar string, forceNonblockArg int, dynamicFcntlCommand, dataMmap bool) {
 	native := isNative(ctx.sysTarget, call.Meta.CallName)
 	fmt.Fprintf(w, "\t")
 	if !native {
@@ -1360,7 +1364,7 @@ func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCo
 		// but only for non-native syscalls to reduce clutter (native syscalls are assumed to not crash).
 		// Arrange for res = -1 in case of syscall abort, we care about errno only if we are tracing for pkg/runtest.
 		if haveCopyout || trace {
-			fmt.Fprintf(w, "res = -1;\n\t")
+			fmt.Fprintf(w, "%s = -1;\n\t", resultVar)
 		}
 		if trace {
 			fmt.Fprintf(w, "errno = EFAULT;\n\t")
@@ -1368,7 +1372,7 @@ func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCo
 		fmt.Fprintf(w, "NONFAILING(")
 	}
 	if haveCopyout || trace {
-		fmt.Fprintf(w, "res = ")
+		fmt.Fprintf(w, "%s = ", resultVar)
 	}
 	w.WriteString(ctx.fmtCallBody(call, initCall, ci, forceNonblockArg, dynamicFcntlCommand, dataMmap))
 	if !native {
@@ -1387,7 +1391,7 @@ func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCo
 			// So instead of intptr_t -1 we can get 0x00000000ffffffff. Sign extend it to intptr_t.
 			cast = "(intptr_t)(int)"
 		}
-		ctx.sourceDialect().traceEpilogue(w, ci, cast)
+		ctx.sourceDialect().traceEpilogue(w, ci, cast, resultVar)
 	}
 }
 

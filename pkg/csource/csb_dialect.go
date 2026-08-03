@@ -70,8 +70,9 @@ func (dialect *csbDialect) sourceHeader() (string, string, error) {
 	return header + "\n", metadata, nil
 }
 
-func (*csbDialect) traceEpilogue(w *bytes.Buffer, _ int, _ string) {
-	fmt.Fprintln(w, "\tif (res == -1) { assert(!abort_on_fail); UNIQUE_VAR(ctx->num_failed)++; } else { UNIQUE_VAR(ctx->num_succeeded)++; }")
+func (*csbDialect) traceEpilogue(w *bytes.Buffer, _ int, _ string, resultVar string) {
+	fmt.Fprintf(w, "\tif (%s == -1) { assert(!abort_on_fail); UNIQUE_VAR(ctx->num_failed)++; } else { UNIQUE_VAR(ctx->num_succeeded)++; }\n",
+		resultVar)
 }
 
 func (*csbDialect) pseudoCallName(name string) string {
