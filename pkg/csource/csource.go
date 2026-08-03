@@ -985,12 +985,12 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		// Call itself.
 		resCopyout := call.Index != prog.ExecNoCopyout
 		argCopyout := len(call.Copyout) != 0
-		closeDiscardedDup := ctx.opts.CSB && !resCopyout &&
-			(call.Meta.CallName == "dup" || call.Meta.CallName == "dup3")
-		resultVar := "res"
-		if closeDiscardedDup {
-			resultVar = fmt.Sprintf("csb_dup_res_%d", ci)
-			fmt.Fprintf(w, "\tintptr_t %s;\n", resultVar)
+		isDup := ctx.opts.CSB && (call.Meta.CallName == "dup" || call.Meta.CallName == "dup3")
+		closeInitialDup := isDup && !resCopyout
+		closeRerunDup := isDup && call.Props.Rerun > 0
+		dupResultVar := fmt.Sprintf("csb_dup_res_%d", ci)
+		if closeInitialDup || closeRerunDup {
+			fmt.Fprintf(w, "\tintptr_t %s;\n", dupResultVar)
 		}
 
 		initCall := false
@@ -1090,18 +1090,22 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		if guardCondition != "" {
 			fmt.Fprintf(w, "\tif (%s) {\n", guardCondition)
 		}
-		ctx.emitCall(w, call, ci, resCopyout || argCopyout || closeDiscardedDup, trace, initCall,
+		resultVar := "res"
+		if closeInitialDup {
+			resultVar = dupResultVar
+		}
+		ctx.emitCall(w, call, ci, resCopyout || argCopyout || closeInitialDup, trace, initCall,
 			resultVar, forceNonblockArg, dynamicFcntlCommand, dataMmap)
-		if closeDiscardedDup {
+		if closeInitialDup {
 			fmt.Fprintf(w, "\tif (%[1]s > 2) close((int)%[1]s);\n", resultVar)
 		}
 		if call.Props.Rerun > 0 {
 			fmt.Fprintf(w, "\tfor (int i = 0; i < %v; i++) {\n", call.Props.Rerun)
 			// Rerun invocations should not affect the result value.
-			ctx.emitCall(w, call, ci, closeDiscardedDup, false, initCall, resultVar,
+			ctx.emitCall(w, call, ci, closeRerunDup, false, initCall, dupResultVar,
 				forceNonblockArg, dynamicFcntlCommand, dataMmap)
-			if closeDiscardedDup {
-				fmt.Fprintf(w, "\tif (%[1]s > 2) close((int)%[1]s);\n", resultVar)
+			if closeRerunDup {
+				fmt.Fprintf(w, "\tif (%[1]s > 2) close((int)%[1]s);\n", dupResultVar)
 			}
 			fmt.Fprintf(w, "\t}\n")
 		}
