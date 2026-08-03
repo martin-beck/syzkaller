@@ -1096,6 +1096,9 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			// Rerun invocations should not affect the result value.
 			ctx.emitCall(w, call, ci, false, false, initCall, forceNonblockArg,
 				dynamicFcntlCommand, dataMmap)
+			if closeUnusedDup {
+				fmt.Fprintf(w, "\tif (res > 2) close((int)res);\n")
+			}
 			fmt.Fprintf(w, "\t}\n")
 		}
 		if ctx.opts.CSB && (call.Meta.CallName == "io_uring_setup" || call.Meta.CallName == "syz_io_uring_setup") {
