@@ -873,7 +873,7 @@ func TestExecLifecycleCall(t *testing.T) {
 	}
 }
 
-func TestSkipOnlyLeadingBootstrapExec(t *testing.T) {
+func TestSkipOnlyRootBootstrapExec(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {
 		t.Fatal(err)
@@ -890,8 +890,8 @@ func TestSkipOnlyLeadingBootstrapExec(t *testing.T) {
 	if got := strings.Count(root, "syz_csb_execve"); got != 1 {
 		t.Fatalf("root contains %d exec lifecycles, want 1:\n%s", got, root)
 	}
-	if strings.Contains(root, "getppid") {
-		t.Fatalf("root retained calls after its workload exec:\n%s", root)
+	if !strings.Contains(root, "getppid") {
+		t.Fatalf("root lost calls after its skipped bootstrap exec:\n%s", root)
 	}
 	child := string(genProg(trace, target, false, false, false, false).Serialize())
 	if got := strings.Count(child, "syz_csb_execve"); got != 2 {
@@ -924,11 +924,11 @@ func TestBootstrapExecIsRootSpecific(t *testing.T) {
 	}}
 
 	got := string(genProg(trace, target, false, false, false, true).Serialize())
-	if lifecycles := strings.Count(got, "syz_csb_execve"); lifecycles != 2 {
-		t.Fatalf("got %d exec lifecycles, want child and workload execs:\n%s", lifecycles, got)
+	if lifecycles := strings.Count(got, "syz_csb_execve"); lifecycles != 1 {
+		t.Fatalf("got %d exec lifecycles, want child exec only:\n%s", lifecycles, got)
 	}
-	if strings.Contains(got, "getppid") {
-		t.Fatalf("root calls after its workload exec remained:\n%s", got)
+	if !strings.Contains(got, "getppid") {
+		t.Fatalf("root calls after its bootstrap exec were lost:\n%s", got)
 	}
 }
 

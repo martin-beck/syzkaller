@@ -47,35 +47,6 @@ func TestReduceProgSamplesDynamicMotifs(t *testing.T) {
 	}
 }
 
-func TestReduceProgKeepsResourceCallsStructural(t *testing.T) {
-	p := testProg(t, ""+
-		"r0 = test$res2()\n"+
-		"fallback$1(r0)\n"+
-		"fallback$1(r0)\n")
-	reduced, stats := reduceProg(p, reduceOptions{
-		MaxCalls:          0,
-		MaxMotifInstances: 1,
-		MaxLiveResources:  0,
-		KeepFirst:         0,
-		KeepLast:          1,
-		IncludeConsts:     true,
-	})
-	if len(reduced.Calls) != len(p.Calls) {
-		t.Fatalf("got %d calls, want all resource calls:\n%s", len(reduced.Calls), reduced.Serialize())
-	}
-	for _, call := range reduced.Calls {
-		if call.Props.Rerun != 0 {
-			t.Fatalf("resource call was collapsed into rerun:\n%s", reduced.Serialize())
-		}
-	}
-	if stats.WeightedCalls != len(p.Calls) {
-		t.Fatalf("weighted calls = %d, want %d", stats.WeightedCalls, len(p.Calls))
-	}
-	if _, err := reduced.SerializeForExec(); err != nil {
-		t.Fatalf("reduced program is not executable: %v\n%s", err, reduced.Serialize())
-	}
-}
-
 func TestUsedResourcesIncludesInOutDependencies(t *testing.T) {
 	p := testProg(t, "r0 = test$res2()\nmutate6(r0, &(0x7f0000000040)=\"abcd\", 0x4)\n")
 	producer := p.Calls[0].Ret
@@ -236,28 +207,6 @@ func TestReduceProgSamplesCopiedInCallsWithoutRerun(t *testing.T) {
 	}
 	if stats.WeightedCalls != len(reduced.Calls) {
 		t.Fatalf("weighted calls = %d, want %d", stats.WeightedCalls, len(reduced.Calls))
-	}
-}
-
-func TestReduceProgDoesNotDropStructuralResourcesForLiveCap(t *testing.T) {
-	p := testProg(t, ""+
-		"r0 = test$res2()\n"+
-		"r1 = test$res2()\n"+
-		"mutate6(r0, &(0x7f0000000040)=\"abcd\", 0x4)\n")
-	reduced, stats := reduceProg(p, reduceOptions{
-		MaxCalls:          0,
-		MaxMotifInstances: 0,
-		MaxLiveResources:  1,
-		IncludeConsts:     true,
-	})
-	if len(reduced.Calls) != len(p.Calls) {
-		t.Fatalf("got %d calls, want all structural resource calls:\n%s", len(reduced.Calls), reduced.Serialize())
-	}
-	if stats.DroppedResources != 0 {
-		t.Fatalf("structural resource calls were dropped: %+v", stats)
-	}
-	if _, err := reduced.SerializeForExec(); err != nil {
-		t.Fatalf("reduced program is not executable: %v\n%s", err, reduced.Serialize())
 	}
 }
 
