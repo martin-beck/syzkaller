@@ -111,6 +111,46 @@ func TestCSBReappliesCurrentAffinity(t *testing.T) {
 	assert.Contains(t, string(src), "sched_getaffinity(0, mask_size, mask)")
 }
 
+func TestCSBBoundsTimespecWaits(t *testing.T) {
+	tests := []struct {
+		arch     string
+		call     string
+		typeName string
+	}{
+		{targets.AMD64, "ppoll(0x0, 0x0, 0x0, 0x0, 0x0)", "csb_timespec"},
+		{targets.AMD64, "pselect6(0x0, 0x0, 0x0, 0x0, 0x0, 0x0)", "csb_timespec"},
+		{targets.I386, "ppoll_time64$auto(0x0, 0x0, 0x0, 0x0, 0x8)", "csb_timespec64"},
+		{targets.I386, "pselect6_time64$auto(0x0, 0x0, 0x0, 0x0, 0x0, 0x0)", "csb_timespec64"},
+	}
+	for _, test := range tests {
+		t.Run(test.call[:strings.IndexByte(test.call, '(')], func(t *testing.T) {
+			target, err := prog.GetTarget(targets.Linux, test.arch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := target.Deserialize([]byte(test.call+"\n"), prog.NonStrict)
+			if err != nil {
+				t.Fatal(err)
+			}
+			csb, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "(struct " + test.typeName + "[]){{CSB_MAX_WAIT_MS / 1000, " +
+				"(CSB_MAX_WAIT_MS % 1000) * 1000000}}"
+			assert.Contains(t, string(csb), want)
+			assert.Contains(t, string(csb), "#ifndef CSB_MAX_WAIT_MS")
+			assert.Contains(t, string(csb), "#endif")
+
+			regular, _, err := Write(p, Options{Slowdown: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.NotContains(t, string(regular), want)
+		})
+	}
+}
+
 func TestCSBEmptyNetworkMetadata(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {
