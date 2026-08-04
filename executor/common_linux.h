@@ -6044,15 +6044,10 @@ struct UNIQUE_VAR(affinity_mask) {
 	cpu_set_t mask[];
 };
 
-static void UNIQUE_FUNC(free_affinity_mask)(void* arg)
-{
-	free(arg);
-}
-
 static void UNIQUE_FUNC(create_affinity_mask_key)(void)
 {
 	UNIQUE_VAR(am_state).affinity_mask_key_error =
-	    pthread_key_create(&(UNIQUE_VAR(am_state).affinity_mask_key), UNIQUE_FUNC(free_affinity_mask));
+	    pthread_key_create(&(UNIQUE_VAR(am_state).affinity_mask_key), free);
 	if (!UNIQUE_VAR(am_state).affinity_mask_key_error)
 		__atomic_store_n(&(UNIQUE_VAR(am_state).affinity_mask_key_created), 1, __ATOMIC_RELEASE);
 }
@@ -6065,7 +6060,7 @@ static void UNIQUE_FUNC(cleanup_affinity_mask)(void)
 	void* affinity = pthread_getspecific(UNIQUE_VAR(am_state).affinity_mask_key);
 	if (affinity) {
 		pthread_setspecific(UNIQUE_VAR(am_state).affinity_mask_key, NULL);
-		UNIQUE_FUNC(free_affinity_mask)(affinity);
+		free(affinity);
 	}
 	if (__atomic_add_fetch(&(UNIQUE_VAR(am_state).affinity_mask_users), 1, __ATOMIC_ACQ_REL) ==
 	    BM_THREAD_NUM)

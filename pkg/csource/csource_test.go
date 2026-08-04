@@ -111,7 +111,7 @@ func TestCSBReappliesCurrentAffinity(t *testing.T) {
 	assert.Contains(t, string(src), "pthread_setspecific")
 	assert.Contains(t, string(src), "pthread_key_delete")
 	assert.Contains(t, string(src), "sched_getaffinity(0, mask_size, affinity->mask)")
-	assert.Contains(t, string(src), "UNIQUE_FUNC(free_affinity_mask)")
+	assert.Contains(t, string(src), "pthread_key_create(&(UNIQUE_VAR(am_state).affinity_mask_key), free)")
 	assert.Contains(t, string(src), "UNIQUE_FUNC(cleanup_affinity_mask)();")
 }
 
