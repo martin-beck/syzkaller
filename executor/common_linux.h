@@ -6016,29 +6016,90 @@ static long syz_csb_vfork_wait(void)
 
 #if SYZ_EXECUTOR || __NR_syz_reapply_affinity
 #include <errno.h>
+#include <pthread.h>
 #include <sched.h>
+
+static pthread_key_t UNIQUE_VAR(affinity_mask_key);
+static pthread_once_t UNIQUE_VAR(affinity_mask_once) = PTHREAD_ONCE_INIT;
+static int UNIQUE_VAR(affinity_mask_key_error);
+static int UNIQUE_VAR(affinity_mask_key_created);
+#if CSB
+static int UNIQUE_VAR(affinity_mask_users);
+#endif
+
+struct UNIQUE_VAR(affinity_mask) {
+	size_t size;
+	cpu_set_t mask[];
+};
+
+static void UNIQUE_FUNC(free_affinity_mask)(void* arg)
+{
+	free(arg);
+}
+
+static void UNIQUE_FUNC(create_affinity_mask_key)(void)
+{
+	UNIQUE_VAR(affinity_mask_key_error) =
+	    pthread_key_create(&UNIQUE_VAR(affinity_mask_key), UNIQUE_FUNC(free_affinity_mask));
+	if (!UNIQUE_VAR(affinity_mask_key_error))
+		__atomic_store_n(&UNIQUE_VAR(affinity_mask_key_created), 1, __ATOMIC_RELEASE);
+}
+
+#if CSB
+static void UNIQUE_FUNC(cleanup_affinity_mask)(void)
+{
+	if (!__atomic_load_n(&UNIQUE_VAR(affinity_mask_key_created), __ATOMIC_ACQUIRE))
+		return;
+	void* affinity = pthread_getspecific(UNIQUE_VAR(affinity_mask_key));
+	if (affinity) {
+		pthread_setspecific(UNIQUE_VAR(affinity_mask_key), NULL);
+		UNIQUE_FUNC(free_affinity_mask)(affinity);
+	}
+	if (__atomic_add_fetch(&UNIQUE_VAR(affinity_mask_users), 1, __ATOMIC_ACQ_REL) ==
+	    BM_THREAD_NUM)
+		pthread_key_delete(UNIQUE_VAR(affinity_mask_key));
+}
+#endif
 
 static long UNIQUE_FUNC(syz_reapply_affinity)(void)
 {
-	// Each worker snapshots the affinity inherited from its launcher.
-	static __thread cpu_set_t* mask = NULL;
-	static __thread size_t mask_size = 0;
-	if (!mask) {
-		for (int cpus = CPU_SETSIZE;; cpus *= 2) {
-			mask_size = CPU_ALLOC_SIZE(cpus);
-			mask = CPU_ALLOC(cpus);
-			if (!mask)
-				return -1;
-			if (!sched_getaffinity(0, mask_size, mask))
-				break;
-			CPU_FREE(mask);
-			mask = NULL;
-			mask_size = 0;
-			if (errno != EINVAL)
-				return -1;
-		}
+	int err = pthread_once(&UNIQUE_VAR(affinity_mask_once), UNIQUE_FUNC(create_affinity_mask_key));
+	if (err) {
+		errno = err;
+		return -1;
 	}
-	return sched_setaffinity(0, mask_size, mask);
+	if (UNIQUE_VAR(affinity_mask_key_error)) {
+		errno = UNIQUE_VAR(affinity_mask_key_error);
+		return -1;
+	}
+	struct UNIQUE_VAR(affinity_mask)* affinity =
+	    (struct UNIQUE_VAR(affinity_mask)*)pthread_getspecific(UNIQUE_VAR(affinity_mask_key));
+	if (affinity)
+		return sched_setaffinity(0, affinity->size, affinity->mask);
+	// Each worker snapshots the affinity inherited from its launcher.
+	for (int cpus = CPU_SETSIZE;; cpus *= 2) {
+		size_t mask_size = CPU_ALLOC_SIZE(cpus);
+		affinity = (struct UNIQUE_VAR(affinity_mask)*)calloc(1, sizeof(*affinity) + mask_size);
+		if (!affinity)
+			return -1;
+		if (sched_getaffinity(0, mask_size, affinity->mask)) {
+			err = errno;
+			free(affinity);
+			if (err == EINVAL) {
+				affinity = NULL;
+				continue;
+			}
+			errno = err;
+			return -1;
+		}
+		affinity->size = mask_size;
+		err = pthread_setspecific(UNIQUE_VAR(affinity_mask_key), affinity);
+		if (!err)
+			return sched_setaffinity(0, affinity->size, affinity->mask);
+		free(affinity);
+		errno = err;
+		return -1;
+	}
 }
 #endif
 
