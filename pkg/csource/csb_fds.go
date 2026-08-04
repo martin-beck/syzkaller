@@ -79,7 +79,7 @@ func markCSBFDResourceClosed(call prog.ExecCall, callName string) {
 	if callName != "close" || len(call.Args) == 0 {
 		return
 	}
-	if fdRes, ok := execArgResultIndex(call.Args[0]); ok {
+	if fdRes, ok := resultIndex(call.Args, 0); ok {
 		missedFDResources[fdRes] = false
 	}
 }

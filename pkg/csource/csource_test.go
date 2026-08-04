@@ -727,7 +727,7 @@ func TestCSBClosesUnusedDupResults(t *testing.T) {
 			t.Fatal(err)
 		}
 		assert.Contains(t, string(src), "intptr_t res = 0;\n\tV_UNUSED(res);")
-		assert.Equal(t, 2, strings.Count(string(src), "if (res > 2) close((int)res);"))
+		assert.Equal(t, 2, strings.Count(string(src), "> 2) close((int)csb_discarded_fd_"))
 	}
 }
 
