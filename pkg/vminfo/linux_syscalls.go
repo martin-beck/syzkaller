@@ -120,6 +120,7 @@ var linuxSyscallChecks = map[string]func(*checkContext, *prog.Syscall) string{
 	"syz_usbip_server_init":         linuxSyzUsbIPSupported,
 	"syz_clone":                     alwaysSupported,
 	"syz_clone3":                    alwaysSupported,
+	"syz_reapply_affinity":          alwaysSupported,
 	"syz_pkey_set":                  linuxPkeysSupported,
 	"syz_socket_connect_nvme_tcp":   linuxSyzSocketConnectNvmeTCPSupported,
 	"syz_pidfd_open":                alwaysSupported,
