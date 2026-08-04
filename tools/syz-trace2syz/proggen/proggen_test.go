@@ -517,8 +517,6 @@ munmap(0x70000000, 8192) = 0
 mremap(0x70000000, 4096, 8192, 1) = 0x70002000
 rt_sigprocmask(0, [], NULL, 8) = 0
 rt_sigtimedwait([], NULL, {tv_sec=0, tv_nsec=0}, 8) = -1 EAGAIN (Resource temporarily unavailable)
-set_robust_list(0x1234, 24) = 0
-set_tid_address(0x1234) = 1234
 wait4(-1, NULL, 1, NULL) = -1 ECHILD (No child processes)
 wait(NULL) = -1 ECHILD (No child processes)
 `)
@@ -531,8 +529,6 @@ wait(NULL) = -1 ECHILD (No child processes)
 		"mremap(",
 		"rt_sigprocmask(",
 		"rt_sigtimedwait(",
-		"set_robust_list(",
-		"set_tid_address(",
 		"wait4(",
 	} {
 		if !strings.Contains(serialized, want) {
@@ -585,8 +581,6 @@ wait(NULL) = -1 ECHILD (No child processes)
 		"__NR_mremap",
 		"__NR_rt_sigprocmask",
 		"__NR_rt_sigtimedwait",
-		"__NR_set_robust_list",
-		"__NR_set_tid_address",
 		"__NR_wait4",
 	} {
 		if !strings.Contains(header, want) {
@@ -763,11 +757,11 @@ func TestSkipOnlyRootBootstrapExec(t *testing.T) {
 		t.Fatalf("root lost calls after its skipped bootstrap exec:\n%s", root)
 	}
 	child := string(genProg(trace, target, false, false, false, false).Serialize())
-	if got := strings.Count(child, "syz_csb_execve"); got != 1 {
-		t.Fatalf("child contains %d exec lifecycles, want 1:\n%s", got, child)
+	if got := strings.Count(child, "syz_csb_execve"); got != 2 {
+		t.Fatalf("child contains %d exec lifecycles, want 2:\n%s", got, child)
 	}
-	if strings.Contains(child, "getppid") {
-		t.Fatalf("child retained calls after its successful workload exec:\n%s", child)
+	if !strings.Contains(child, "getppid") {
+		t.Fatalf("child lost calls after its successful workload exec:\n%s", child)
 	}
 }
 
@@ -792,7 +786,7 @@ func TestBootstrapExecIsRootSpecific(t *testing.T) {
 	}
 }
 
-func TestSuccessfulExecTerminatesOnlyItsTID(t *testing.T) {
+func TestSuccessfulExecKeepsFollowingCalls(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {
 		t.Fatal(err)
@@ -809,11 +803,25 @@ func TestSuccessfulExecTerminatesOnlyItsTID(t *testing.T) {
 	if lifecycles := strings.Count(got, "syz_csb_execve"); lifecycles != 2 {
 		t.Fatalf("got %d exec lifecycles, want 2:\n%s", lifecycles, got)
 	}
-	if !strings.Contains(got, "getpid") {
-		t.Fatalf("calls from a live interleaved TID were lost:\n%s", got)
+	for _, call := range []string{"getpid", "getppid", "getuid"} {
+		if !strings.Contains(got, call) {
+			t.Fatalf("%s after a successful exec was lost:\n%s", call, got)
+		}
 	}
-	if strings.Contains(got, "getppid") || strings.Contains(got, "getuid") {
-		t.Fatalf("calls after successful exec remained in their TID:\n%s", got)
+}
+
+func TestResumedCallAfterExecIsKept(t *testing.T) {
+	p := parseSingleProg(t, `
+1 execve("/bin/app", ["app"], 0x0) = 0
+1 socket(2, 1, 0 <unfinished ...>
+1 <... socket resumed>) = 3
+1 close(3) = 0
+`)
+	got := string(p.Serialize())
+	for _, call := range []string{"syz_csb_execve", "socket", "close"} {
+		if !strings.Contains(got, call) {
+			t.Fatalf("%s was lost after trace conversion:\n%s", call, got)
+		}
 	}
 }
 

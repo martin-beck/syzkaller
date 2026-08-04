@@ -4,6 +4,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -55,7 +56,7 @@ func TestIsPollLike(t *testing.T) {
 	}
 }
 
-func TestFilterOutPollsKeepsOnlyPollBeforeNonPoll(t *testing.T) {
+func TestFilterOutPollsKeepsLastPollInEachSequence(t *testing.T) {
 	p := makeTestProg(
 		testCall{"poll", 1},
 		testCall{"ppoll", 1},
@@ -66,7 +67,7 @@ func TestFilterOutPollsKeepsOnlyPollBeforeNonPoll(t *testing.T) {
 	)
 
 	got := callNames(filterOutPolls(p))
-	want := []string{"ppoll", "read", "epoll_wait", "write"}
+	want := []string{"ppoll", "read", "epoll_wait", "write", "select"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
@@ -326,6 +327,146 @@ func TestProcessComponentsPreservesSmallReduction(t *testing.T) {
 	}
 }
 
+func TestProcessComponentsKeepsShortVariedCalls(t *testing.T) {
+	oldMinCalls, oldJobs := *flagMinCalls, *flagJobs
+	defer func() {
+		*flagMinCalls = oldMinCalls
+		*flagJobs = oldJobs
+	}()
+	// CSB historically passed 10. It remains accepted for compatibility, but
+	// must not discard short dependency components; multidiff handles deduplication.
+	*flagMinCalls = 10
+	*flagJobs = 2
+
+	p := makeTestProg(
+		testCall{"futex", 1},
+		testCall{"mprotect", 1},
+		testCall{"sched_yield", 1},
+		testCall{"getpid", 1},
+	)
+	components := []prog.RelatedCallComponent{
+		{KeepCalls: []int{0}, FilterCalls: true},
+		{KeepCalls: []int{1}, FilterCalls: true},
+		{KeepCalls: []int{2}, FilterCalls: true},
+		{KeepCalls: []int{3}, FilterCalls: true},
+	}
+	results := processComponents(p, components)
+	for i, result := range results {
+		if result.data == nil {
+			t.Fatalf("short component %d (%s) was dropped", i, p.Calls[i].Meta.Name)
+		}
+		if result.calls != 1 {
+			t.Fatalf("short component %d contains %d calls, want 1", i, result.calls)
+		}
+	}
+}
+
+func TestShapeSelectorBoundsRepeatedComponents(t *testing.T) {
+	selector := newShapeSelector(8)
+	for i := range 1000 {
+		selector.add(extractedComponent{
+			data:  []byte(fmt.Sprintf("getpid(%d)\n", i)),
+			calls: 1,
+			names: []string{"getpid"},
+			shape: "call:getpid",
+		})
+	}
+	got := selector.selected()
+	if len(got) != 8 {
+		t.Fatalf("retained %d repeated components, want 8", len(got))
+	}
+	if string(got[0].data) != "getpid(0)\n" || string(got[1].data) != "getpid(1)\n" {
+		t.Fatalf("first representatives changed: %q, %q", got[0].data, got[1].data)
+	}
+	if string(got[len(got)-1].data) != "getpid(999)\n" {
+		t.Fatalf("last representative = %q, want occurrence 999", got[len(got)-1].data)
+	}
+}
+
+func TestShapeSelectorPreservesEveryShape(t *testing.T) {
+	selector := newShapeSelector(3)
+	want := []string{"futex", "mprotect", "sched_yield", "getpid"}
+	for _, name := range want {
+		for i := range 20 {
+			selector.add(extractedComponent{
+				data:  []byte(fmt.Sprintf("%s(%d)\n", name, i)),
+				calls: 1,
+				names: []string{name},
+				shape: "call:" + name,
+			})
+		}
+	}
+	counts := make(map[string]int)
+	for _, component := range selector.selected() {
+		counts[component.shape]++
+	}
+	for _, name := range want {
+		if got := counts["call:"+name]; got != 3 {
+			t.Fatalf("shape %s retained %d representatives, want 3", name, got)
+		}
+	}
+}
+
+func TestShapeSelectorIsDeterministic(t *testing.T) {
+	selectData := func() []string {
+		selector := newShapeSelector(8)
+		for i := range 100 {
+			selector.add(extractedComponent{
+				data:  []byte(fmt.Sprintf("socket(0x%x)\n", i*17)),
+				shape: "call:socket",
+			})
+		}
+		var ret []string
+		for _, component := range selector.selected() {
+			ret = append(ret, string(component.data))
+		}
+		return ret
+	}
+	if first, second := selectData(), selectData(); !reflect.DeepEqual(first, second) {
+		t.Fatalf("selection changed between runs:\n%q\n%q", first, second)
+	}
+}
+
+func TestComponentShapeIncludesResourceTopology(t *testing.T) {
+	target, err := prog.GetTarget("test", "64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parse := func(source string) *prog.Prog {
+		p, err := target.Deserialize([]byte(source), prog.NonStrict)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	linked := parse("r0 = test$res0()\ntest$res1(r0)\n")
+	literal := parse("r0 = test$res0()\ntest$res1(0xffff)\n")
+	if componentShape(linked) == componentShape(literal) {
+		t.Fatal("resource reference and literal resource have the same shape")
+	}
+	linkedAgain := parse("r0 = test$res0()\ntest$res1(r0)\n")
+	if componentShape(linked) != componentShape(linkedAgain) {
+		t.Fatal("identical dependency topology produced different shapes")
+	}
+}
+
+func TestComponentShapeIgnoresScalarConstants(t *testing.T) {
+	target, err := prog.GetTarget("test", "64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parse := func(value string) *prog.Prog {
+		p, err := target.Deserialize([]byte("test$int("+value+", 0x2, 0x3, 0x4, 0x5)\n"), prog.NonStrict)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	if componentShape(parse("0x1")) != componentShape(parse("0x99")) {
+		t.Fatal("scalar-only variants were assigned different shapes")
+	}
+}
+
 func serialExtractComponents(p *prog.Prog, tid int64, callIndices []int) []extractedComponent {
 	cache := newCache()
 	processedCalls := make([]bool, len(p.Calls))
@@ -342,10 +483,11 @@ func serialExtractComponents(p *prog.Prog, tid int64, callIndices []int) []extra
 
 		pF = filterOutPolls(pF)
 		var result extractedComponent
-		if len(pF.Calls) >= *flagMinCalls {
+		if len(pF.Calls) != 0 {
 			result.data = pF.Serialize()
 			result.calls = len(pF.Calls)
 			result.names = stat.TopKNames(genSyscallHist(pF), *flagTopCalls)
+			result.shape = componentShape(pF)
 		}
 		results = append(results, result)
 	}

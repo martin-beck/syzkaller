@@ -221,10 +221,10 @@ func reduceProg(p *prog.Prog, opts reduceOptions) (*prog.Prog, reduceStats) {
 
 	// Every syscall variant must survive reduction. Select the representative
 	// with the smallest dependency closure so that the invariant costs as few
-	// calls as possible. Mandatory calls override the configured size and live
-	// resource caps: silently losing a syscall variant is worse than exceeding a
-	// soft reduction target.
-	mandatory := mandatoryExecutableCalls(p, execKeys)
+	// calls as possible. Do not use executable argument identity here: pointer
+	// addresses, copied-in data, and resource identities commonly differ for
+	// every dynamic instance and would prevent motif reduction altogether.
+	mandatory := mandatoryVariantCalls(p)
 	keep := make([]bool, len(p.Calls))
 	available := make(map[*prog.ResultArg]bool)
 	liveResources := make(map[*prog.ResultArg]bool)
@@ -374,7 +374,7 @@ func writeExecutableArgKey(b *strings.Builder, arg prog.Arg, resourceIDs map[*pr
 	}
 }
 
-func mandatoryExecutableCalls(p *prog.Prog, execKeys []string) []bool {
+func mandatoryVariantCalls(p *prog.Prog) []bool {
 	producer := make(map[*prog.ResultArg]int)
 	for i, call := range p.Calls {
 		for _, res := range producedResources(call) {
@@ -406,18 +406,11 @@ func mandatoryExecutableCalls(p *prog.Prog, execKeys []string) []bool {
 	}
 
 	best := make(map[string]int)
-	bestRerunnable := make(map[string]int)
 	for i, call := range p.Calls {
-		key := execKeys[i]
+		key := call.Meta.Name
 		previous, ok := best[key]
 		if !ok || len(closures[i]) < len(closures[previous]) {
 			best[key] = i
-		}
-		if canFrequencyWeight(call) {
-			previous, ok := bestRerunnable[key]
-			if !ok || len(closures[i]) < len(closures[previous]) {
-				bestRerunnable[key] = i
-			}
 		}
 	}
 	mandatory := make([]bool, len(p.Calls))
@@ -426,25 +419,18 @@ func mandatoryExecutableCalls(p *prog.Prog, execKeys []string) []bool {
 			mandatory[index] = true
 		}
 	}
-	for name, representative := range best {
-		if rerunnable, ok := bestRerunnable[name]; ok {
-			representative = rerunnable
-		}
+	for _, representative := range best {
 		addClosure(representative)
-	}
-	// Retain calls that cannot safely use rerun and their dependencies.
-	for i, call := range p.Calls {
-		if !canFrequencyWeight(call) {
-			addClosure(i)
-		}
 	}
 	return mandatory
 }
 
-// applyFrequencyWeights accounts for every original invocation in the reduced
-// program. Only calls with identical executable arguments share a weight:
-// csource performs copyins once and rerun repeats the retained call verbatim.
-// mandatoryExecutableCalls guarantees a retained representative for every key.
+// applyFrequencyWeights restores original invocations when the reduced program
+// retains an executable-equivalent call. Only calls with identical executable
+// arguments share a weight: csource performs copyins once and rerun repeats the
+// retained call verbatim.
+// Calls without a retained executable-equivalent representative are omitted
+// from the frequency total; representing them with rerun would change behavior.
 func applyFrequencyWeights(original, reduced *prog.Prog, keep []bool, execKeys []string) int {
 	byExecutableCall := make(map[string][]int)
 	originalToReduced := make([]int, len(original.Calls))
@@ -466,10 +452,15 @@ func applyFrequencyWeights(original, reduced *prog.Prog, keep []bool, execKeys [
 	weights := make([]int, len(reduced.Calls))
 	for originalIndex, call := range original.Calls {
 		if !canFrequencyWeight(call) {
-			weights[originalToReduced[originalIndex]] += 1 + call.Props.Rerun
+			if reducedIndex := originalToReduced[originalIndex]; reducedIndex >= 0 {
+				weights[reducedIndex] += 1 + call.Props.Rerun
+			}
 			continue
 		}
 		candidates := byExecutableCall[execKeys[originalIndex]]
+		if len(candidates) == 0 {
+			continue
+		}
 		representative := nearestIndex(candidates, originalIndex)
 		weight := 1 + call.Props.Rerun
 		weights[originalToReduced[representative]] += weight

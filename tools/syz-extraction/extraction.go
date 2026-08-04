@@ -4,7 +4,9 @@
 package main
 
 import (
+	"bytes"
 	"cmp"
+	"crypto/sha256"
 	"flag"
 	"fmt"
 	"os"
@@ -34,9 +36,11 @@ var (
 
 	flagStrict      = flag.Bool("strict", false, "parse input program in strict mode")
 	flagDeserialize = flag.String("deserialize", "", "(Optional) directory to store deserialized programs")
-	flagMinCalls    = flag.Int("minCalls", 5, "minimum number of remaining syscalls after minimization")
+	flagMinCalls    = flag.Int("minCalls", 1, "deprecated compatibility flag; non-empty components are always emitted")
 	flagTopCalls    = flag.Int("topCalls", 2, "number of most used usyscalls to be used for file name generation")
 	flagJobs        = flag.Int("jobs", defaultJobs(), "number of extracted programs to build in parallel")
+	flagMaxPerShape = flag.Int("maxComponentsPerShape", 8,
+		"maximum representatives per structural call shape; 0 keeps every component")
 
 	syscallIDxPerTid = make(map[int64][]int)
 )
@@ -52,6 +56,10 @@ func help() {
 	flag.Parse()
 	if *flagProg == "" {
 		flag.Usage()
+		os.Exit(1)
+	}
+	if *flagMaxPerShape < 0 {
+		fmt.Fprintln(os.Stderr, "-maxComponentsPerShape must be non-negative")
 		os.Exit(1)
 	}
 }
@@ -154,6 +162,114 @@ type extractedComponent struct {
 	data  []byte
 	calls int
 	names []string
+	shape string
+}
+
+type selectedComponent struct {
+	component extractedComponent
+	sequence  int
+	digest    [sha256.Size]byte
+}
+
+type shapeSelection struct {
+	first  []selectedComponent
+	middle []selectedComponent
+	last   *selectedComponent
+}
+
+type shapeSelector struct {
+	limit     int
+	generated int
+	next      int
+	shapes    map[string]*shapeSelection
+	unlimited []selectedComponent
+}
+
+func newShapeSelector(limit int) *shapeSelector {
+	return &shapeSelector{limit: limit, shapes: make(map[string]*shapeSelection)}
+}
+
+func (selector *shapeSelector) add(component extractedComponent) {
+	if component.data == nil {
+		return
+	}
+	selector.generated++
+	candidate := selectedComponent{
+		component: component,
+		sequence:  selector.next,
+		digest:    sha256.Sum256(component.data),
+	}
+	selector.next++
+	if selector.limit == 0 {
+		selector.unlimited = append(selector.unlimited, candidate)
+		return
+	}
+	selection := selector.shapes[component.shape]
+	if selection == nil {
+		selection = new(shapeSelection)
+		selector.shapes[component.shape] = selection
+	}
+	if selection.hasDigest(candidate.digest) {
+		return
+	}
+	firstLimit := min(selector.limit, 2)
+	if len(selection.first) < firstLimit {
+		selection.first = append(selection.first, candidate)
+		return
+	}
+	if selector.limit <= 2 {
+		return
+	}
+	if selection.last != nil {
+		selection.addMiddle(*selection.last, selector.limit-firstLimit-1)
+	}
+	selection.last = &candidate
+}
+
+func (selection *shapeSelection) hasDigest(digest [sha256.Size]byte) bool {
+	for _, candidate := range selection.first {
+		if candidate.digest == digest {
+			return true
+		}
+	}
+	for _, candidate := range selection.middle {
+		if candidate.digest == digest {
+			return true
+		}
+	}
+	return selection.last != nil && selection.last.digest == digest
+}
+
+func (selection *shapeSelection) addMiddle(candidate selectedComponent, limit int) {
+	if limit == 0 {
+		return
+	}
+	selection.middle = append(selection.middle, candidate)
+	slices.SortFunc(selection.middle, func(a, b selectedComponent) int {
+		return bytes.Compare(a.digest[:], b.digest[:])
+	})
+	if len(selection.middle) > limit {
+		selection.middle = selection.middle[:limit]
+	}
+}
+
+func (selector *shapeSelector) selected() []extractedComponent {
+	selected := append([]selectedComponent(nil), selector.unlimited...)
+	for _, selection := range selector.shapes {
+		selected = append(selected, selection.first...)
+		selected = append(selected, selection.middle...)
+		if selection.last != nil {
+			selected = append(selected, *selection.last)
+		}
+	}
+	slices.SortFunc(selected, func(a, b selectedComponent) int {
+		return cmp.Compare(a.sequence, b.sequence)
+	})
+	ret := make([]extractedComponent, len(selected))
+	for i := range selected {
+		ret[i] = selected[i].component
+	}
+	return ret
 }
 
 func isPollLike(syscallName string) bool {
@@ -186,6 +302,9 @@ func filterOutPolls(p *prog.Prog) *prog.Prog {
 			notPolls[idx] = true
 		}
 	}
+	for _, idx := range prevPoll {
+		notPolls[idx] = true // Keep the final poll in a trailing sequence.
+	}
 	px := p.CloneFilter(notPolls)
 	return px
 }
@@ -204,6 +323,9 @@ func filterOutPollIndices(p *prog.Prog, indices []int) []int {
 			}
 			keep[pos] = true
 		}
+	}
+	for _, pos := range prevPoll {
+		keep[pos] = true // Keep the final poll in a trailing sequence.
 	}
 	out := make([]int, 0, len(indices))
 	for pos, index := range indices {
@@ -243,6 +365,7 @@ func generateAllProgs(p *prog.Prog, threadList []int64) {
 
 	c := newCache()
 	prog.PrepareDependencyIndex(p, c)
+	selector := newShapeSelector(*flagMaxPerShape)
 
 	totalStartSyscalls := 0
 	usedStartSyscalls := 0
@@ -260,23 +383,21 @@ func generateAllProgs(p *prog.Prog, threadList []int64) {
 
 		emit := func(results []extractedComponent) {
 			for _, result := range results {
-				if result.data == nil {
-					continue
-				}
-				prefix := outPrefix + "_" + strings.Join(result.names, "_")
-				if _, ok := outPrefixesIdx[prefix]; ok {
-					outPrefixesIdx[prefix]++
-				} else {
-					outPrefixesIdx[prefix] = 0
-				}
-				fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
-				fmt.Fprintf(os.Stderr, "    Extracted %d syscalls into %s_%d\n",
-					result.calls, prefix, outPrefixesIdx[prefix])
-				saveProg2File(result.data, prefix, outPrefixesIdx[prefix])
+				selector.add(result)
 			}
 		}
 		processThreadComponents(p, tid, syscallIDxPerTid[tid], c, emit)
 		fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
+	}
+	selected := selector.selected()
+	fmt.Fprintf(os.Stderr, "Shape selection: generated %d components across %d shapes, retained %d, folded %d\n",
+		selector.generated, len(selector.shapes), len(selected), selector.generated-len(selected))
+	for _, result := range selected {
+		prefix := outPrefix + "_" + strings.Join(result.names, "_")
+		index := outPrefixesIdx[prefix]
+		outPrefixesIdx[prefix] = index + 1
+		fmt.Fprintf(os.Stderr, "    Extracted %d syscalls into %s_%d\n", result.calls, prefix, index)
+		saveProg2File(result.data, prefix, index)
 	}
 }
 
@@ -331,7 +452,7 @@ func processComponents(p *prog.Prog, components []prog.RelatedCallComponent) []e
 					}
 				}
 				indices = filterOutPollIndices(p, indices)
-				if len(indices) < *flagMinCalls {
+				if len(indices) == 0 {
 					continue
 				}
 				pF := p.CloneCalls(indices)
@@ -340,6 +461,7 @@ func processComponents(p *prog.Prog, components []prog.RelatedCallComponent) []e
 				results[i].calls = len(indices)
 				scallHist := genSyscallHist(pF)
 				results[i].names = stat.TopKNames(scallHist, *flagTopCalls)
+				results[i].shape = componentShape(pF)
 			}
 		}()
 	}
@@ -350,6 +472,51 @@ func processComponents(p *prog.Prog, components []prog.RelatedCallComponent) []e
 	wg.Wait()
 
 	return results
+}
+
+func componentShape(p *prog.Prog) string {
+	var shape strings.Builder
+	results := make(map[*prog.ResultArg]int)
+	for callIndex, call := range p.Calls {
+		prog.ForeachArg(call, func(arg prog.Arg, _ *prog.ArgCtx) {
+			result, ok := arg.(*prog.ResultArg)
+			if ok && result.Res == nil && result.Dir() == prog.DirOut {
+				results[result] = callIndex
+			}
+		})
+	}
+	for _, call := range p.Calls {
+		fmt.Fprintf(&shape, "call:%s;props:%d,%t,%d;", call.Meta.Name,
+			call.Props.FailNth, call.Props.Async, call.Props.Rerun)
+		prog.ForeachArg(call, func(arg prog.Arg, _ *prog.ArgCtx) {
+			fmt.Fprintf(&shape, "%T:%s:%s", arg, arg.Type().Name(), arg.Dir())
+			switch typed := arg.(type) {
+			case *prog.ResultArg:
+				if typed.Res != nil {
+					if producer, ok := results[typed.Res]; ok {
+						fmt.Fprintf(&shape, ":ref=%d", producer)
+					} else {
+						shape.WriteString(":external-ref")
+					}
+				} else if typed.Dir() == prog.DirOut {
+					shape.WriteString(":producer")
+				} else {
+					shape.WriteString(":literal")
+				}
+			case *prog.PointerArg:
+				fmt.Fprintf(&shape, ":special=%t:vma=%t:pointee=%t", typed.IsSpecial(),
+					typed.VmaSize != 0, typed.Res != nil)
+			case *prog.DataArg:
+				fmt.Fprintf(&shape, ":size=%d", typed.Size())
+			case *prog.GroupArg:
+				fmt.Fprintf(&shape, ":items=%d", len(typed.Inner))
+			case *prog.UnionArg:
+				fmt.Fprintf(&shape, ":option=%d", typed.Index)
+			}
+			shape.WriteByte(';')
+		})
+	}
+	return shape.String()
 }
 
 func genSyscallHist(p *prog.Prog) map[string]int {

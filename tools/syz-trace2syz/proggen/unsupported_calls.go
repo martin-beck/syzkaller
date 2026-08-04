@@ -28,5 +28,15 @@ var (
 		"io_destroy":    true,
 		"io_submit":     true,
 		"io_cancel":     true,
+		// set_tid_address is used by libc internally, causes parent join to hang
+		// set robust list is also used by libc internally
+		"set_tid_address": true,
+		"set_robust_list": true,
+		// kill syscall signals are not handled yet properly
+		"kill":              true,
+		"tkill":             true,
+		"tgkill":            true,
+		"rt_tgsigqueueinfo": true,
+		"pidfd_send_signal": true,
 	}
 )

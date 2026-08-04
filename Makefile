@@ -107,14 +107,14 @@ endif
 	bin/syz-extract bin/syz-fmt \
 	extract generate generate_go generate_rpc generate_sys \
 	format format_go format_cpp format_sys \
-	tidy test test_race \
+	tidy test test_race multidiff \
 	check_copyright check_language check_whitespace check_links check_diff check_commits check_shebang check_html \
 	presubmit presubmit_aux presubmit_build presubmit_arch_linux presubmit_arch_freebsd \
 	presubmit_arch_netbsd presubmit_arch_openbsd presubmit_arch_darwin presubmit_arch_windows \
 	presubmit_arch_executor presubmit_dashboard presubmit_race presubmit_race_dashboard presubmit_old
 
 all: host target
-host: manager repro mutate prog2c db upgrade
+host: manager repro mutate prog2c multidiff db upgrade
 target: execprog executor check_syzos
 
 executor: descriptions
@@ -184,6 +184,9 @@ diff: descriptions target
 
 prog2c: descriptions
 	GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GOHOSTFLAGS) -o ./bin/syz-prog2c github.com/google/syzkaller/tools/syz-prog2c
+
+multidiff: descriptions
+	GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GOHOSTFLAGS) -o ./bin/syz-multidiff github.com/google/syzkaller/tools/syz-multidiff
 
 extraction: descriptions
 	# Large traces need compiler optimizations; other tools keep their debugging flags.

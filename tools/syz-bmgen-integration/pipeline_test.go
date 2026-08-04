@@ -40,6 +40,75 @@ func TestRealTracePipeline(t *testing.T) {
 	}
 }
 
+func TestShortVariedCallsSurvivePipeline(t *testing.T) {
+	requireTools(t)
+	work := t.TempDir()
+	input := filepath.Join(work, "short.prog")
+	data := []byte("" +
+		"# csb.trace.os=linux\n" +
+		"# csb.trace.arch=amd64\n")
+	for range 100 {
+		data = append(data, []byte("<1>getpid()\n")...)
+	}
+	data = append(data, []byte(""+
+		"<1>getuid()\n"+
+		"<1>getgid()\n"+
+		"<1>geteuid()\n"+
+		"<1>getegid()\n"+
+		"<1>getppid()\n"+
+		"<1>sched_yield()\n")...)
+	if err := os.WriteFile(input, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantCalls := []string{"getpid", "getuid", "getgid", "geteuid", "getegid", "getppid", "sched_yield"}
+
+	extracted := filepath.Join(work, "extracted")
+	mustMkdir(t, extracted)
+	// The historical CSB threshold must remain accepted without dropping short components.
+	runOK(t, tool("syz-extraction"), "-os=linux", "-arch=amd64", "-prog="+input,
+		"-deserialize="+extracted, "-minCalls=10", "-strict")
+	extractedPrograms := programs(t, extracted)
+	if len(extractedPrograms) > len(wantCalls)*8 {
+		t.Fatalf("extraction retained %d short programs, want at most %d", len(extractedPrograms), len(wantCalls)*8)
+	}
+	assertCallCoverage(t, extractedPrograms, wantCalls)
+
+	var reduced []string
+	for i, extractedProg := range programs(t, extracted) {
+		out := filepath.Join(work, fmt.Sprintf("reduced-%d.prog", i))
+		runOK(t, tool("syz-prog-reduce"), "-os=linux", "-arch=amd64",
+			"-prog="+extractedProg, "-out="+out)
+		reduced = append(reduced, out)
+	}
+	assertCallCoverage(t, reduced, wantCalls)
+
+	args := []string{"-os=linux", "-arch=amd64", "-strict", "-listfiles", "-fold=2"}
+	selectedData, err := run(tool("syz-multidiff"), append(args, reduced...)...)
+	if err != nil {
+		t.Fatalf("multidiff failed: %v\n%s", err, selectedData)
+	}
+	selected := strings.Fields(string(selectedData))
+	assertCallCoverage(t, selected, wantCalls)
+
+	var headers [][]byte
+	for i, selectedProg := range selected {
+		prefix := filepath.Join(work, fmt.Sprintf("header-%d.h", i))
+		runOK(t, tool("syz-prog2c"), "-os=linux", "-arch=amd64", "-prog="+selectedProg,
+			"-cfile="+prefix, "-format=false", "-strict", "-csb")
+		matches, err := filepath.Glob(strings.TrimSuffix(prefix, ".h") + "_*.h")
+		if err != nil || len(matches) != 1 {
+			t.Fatalf("prog2c outputs for %s: %v (%v)", selectedProg, matches, err)
+		}
+		headers = append(headers, readFile(t, matches[0]))
+	}
+	joined := bytes.Join(headers, nil)
+	for _, name := range wantCalls {
+		if !bytes.Contains(joined, []byte("__NR_"+name)) {
+			t.Errorf("final headers lost %s", name)
+		}
+	}
+}
+
 func testPipeline(t *testing.T, arch string) {
 	work := t.TempDir()
 	trace := filepath.Join(repoRoot, "traces/bash_ls_grep_strace.log")
@@ -281,6 +350,19 @@ func readFile(t *testing.T, path string) []byte {
 	return data
 }
 
+func assertCallCoverage(t *testing.T, files, calls []string) {
+	t.Helper()
+	var all []byte
+	for _, file := range files {
+		all = append(all, readFile(t, file)...)
+	}
+	for _, call := range calls {
+		if !bytes.Contains(all, []byte(call+"(")) {
+			t.Errorf("%v lost %s", files, call)
+		}
+	}
+}
+
 func mustMkdir(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o700); err != nil {
@@ -290,7 +372,10 @@ func mustMkdir(t *testing.T, path string) {
 
 func runOK(t *testing.T, command string, args ...string) {
 	t.Helper()
-	if output, err := run(command, args...); err != nil {
+	output, err := run(command, args...)
+	if ex_err, ok := err.(*exec.ExitError); ok {
+		t.Fatalf("%s %s failed: %v\n%s", command, strings.Join(args, " "), ex_err, ex_err.Stderr)
+	} else if err != nil {
 		t.Fatalf("%s %s failed: %v\n%s", command, strings.Join(args, " "), err, output)
 	}
 }
@@ -311,7 +396,7 @@ func run(command string, args ...string) ([]byte, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = repoRoot
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output()
 	if ctx.Err() != nil {
 		return output, fmt.Errorf("timed out: %w", ctx.Err())
 	}
@@ -324,9 +409,9 @@ func tool(name string) string {
 
 func requireTools(t *testing.T) {
 	t.Helper()
-	for _, name := range []string{"syz-trace2syz", "syz-extraction", "syz-prog-reduce", "syz-prog2c"} {
+	for _, name := range []string{"syz-trace2syz", "syz-extraction", "syz-prog-reduce", "syz-multidiff", "syz-prog2c"} {
 		if _, err := os.Stat(tool(name)); err != nil {
-			t.Fatalf("%s is required; run make trace2syz extraction progreduce prog2c: %v", tool(name), err)
+			t.Fatalf("%s is required; run make trace2syz extraction progreduce multidiff prog2c: %v", tool(name), err)
 		}
 	}
 }

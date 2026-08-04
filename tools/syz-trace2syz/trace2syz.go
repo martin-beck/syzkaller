@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -69,6 +70,21 @@ func initializeTarget(os, arch string) *prog.Target {
 	return target
 }
 
+func makeOutputPrefix(fname string) string {
+	name := filepath.Base(fname)
+	name = strings.TrimSuffix(name, filepath.Ext(name))
+	invalidChar := regexp.MustCompile(`[^A-Za-z0-9_]`)
+	name = invalidChar.ReplaceAllString(name, "_")
+	name = strings.TrimLeft(name, "_")
+	if len(name) == 0 {
+		return "empty"
+	} else if len(name) < 5 {
+		return name
+	} else {
+		return name[:5]
+	}
+}
+
 func genSyscallHist(p *prog.Prog) map[string]int {
 	hist := make(map[string]int)
 
@@ -109,7 +125,7 @@ func parseTraces(target *prog.Target) []*prog.Prog {
 		fmt.Fprintf(os.Stderr, "Generated %d programs\n", len(progs))
 		for idx, p := range progs {
 			fmt.Fprintf(os.Stderr, "Length of program %d: %d\n", idx+1, len(p.Calls))
-			progPrefix[p] = filepath.Base(names[i])[:5]
+			progPrefix[p] = makeOutputPrefix(names[i])
 		}
 		if err != nil {
 			log.Fatalf("%v", err)

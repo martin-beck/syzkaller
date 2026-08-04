@@ -164,7 +164,8 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 	if len(trace.Calls) != 0 {
 		rootPID = trace.Calls[0].Pid
 	}
-	terminatedTIDs := make(map[int64]bool)
+	// Bounded exec lifecycle calls do not replace the benchmark process, so
+	// continue translating calls from the traced replacement image.
 	for sIdx, sCall := range trace.Calls {
 		if sIdx%1000 == 0 {
 			status = fmt.Sprintf("-- Progress [%03.1f/100%%] --", (100.0 * float32(sIdx) / float32(numCalls)))
@@ -175,9 +176,6 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 			// 2179  wait4(2180,  <unfinished ...>
 			// 2179  <... wait4 resumed> 0x7fff28981bf8, 0, NULL) = ? ERESTARTSYS
 			// 2179  --- SIGUSR1 {si_signo=SIGUSR1, si_code=SI_USER, si_pid=2180, si_uid=0} ---
-			continue
-		}
-		if terminatedTIDs[sCall.Pid] {
 			continue
 		}
 		if skipBootstrapExec && !bootstrapExecSkipped && sCall.Pid == rootPID && isSuccessfulExec(sCall) {
@@ -197,10 +195,6 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 				fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 				log.Fatalf("%v", err)
 			}
-		}
-		// Later calls from this TID belong to the replacement image.
-		if isSuccessfulExec(sCall) {
-			terminatedTIDs[sCall.Pid] = true
 		}
 	}
 	fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
