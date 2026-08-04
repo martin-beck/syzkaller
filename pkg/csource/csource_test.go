@@ -106,9 +106,14 @@ func TestCSBReappliesCurrentAffinity(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Contains(t, string(src), "UNIQUE_FUNC(syz_reapply_affinity)()")
-	assert.Contains(t, string(src), "static __thread cpu_set_t* mask = NULL")
-	assert.Contains(t, string(src), "mask = CPU_ALLOC(cpus)")
-	assert.Contains(t, string(src), "sched_getaffinity(0, mask_size, mask)")
+	assert.Contains(t, string(src), "pthread_key_create")
+	assert.Contains(t, string(src), "pthread_getspecific")
+	assert.Contains(t, string(src), "pthread_setspecific")
+	assert.Contains(t, string(src), "pthread_key_delete")
+	assert.Contains(t, string(src), "sched_getaffinity(0, mask_size, affinity->mask)")
+	assert.Contains(t, string(src), "UNIQUE_VAR(AffinityMaskState) * am = &UNIQUE_VAR(am_state);")
+	assert.Contains(t, string(src), "pthread_key_create(&am->affinity_mask_key, free)")
+	assert.Contains(t, string(src), "UNIQUE_FUNC(cleanup_affinity_mask)();")
 }
 
 func TestCSBEmptyNetworkMetadata(t *testing.T) {
