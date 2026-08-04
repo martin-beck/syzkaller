@@ -16,6 +16,7 @@ import (
 // reproducer and embedding formats. Keep format-specific policy here so that
 // normal csource generation only depends on this small interface.
 type sourceDialect interface {
+	validate() error
 	sandboxCall(name string, arg int) string
 	sourceHeader() (string, string, error)
 	traceEpilogue(w *bytes.Buffer, call int, cast, resultVar string)
@@ -28,6 +29,10 @@ type sourceDialect interface {
 	emitUnusedResult(w *bytes.Buffer)
 	declareResults(vars []uint64) string
 	assembleCalls(results, syscalls, declarations, closes string) (string, string)
+}
+
+func (*upstreamDialect) validate() error {
+	return nil
 }
 
 type upstreamDialect struct {

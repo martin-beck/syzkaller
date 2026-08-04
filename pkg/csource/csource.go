@@ -54,6 +54,7 @@ type NetOpSize struct {
 var (
 	connectFDs       = make(map[uint64](bool))
 	acceptFDs        = make(map[uint64](bool))
+	acceptCalls      int
 	readFDSizes      = make(map[uint64](uint64))
 	NetOpsFDs        = make(map[uint64]([]NetOpSize))
 	NetOpsFDsConnect = make(map[uint64]([]NetOpSize))
@@ -124,6 +125,13 @@ func NetOpsString(res uint64, ops map[uint64][]NetOpSize) string {
 	return netopstring
 }
 
+func netOpsOrHandshake(res uint64) []NetOpSize {
+	if ops := NetOpsFDs[res]; len(ops) != 0 {
+		return ops
+	}
+	return []NetOpSize{{Op: NetRead, Num: 1, Size: 1}}
+}
+
 // Write generates C source for program p based on the provided options opt.
 func Write(p *prog.Prog, opts Options) (program []byte, metaData string, err error) {
 	if err := opts.Check(p.Target.OS); err != nil {
@@ -144,6 +152,7 @@ func resetGenerationState() {
 	resetCSBFDResources()
 	connectFDs = make(map[uint64]bool)
 	acceptFDs = make(map[uint64]bool)
+	acceptCalls = 0
 	readFDSizes = make(map[uint64]uint64)
 	NetOpsFDs = make(map[uint64][]NetOpSize)
 	NetOpsFDsConnect = make(map[uint64][]NetOpSize)
@@ -243,6 +252,9 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	calls, vars, resultResets, err := ctx.generateProgCalls(ctx.p, ctx.opts.Trace, ctx.opts.CallComments,
 		netSrvListenIdxs, false)
 	if err != nil {
+		return nil, metaData, err
+	}
+	if err := ctx.sourceDialect().validate(); err != nil {
 		return nil, metaData, err
 	}
 
@@ -1176,7 +1188,8 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			}
 		}
 
-		if callName == "connect" {
+		if callName == "connect" &&
+			(call.Meta.Name == "connect$inet" || call.Meta.Name == "connect$inet6") {
 			if fdRes, ok := resultIndex(call.Args, 0); ok {
 				connectFDs[fdRes] = true
 			}
@@ -1188,7 +1201,10 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			}
 		}
 
-		if callName == "accept" || callName == "accept4" {
+		if (callName == "accept" || callName == "accept4") &&
+			(call.Meta.Name == "accept$inet" || call.Meta.Name == "accept4$inet" ||
+				call.Meta.Name == "accept$inet6" || call.Meta.Name == "accept4$inet6") {
+			acceptCalls++
 			fdRes := call.Index
 
 			acceptFDs[fdRes] = true
@@ -1199,20 +1215,14 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 
 	tmpOps := make(map[uint64]([]NetOpSize))
 	for res := range connectFDs {
-		nop, ok := NetOpsFDs[res]
-		if ok {
-			tmpOps[res] = nop
-		}
+		tmpOps[res] = netOpsOrHandshake(res)
 	}
 
 	NetOpsFDsConnect = tmpOps
 
 	tmpOps = make(map[uint64]([]NetOpSize))
 	for _, res := range sortedUint64AnyKeys(acceptFDs) {
-		nop, ok := NetOpsFDs[res]
-		if ok {
-			tmpOps[res] = nop
-		}
+		tmpOps[res] = netOpsOrHandshake(res)
 	}
 
 	NetOpsFDsAccept = tmpOps

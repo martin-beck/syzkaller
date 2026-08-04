@@ -5,17 +5,39 @@ package csource
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/google/syzkaller/prog"
 )
 
+var ErrUnsupportedCSBNetwork = errors.New("unsupported CSB network topology")
+
 // csbDialect adapts a normal syzkaller C reproducer for inclusion as one of
 // several independently namespaced benchmark headers in a CSB translation unit.
 type csbDialect struct {
 	ctx *context
+}
+
+func (*csbDialect) validate() error {
+	if len(NetOpsFDsConnect) != 0 && len(NetOpsFDsAccept) != 0 {
+		return fmt.Errorf("%w: both client and server sequences", ErrUnsupportedCSBNetwork)
+	}
+	if acceptCalls > 1 {
+		return fmt.Errorf("%w: multiple server sequences", ErrUnsupportedCSBNetwork)
+	}
+	var first []NetOpSize
+	for _, fd := range sortedUint64AnyKeys(NetOpsFDsConnect) {
+		if first == nil {
+			first = NetOpsFDsConnect[fd]
+		} else if !slices.Equal(first, NetOpsFDsConnect[fd]) {
+			return fmt.Errorf("%w: different client sequences", ErrUnsupportedCSBNetwork)
+		}
+	}
+	return nil
 }
 
 func (dialect *csbDialect) sandboxCall(name string, arg int) string {
