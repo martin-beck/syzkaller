@@ -6030,11 +6030,11 @@ typedef struct {
 } UNIQUE_VAR(AffinityMaskState);
 
 static UNIQUE_VAR(AffinityMaskState) UNIQUE_VAR(am_state) = {
-	.affinity_mask_once = PTHREAD_ONCE_INIT;
-	.affinity_mask_key_error = 0;
-	.affinity_mask_key_created = 0;
+    .affinity_mask_once = PTHREAD_ONCE_INIT,
+    .affinity_mask_key_error = 0,
+    .affinity_mask_key_created = 0,
 #if CSB
-	.affinity_mask_users = 0;
+    .affinity_mask_users = 0,
 #endif
 
 };
