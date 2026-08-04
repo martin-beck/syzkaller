@@ -6019,13 +6019,25 @@ static long syz_csb_vfork_wait(void)
 #include <pthread.h>
 #include <sched.h>
 
-static pthread_key_t UNIQUE_VAR(affinity_mask_key);
-static pthread_once_t UNIQUE_VAR(affinity_mask_once) = PTHREAD_ONCE_INIT;
-static int UNIQUE_VAR(affinity_mask_key_error);
-static int UNIQUE_VAR(affinity_mask_key_created);
+typedef struct {
+	pthread_key_t affinity_mask_key;
+	pthread_once_t affinity_mask_once;
+	int affinity_mask_key_error;
+	int affinity_mask_key_created;
 #if CSB
-static int UNIQUE_VAR(affinity_mask_users);
+	int affinity_mask_users;
 #endif
+} UNIQUE_VAR(AffinityMaskState);
+
+static UNIQUE_VAR(AffinityMaskState) UNIQUE_VAR(am_state) = {
+	.affinity_mask_once = PTHREAD_ONCE_INIT;
+	.affinity_mask_key_error = 0;
+	.affinity_mask_key_created = 0;
+#if CSB
+	.affinity_mask_users = 0;
+#endif
+
+};
 
 struct UNIQUE_VAR(affinity_mask) {
 	size_t size;
@@ -6039,41 +6051,41 @@ static void UNIQUE_FUNC(free_affinity_mask)(void* arg)
 
 static void UNIQUE_FUNC(create_affinity_mask_key)(void)
 {
-	UNIQUE_VAR(affinity_mask_key_error) =
-	    pthread_key_create(&UNIQUE_VAR(affinity_mask_key), UNIQUE_FUNC(free_affinity_mask));
-	if (!UNIQUE_VAR(affinity_mask_key_error))
-		__atomic_store_n(&UNIQUE_VAR(affinity_mask_key_created), 1, __ATOMIC_RELEASE);
+	UNIQUE_VAR(am_state).affinity_mask_key_error =
+	    pthread_key_create(&(UNIQUE_VAR(am_state).affinity_mask_key), UNIQUE_FUNC(free_affinity_mask));
+	if (!UNIQUE_VAR(am_state).affinity_mask_key_error)
+		__atomic_store_n(&(UNIQUE_VAR(am_state).affinity_mask_key_created), 1, __ATOMIC_RELEASE);
 }
 
 #if CSB
 static void UNIQUE_FUNC(cleanup_affinity_mask)(void)
 {
-	if (!__atomic_load_n(&UNIQUE_VAR(affinity_mask_key_created), __ATOMIC_ACQUIRE))
+	if (!__atomic_load_n(&(UNIQUE_VAR(am_state).affinity_mask_key_created), __ATOMIC_ACQUIRE))
 		return;
-	void* affinity = pthread_getspecific(UNIQUE_VAR(affinity_mask_key));
+	void* affinity = pthread_getspecific(UNIQUE_VAR(am_state).affinity_mask_key);
 	if (affinity) {
-		pthread_setspecific(UNIQUE_VAR(affinity_mask_key), NULL);
+		pthread_setspecific(UNIQUE_VAR(am_state).affinity_mask_key, NULL);
 		UNIQUE_FUNC(free_affinity_mask)(affinity);
 	}
-	if (__atomic_add_fetch(&UNIQUE_VAR(affinity_mask_users), 1, __ATOMIC_ACQ_REL) ==
+	if (__atomic_add_fetch(&(UNIQUE_VAR(am_state).affinity_mask_users), 1, __ATOMIC_ACQ_REL) ==
 	    BM_THREAD_NUM)
-		pthread_key_delete(UNIQUE_VAR(affinity_mask_key));
+		pthread_key_delete(UNIQUE_VAR(am_state).affinity_mask_key);
 }
 #endif
 
 static long UNIQUE_FUNC(syz_reapply_affinity)(void)
 {
-	int err = pthread_once(&UNIQUE_VAR(affinity_mask_once), UNIQUE_FUNC(create_affinity_mask_key));
+	int err = pthread_once(&(UNIQUE_VAR(am_state).affinity_mask_once), UNIQUE_FUNC(create_affinity_mask_key));
 	if (err) {
 		errno = err;
 		return -1;
 	}
-	if (UNIQUE_VAR(affinity_mask_key_error)) {
-		errno = UNIQUE_VAR(affinity_mask_key_error);
+	if (UNIQUE_VAR(am_state).affinity_mask_key_error) {
+		errno = UNIQUE_VAR(am_state).affinity_mask_key_error;
 		return -1;
 	}
 	struct UNIQUE_VAR(affinity_mask)* affinity =
-	    (struct UNIQUE_VAR(affinity_mask)*)pthread_getspecific(UNIQUE_VAR(affinity_mask_key));
+	    (struct UNIQUE_VAR(affinity_mask)*)pthread_getspecific(UNIQUE_VAR(am_state).affinity_mask_key);
 	if (affinity)
 		return sched_setaffinity(0, affinity->size, affinity->mask);
 	// Each worker snapshots the affinity inherited from its launcher.
@@ -6093,7 +6105,7 @@ static long UNIQUE_FUNC(syz_reapply_affinity)(void)
 			return -1;
 		}
 		affinity->size = mask_size;
-		err = pthread_setspecific(UNIQUE_VAR(affinity_mask_key), affinity);
+		err = pthread_setspecific(UNIQUE_VAR(am_state).affinity_mask_key, affinity);
 		if (!err)
 			return sched_setaffinity(0, affinity->size, affinity->mask);
 		free(affinity);
