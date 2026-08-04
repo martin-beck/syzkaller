@@ -7,7 +7,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tool: [trace2syz, prog2c, extraction, progreduce]
+        tool: [trace2syz, prog2c, extraction, progreduce, multidiff]
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
@@ -33,6 +33,8 @@ jobs:
             package: extraction
           - target: progreduce
             package: prog-reduce
+          - target: multidiff
+            package: multidiff
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
@@ -107,8 +109,8 @@ jobs:
           go-version: '1.25'
       - name: Run short real-trace integration tests
         run: |
-          make trace2syz extraction progreduce prog2c
-          go test -run '^$' -tags bmgen_integration ./tools/syz-trace2syz/... ./tools/syz-extraction/... ./tools/syz-prog-reduce/... ./tools/syz-prog2c/...
+          make trace2syz extraction progreduce multidiff prog2c
+          go test -run '^$' -tags bmgen_integration ./tools/syz-trace2syz/... ./tools/syz-extraction/... ./tools/syz-prog-reduce/... ./tools/syz-multidiff/... ./tools/syz-prog2c/...
           go test ./tools/syz-bmgen-integration -count=1 -timeout=3m
 
    Test-with-CSB:
@@ -162,6 +164,14 @@ jobs:
 
            cd ../../
            go env -w GOBIN=$HOME/.local/bin
+
+           # Short components increase the generated CSB corpus. Keep the
+           # original benchmark-selection stage bounded in CI.
+           sed -i 's/"duration": 60/"duration": 1/' \
+             bm-generator/templates/fg_single.json.in
+           sed -i \
+             's#^\./scripts/fg-diff/select-benchmarks.sh .*#mapfile -t configs < <(find ./config/"$group" -maxdepth 1 -name "fg_*.json" | sort | head -n 16); ./scripts/fg-diff/select-benchmarks.sh "${configs[@]}"#' \
+             bm-generator/06_select.sh
 
            cd bm-generator
            ./test.sh
