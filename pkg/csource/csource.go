@@ -364,6 +364,9 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	for _, rIdx := range sortedUint64AnyKeys(listenFDs) {
 		callsNetSrvDereg = append(callsNetSrvDereg, fmt.Sprintf("\tclose(UNIQUE_VAR(ctx->r)[%d]);", rIdx))
 	}
+	if _, ok := ctx.calls["syz_reapply_affinity"]; ok {
+		callsNetSrvDereg = append(callsNetSrvDereg, "\tUNIQUE_FUNC(cleanup_affinity_mask)();")
+	}
 	callsNetSrvDereg = append(callsNetSrvDereg, "\tfree(UNIQUE_VAR(ctx->r));")
 	syscallsNetSrvDereg := strings.Join(callsNetSrvDereg, "\n")
 
