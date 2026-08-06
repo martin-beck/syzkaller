@@ -26,6 +26,7 @@ type sourceDialect interface {
 	pointerOffset(value uint64) string
 	resultArrayName() string
 	rewriteExit(result []byte) []byte
+	finalize(result []byte) []byte
 	emitProgramBanner(w *bytes.Buffer, trace bool)
 	emitUnusedResult(w *bytes.Buffer)
 	declareResults(vars []uint64) string
@@ -87,6 +88,10 @@ func (*upstreamDialect) rewriteExit(result []byte) []byte {
 	result = bytes.ReplaceAll(result, []byte("UNIQUE_FUNC(doexit)("), []byte("exit("))
 	result = bytes.ReplaceAll(result, []byte("doexit("), []byte("exit("))
 	return rewriteFailureCalls(result, "\texit(1);\n")
+}
+
+func (*upstreamDialect) finalize(result []byte) []byte {
+	return result
 }
 
 func rewriteFailureCalls(result []byte, replacement string) []byte {

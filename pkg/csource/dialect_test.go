@@ -23,12 +23,14 @@ func TestUpstreamDialectRewritesNamespacedExit(t *testing.T) {
 }
 
 func TestDialectPreservesCSBFailureRendering(t *testing.T) {
-	input := []byte("#include <fcntl.h> // Definition of AT_* constants.\n" +
+	input := []byte("#include <fcntl.h>\n#include <stdint.h>\n\n#ifndef CSB_MAX_WAIT_MS\n" +
 		"\t\tif (unlink(filename))\n\t\t\texitf(\"unlink(%s) failed\", filename);\n" +
 		"\twhile (rmdir(dir))\n\t\texitf(\"rmdir(%s) failed\", dir);\n")
-	got := string((&csbDialect{}).rewriteExit(input))
+	dialect := &csbDialect{}
+	got := string(dialect.finalize(dialect.rewriteExit(input)))
 	for _, want := range []string{
 		"#include <fcntl.h> /* Definition of AT_* constants */",
+		"#include <stdint.h>\n\n#include <fcntl.h> /* Definition of AT_* constants */\n#ifndef CSB_MAX_WAIT_MS",
 		"if (unlink(filename)) {\n\tassert(0);\n\t\t}",
 		"while (rmdir(dir)) {\n\tassert(0);\n\t}",
 	} {

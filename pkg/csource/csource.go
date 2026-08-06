@@ -1911,7 +1911,7 @@ func (ctx *context) postProcess(result []byte) []byte {
 
 	result = ctx.hoistIncludes(result)
 	result = ctx.removeEmptyLines(result)
-	return result
+	return ctx.sourceDialect().finalize(result)
 }
 
 // hoistIncludes moves all includes to the top, removes dups and sorts.

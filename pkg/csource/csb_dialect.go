@@ -185,6 +185,12 @@ func (*csbDialect) rewriteExit(result []byte) []byte {
 	return rewriteFailureCalls(result, "\tassert(0);\n")
 }
 
+func (*csbDialect) finalize(result []byte) []byte {
+	result = bytes.Replace(result, []byte("#include <fcntl.h>\n"), nil, 1)
+	return bytes.Replace(result, []byte("#ifndef CSB_MAX_WAIT_MS\n"),
+		[]byte("#include <fcntl.h> /* Definition of AT_* constants */\n#ifndef CSB_MAX_WAIT_MS\n"), 1)
+}
+
 func (*csbDialect) emitProgramBanner(*bytes.Buffer, bool) {
 }
 
