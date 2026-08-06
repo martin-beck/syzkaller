@@ -21,3 +21,22 @@ func TestUpstreamDialectRewritesNamespacedExit(t *testing.T) {
 		t.Fatalf("unexpected exit rewrite: %q", got)
 	}
 }
+
+func TestDialectPreservesCSBFailureRendering(t *testing.T) {
+	input := []byte("#include <fcntl.h> // Definition of AT_* constants.\n" +
+		"\t\tif (unlink(filename))\n\t\t\texitf(\"unlink(%s) failed\", filename);\n" +
+		"\twhile (rmdir(dir))\n\t\texitf(\"rmdir(%s) failed\", dir);\n")
+	got := string((&csbDialect{}).rewriteExit(input))
+	for _, want := range []string{
+		"#include <fcntl.h> /* Definition of AT_* constants */",
+		"if (unlink(filename)) {\n\tassert(0);\n\t\t}",
+		"while (rmdir(dir)) {\n\tassert(0);\n\t}",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("CSB rewrite missing %q:\n%s", want, got)
+		}
+	}
+	if upstream := string((&upstreamDialect{}).rewriteExit([]byte("\texitf(\"x\");\n"))); upstream != "\texit(1);\n" {
+		t.Fatalf("upstream failure rewrite = %q", upstream)
+	}
+}

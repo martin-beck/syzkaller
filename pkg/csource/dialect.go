@@ -6,6 +6,7 @@ package csource
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -84,7 +85,13 @@ func (*upstreamDialect) resultArrayName() string {
 
 func (*upstreamDialect) rewriteExit(result []byte) []byte {
 	result = bytes.ReplaceAll(result, []byte("UNIQUE_FUNC(doexit)("), []byte("exit("))
-	return bytes.ReplaceAll(result, []byte("doexit("), []byte("exit("))
+	result = bytes.ReplaceAll(result, []byte("doexit("), []byte("exit("))
+	return rewriteFailureCalls(result, "\texit(1);\n")
+}
+
+func rewriteFailureCalls(result []byte, replacement string) []byte {
+	result = regexp.MustCompile(`\t*exitf\((.*\n)*?.*\);\n`).ReplaceAll(result, []byte(replacement))
+	return regexp.MustCompile(`\t*fail(msg)?\((.*\n)*?.*\);\n`).ReplaceAll(result, []byte(replacement))
 }
 
 func (*upstreamDialect) emitProgramBanner(w *bytes.Buffer, trace bool) {

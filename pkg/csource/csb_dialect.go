@@ -172,7 +172,17 @@ func (*csbDialect) resultArrayName() string {
 }
 
 func (*csbDialect) rewriteExit(result []byte) []byte {
-	return bytes.ReplaceAll(result, []byte("UNIQUE_FUNC(doexit)("), []byte("exit("))
+	result = bytes.ReplaceAll(result, []byte("UNIQUE_FUNC(doexit)("), []byte("exit("))
+	result = bytes.ReplaceAll(result,
+		[]byte("#include <fcntl.h> // Definition of AT_* constants.\n"),
+		[]byte("#include <fcntl.h> /* Definition of AT_* constants */\n"))
+	result = bytes.ReplaceAll(result,
+		[]byte("\t\tif (unlink(filename))\n\t\t\texitf(\"unlink(%s) failed\", filename);\n"),
+		[]byte("\t\tif (unlink(filename)) {\n\t\t\texitf(\"unlink(%s) failed\", filename);\n\t\t}\n"))
+	result = bytes.ReplaceAll(result,
+		[]byte("\twhile (rmdir(dir))\n\t\texitf(\"rmdir(%s) failed\", dir);\n"),
+		[]byte("\twhile (rmdir(dir)) {\n\t\texitf(\"rmdir(%s) failed\", dir);\n\t}\n"))
+	return rewriteFailureCalls(result, "\tassert(0);\n")
 }
 
 func (*csbDialect) emitProgramBanner(*bytes.Buffer, bool) {
