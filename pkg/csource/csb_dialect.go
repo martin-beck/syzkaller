@@ -109,11 +109,8 @@ func (*csbDialect) pseudoCallName(name string) string {
 }
 
 func (*csbDialect) rewriteArgument(call prog.ExecCall, callName string, index int) (string, bool) {
-	if index == 0 {
-		switch callName {
-		case "readlinkat", "openat", "faccessat", "faccessat2", "newfstatat", "unlinkat", "mknodat", "fchownat", "fchmodat":
-			return "UNIQUE_VAR(ctx->dirfd)", true
-		}
+	if csbSandboxDirfdArg(callName, index) {
+		return "UNIQUE_VAR(ctx->dirfd)", true
 	}
 	if index == 1 {
 		switch call.Meta.Name {
@@ -146,6 +143,19 @@ func (*csbDialect) rewriteArgument(call prog.ExecCall, callName string, index in
 		}
 	}
 	return "", false
+}
+
+func csbSandboxDirfdArg(callName string, arg int) bool {
+	switch callName {
+	case "renameat", "renameat2", "linkat":
+		return arg == 0 || arg == 2
+	case "symlinkat":
+		return arg == 1
+	case "readlinkat", "openat", "openat2", "faccessat", "faccessat2", "newfstatat",
+		"unlinkat", "mkdirat", "mknodat", "fchownat", "fchmodat", "utimensat", "statx":
+		return arg == 0
+	}
+	return false
 }
 
 func (dialect *csbDialect) pointerOffset(value uint64) string {

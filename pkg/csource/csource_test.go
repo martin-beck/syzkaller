@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -165,6 +166,24 @@ func TestCSBCountsExpectedFailuresAsSuccessful(t *testing.T) {
 			t.Fatal(err)
 		}
 		assert.Contains(t, string(src), test.want)
+	}
+}
+
+func TestCSBSandboxDirfdArguments(t *testing.T) {
+	for _, test := range []struct {
+		call string
+		args []int
+	}{
+		{"mkdirat", []int{0}},
+		{"renameat", []int{0, 2}},
+		{"renameat2", []int{0, 2}},
+		{"linkat", []int{0, 2}},
+		{"symlinkat", []int{1}},
+	} {
+		for i := 0; i < 5; i++ {
+			assert.Equal(t, slices.Contains(test.args, i), csbSandboxDirfdArg(test.call, i),
+				"%s argument %d", test.call, i)
+		}
 	}
 }
 
