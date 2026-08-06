@@ -560,6 +560,7 @@ func generateComment(call *prog.Call) string {
 func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool,
 	initIndices []int, dataMmap bool) ([]string, []uint64, []string, error) {
 	msgSizes := make([]uint64, len(p.Calls))
+	expected := make([]*int64, len(p.Calls))
 	var comments []string
 	if addComments {
 		comments = make([]string, len(p.Calls))
@@ -570,6 +571,10 @@ func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool,
 
 	// generate sendmsg, recvmsg sizes
 	for i, call := range p.Calls {
+		if call.StraceRetValSet {
+			value := call.StraceRetVal
+			expected[i] = &value
+		}
 		if call.Meta.CallName == "recvmsg" || call.Meta.CallName == "sendmsg" {
 			if len(call.Args) <= 1 {
 				continue
@@ -627,12 +632,17 @@ func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool,
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	calls, vars, resets := ctx.generateCalls(decoded, trace, addComments, comments, msgSizes, initIndices, dataMmap)
+	calls, vars, resets := ctx.generateCalls(decoded, trace, addComments, comments, msgSizes, expected,
+		initIndices, dataMmap)
 	return calls, vars, resets, nil
 }
 
 func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
-	callComments []string, msgSizes []uint64, initIndices []int, dataMmap bool) ([]string, []uint64, []string) {
+	callComments []string, msgSizes []uint64, expected []*int64, initIndices []int,
+	dataMmap bool) ([]string, []uint64, []string) {
+	if len(expected) < len(p.Calls) {
+		expected = make([]*int64, len(p.Calls))
+	}
 	var calls []string
 	var resultResets []string
 	csumSeq := 0
@@ -1110,7 +1120,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			resultVar = fdResultVar
 		}
 		ctx.emitCall(w, call, ci, resCopyout || argCopyout || fdCleanup.initialReturn, trace, initCall,
-			resultVar, forceNonblockArg, dynamicFcntlCommand, dataMmap)
+			resultVar, forceNonblockArg, dynamicFcntlCommand, dataMmap, expected[ci])
 		if fdCleanup.initialReturn {
 			fmt.Fprintf(w, "\tif (%[1]s > 2) close((int)%[1]s);\n", resultVar)
 		}
@@ -1124,7 +1134,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			}
 			// Rerun invocations should not affect the result value.
 			ctx.emitCall(w, call, ci, fdCleanup.rerunReturn || fdCleanup.overwriteCopyout,
-				false, initCall, fdResultVar, forceNonblockArg, dynamicFcntlCommand, dataMmap)
+				false, initCall, fdResultVar, forceNonblockArg, dynamicFcntlCommand, dataMmap, expected[ci])
 			if fdCleanup.rerunReturn {
 				fmt.Fprintf(w, "\tif (%[1]s > 2) close((int)%[1]s);\n", fdResultVar)
 			}
@@ -1368,7 +1378,7 @@ func isNative(sysTarget *targets.Target, callName string) bool {
 }
 
 func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCopyout, trace, initCall bool,
-	resultVar string, forceNonblockArg int, dynamicFcntlCommand, dataMmap bool) {
+	resultVar string, forceNonblockArg int, dynamicFcntlCommand, dataMmap bool, expected *int64) {
 	native := isNative(ctx.sysTarget, call.Meta.CallName)
 	fmt.Fprintf(w, "\t")
 	if !native {
@@ -1403,7 +1413,7 @@ func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCo
 			// So instead of intptr_t -1 we can get 0x00000000ffffffff. Sign extend it to intptr_t.
 			cast = "(intptr_t)(int)"
 		}
-		ctx.sourceDialect().traceEpilogue(w, ci, cast, resultVar)
+		ctx.sourceDialect().traceEpilogue(w, ci, cast, resultVar, expected)
 	}
 }
 

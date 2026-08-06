@@ -144,6 +144,30 @@ func TestCSBBoundsMillisecondWaits(t *testing.T) {
 	}
 }
 
+func TestCSBCountsExpectedFailuresAsSuccessful(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		program string
+		want    string
+	}{
+		{"getpid()[-1]\n", "if (res == -1) { UNIQUE_VAR(ctx->num_succeeded)++;"},
+		{"getpid()[123]\n", "if (res != -1) { UNIQUE_VAR(ctx->num_succeeded)++;"},
+	} {
+		p, err := target.Deserialize([]byte(test.program), prog.NonStrict)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src, _, err := Write(p, Options{CSB: true, Trace: true, Slowdown: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Contains(t, string(src), test.want)
+	}
+}
+
 func TestConcurrentCSBWrite(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {
