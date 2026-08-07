@@ -21,13 +21,15 @@ the traced application.
 
 `pkg/csource.sourceDialect` is the only format-policy interface used by the
 Google-derived C generator. Its default implementation produces ordinary
-syzkaller reproducers. `csbDialect` owns all CSB-specific naming, pointer
-relocation, argument rewriting, result accounting, headers, and metadata.
+syzkaller reproducers. `csbDialect` owns CSB-specific pointer relocation,
+argument rewriting, result accounting, headers, and metadata.
 
 New CSB behavior belongs in `csb_dialect.go`; avoid adding `Options.CSB`
-branches to `csource.go`. Every C identifier emitted by a benchmark header must
-use `UNIQUE_VAR()` or `UNIQUE_FUNC()` when another generated header can emit the
-same identifier in the same translation unit.
+branches to `csource.go`. Each generated CSB program is compiled in its own C
+translation unit and must use ordinary internal-linkage identifiers. CSB's
+generated-program descriptor is the only public symbol required by the target
+registry. This makes C's translation-unit boundary responsible for uniqueness
+instead of a manual identifier-macro convention.
 
 ## Updating from Google upstream
 

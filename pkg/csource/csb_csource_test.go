@@ -4,6 +4,7 @@
 package csource
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"strings"
@@ -35,7 +36,7 @@ func TestCSBExecLifecycle(t *testing.T) {
 		for _, want := range []string{"csb_exec_lifecycle", "/proc/self/exe", "syz_csb_exec_child"} {
 			assert.Contains(t, string(src), want)
 		}
-		assertCSBExecIdentifiersNamespaced(t, src)
+		assertCSBExecIdentifiersArePlain(t, src)
 		assert.NotContains(t, string(src), "return -errno")
 	}
 }
@@ -53,15 +54,15 @@ func TestCSBReappliesCurrentAffinity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Contains(t, string(src), "UNIQUE_FUNC(syz_reapply_affinity)()")
+	assert.Contains(t, string(src), "syz_reapply_affinity()")
 	assert.Contains(t, string(src), "pthread_key_create")
 	assert.Contains(t, string(src), "pthread_getspecific")
 	assert.Contains(t, string(src), "pthread_setspecific")
 	assert.Contains(t, string(src), "pthread_key_delete")
 	assert.Contains(t, string(src), "sched_getaffinity(0, mask_size, affinity->mask)")
-	assert.Contains(t, string(src), "UNIQUE_VAR(AffinityMaskState) * am = &UNIQUE_VAR(am_state);")
+	assert.Contains(t, string(src), "AffinityMaskState* am = &am_state;")
 	assert.Contains(t, string(src), "pthread_key_create(&am->affinity_mask_key, free)")
-	assert.Contains(t, string(src), "UNIQUE_FUNC(cleanup_affinity_mask)();")
+	assert.Contains(t, string(src), "cleanup_affinity_mask();")
 }
 
 func TestCSBEmptyNetworkMetadata(t *testing.T) {
@@ -342,7 +343,7 @@ func TestCSBOpenat2DynamicSizeUsesSnapshotSize(t *testing.T) {
 	calls, _ := ctx.generateCalls(decoded, false, false, nil, nil, nil, false)
 	assert.Contains(t, calls[1], "(intptr_t)&csb_open_how_1")
 	assert.Contains(t, calls[1], "sizeof(csb_open_how_1)")
-	assert.NotContains(t, calls[1], "/*size=*/UNIQUE_VAR(ctx->r)[0]")
+	assert.NotContains(t, calls[1], "/*size=*/ctx->r[0]")
 }
 
 func TestCSBPreservesNonblockAfterOpen(t *testing.T) {
@@ -454,9 +455,9 @@ func TestCSBDynamicOpenFlagsAndFcntlCommand(t *testing.T) {
 		sysTarget: targets.Get(target.OS, target.Arch), calls: make(map[string]uint64),
 	}
 	calls, _ := ctx.generateCalls(decoded, false, false, nil, nil, nil, false)
-	assert.Contains(t, calls[1], "(UNIQUE_VAR(ctx->r)[0] | O_NONBLOCK)")
+	assert.Contains(t, calls[1], "(ctx->r[0] | O_NONBLOCK)")
 	assert.Contains(t, calls[2], "syscall(__NR_open")
-	assert.Contains(t, calls[3], "intptr_t csb_fcntl_cmd_3 = UNIQUE_VAR(ctx->r)[0]")
+	assert.Contains(t, calls[3], "intptr_t csb_fcntl_cmd_3 = ctx->r[0]")
 	assert.Contains(t, calls[3], "csb_fcntl_cmd_3 == F_SETFL ? (0 | O_NONBLOCK) : 0")
 	assert.Contains(t, calls[3], "csb_fcntl_cmd_3 == F_DUPFD")
 	assert.Contains(t, calls[3], "? res : -1")
@@ -541,7 +542,7 @@ func TestCSBSetsNonblockingBeforePublishingDescriptor(t *testing.T) {
 		t.Fatal(err)
 	}
 	setNonblock := strings.Index(string(src), "int fd = *(uint32_t*)(0x200000000000ul+PTR_OFFSET)")
-	publish := strings.Index(string(src), "UNIQUE_VAR(ctx->r)[0] = fd")
+	publish := strings.Index(string(src), "ctx->r[0] = fd")
 	if setNonblock == -1 || publish == -1 || setNonblock > publish {
 		t.Fatalf("descriptor publication precedes nonblocking setup:\n%s", src)
 	}
@@ -567,7 +568,7 @@ func TestCSBClosesUnusedDupResults(t *testing.T) {
 	}
 }
 
-func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {
+func assertCSBExecIdentifiersArePlain(t *testing.T, src []byte) {
 	t.Helper()
 	// Strip text that cannot declare or reference a C identifier. In particular,
 	// syz_csb_exec_child is intentionally shared as an environment variable name.
@@ -579,9 +580,8 @@ func assertCSBExecIdentifiersNamespaced(t *testing.T, src []byte) {
 	if len(all) == 0 {
 		t.Fatal("generated source contains no exec lifecycle identifiers")
 	}
-	namespaced := regexp.MustCompile(`UNIQUE_FUNC\(`+execIdentifier.String()+`\)`).ReplaceAll(code, nil)
-	if bare := execIdentifier.FindAll(namespaced, -1); len(bare) != 0 {
-		t.Fatalf("exec lifecycle identifiers are not namespaced: %q", bare)
+	if bytes.Contains(code, []byte("UNIQUE_")) {
+		t.Fatal("generated source still contains UNIQUE_* naming macros")
 	}
 }
 
