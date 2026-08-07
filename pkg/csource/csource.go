@@ -401,63 +401,11 @@ func generateComment(call *prog.Call) string {
 
 func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool, initIndices []int,
 	dataMmap bool) ([]string, []uint64, error) {
-	msgSizes := make([]uint64, len(p.Calls))
 	var comments []string
 	if addComments {
 		comments = make([]string, len(p.Calls))
 		for i, call := range p.Calls {
 			comments[i] = generateComment(call)
-		}
-	}
-
-	// generate sendmsg, recvmsg sizes
-	for i, call := range p.Calls {
-		if call.Meta.CallName == "recvmsg" || call.Meta.CallName == "sendmsg" {
-			if len(call.Args) <= 1 {
-				continue
-			}
-			arg1, ok := call.Args[1].(*prog.PointerArg)
-			if !ok {
-				continue
-			}
-			msghdr, ok := arg1.Res.(*prog.GroupArg)
-			if !ok {
-				continue
-			}
-			if len(msghdr.Inner) <= 3 {
-				continue
-			}
-
-			// arg3 is array of iovec *msg_iov
-			iovPtr, ok := msghdr.Inner[3].(*prog.PointerArg)
-			if !ok {
-				continue
-			}
-			iovGroup, ok := iovPtr.Res.(*prog.GroupArg)
-			if !ok {
-				continue
-			}
-
-			// arg4 is number of iovec *msg_iov
-			// data4 := msghdr[4].(*prog.ConstArg).Val
-
-			totalLength := uint64(0)
-			for _, msg := range iovGroup.Inner {
-				iov, ok := msg.(*prog.GroupArg)
-				if !ok {
-					continue
-				}
-				if len(iov.Inner) <= 1 {
-					continue
-				}
-				msglen, ok := iov.Inner[1].(*prog.ConstArg)
-				if !ok {
-					continue
-				}
-				totalLength += msglen.Val
-			}
-
-			msgSizes[i] = totalLength
 		}
 	}
 
@@ -469,7 +417,7 @@ func (ctx *context) generateProgCalls(p *prog.Prog, trace, addComments bool, ini
 	if err != nil {
 		return nil, nil, err
 	}
-	calls, vars := ctx.generateCalls(decoded, trace, addComments, comments, msgSizes, initIndices, dataMmap)
+	calls, vars := ctx.generateCalls(decoded, trace, addComments, comments, csbMessageSizes(p), initIndices, dataMmap)
 	return calls, vars, nil
 }
 
@@ -477,7 +425,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 	callComments []string, msgSizes []uint64, initIndices []int, dataMmap bool) ([]string, []uint64) {
 	var calls []string
 	csumSeq := 0
-	localIO := localIOResources(p, ctx.target)
+	baseEmitOpts := emitCallOpts{localIO: localIOResources(p, ctx.target)}
 	for ci, call := range p.Calls {
 		w := new(bytes.Buffer)
 		if addComments {
@@ -487,111 +435,16 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		for _, copyin := range call.Copyin {
 			ctx.copyin(w, &csumSeq, copyin)
 		}
-		csbFIONBIO := false
-		if ctx.opts.CSB && call.Meta.CallName == "ioctl" && len(call.Args) > 2 &&
-			localIOArg(call, localIO) {
-			cmd, cmdOK := call.Args[1].(prog.ExecArgConst)
-			value, valueOK := call.Args[2].(prog.ExecArgConst)
-			if cmdOK && valueOK && cmd.Value == ctx.target.ConstMap["FIONBIO"] && valInMMapRange(ctx, value.Value) {
-				csbFIONBIO = true
-				fmt.Fprintf(w, "\tuint32 csb_fionbio_%d = 1;\n", ci)
-			}
-		}
-		if ctx.opts.CSB && call.Meta.CallName == "openat2" {
-			how, known := ctx.openat2How(ci)
-			if known && how[0]&ctx.target.ConstMap["O_PATH"] == 0 {
-				how[0] |= ctx.target.ConstMap["O_NONBLOCK"]
-			}
-			fmt.Fprintf(w, "\t{\n\tstruct { uint64 flags; uint64 mode; uint64 resolve; } "+
-				"csb_open_how_%[1]d = {%[2]d, %[3]d, %[4]d};\n", ci, how[0], how[1], how[2])
-		}
 		if call.Props.FailNth > 0 {
 			fmt.Fprintf(w, "\tinject_fault(%v);\n", call.Props.FailNth)
 		}
 		// Call itself.
 		resCopyout := call.Index != prog.ExecNoCopyout
 		argCopyout := len(call.Copyout) != 0
-		closeUnusedDup := ctx.opts.CSB && !resCopyout &&
-			(call.Meta.CallName == "dup" || call.Meta.CallName == "dup3")
-
-		initCall := false
-		if slices.Contains(initIndices, ci) {
-			initCall = true
-		}
-		forceNonblockArg := -1
-		if ctx.opts.CSB && fcntlCommand(call, ctx.target.ConstMap["F_SETFL"]) && localIOArg(call, localIO) {
-			args := append([]prog.ExecArg(nil), call.Args...)
-			if flags, ok := args[2].(prog.ExecArgConst); ok {
-				flags.Value |= ctx.target.ConstMap["O_NONBLOCK"]
-				args[2] = flags
-				call.Args = args
-			} else if _, ok := args[2].(prog.ExecArgResult); ok {
-				forceNonblockArg = 2
-			}
-		}
-		csbMQAttr := false
-		if ctx.opts.CSB && call.Meta.CallName == "mq_getsetattr" && localIOArg(call, localIO) {
-			if attr, ok := call.Args[1].(prog.ExecArgConst); ok && valInMMapRange(ctx, attr.Value) {
-				csbMQAttr = true
-				fmt.Fprintf(w, "\tstruct { intptr_t flags; intptr_t maxmsg; intptr_t msgsize; intptr_t curmsgs; "+
-					"intptr_t reserved[4]; } "+
-					"csb_mq_attr_%[1]d = {%[2]d, 0, 0, 0};\n", ci, ctx.target.ConstMap["O_NONBLOCK"])
-			}
-		}
-		if ctx.opts.CSB && ctx.target.OS == targets.Linux {
-			// Opening a FIFO for one end only must not stall a generated workload.
-			flagArg := -1
-			switch call.Meta.CallName {
-			case "open":
-				flagArg = 1
-			case "openat":
-				flagArg = 2
-			case "mq_open":
-				flagArg = 1
-			case "creat":
-				var flags prog.ExecArgConst
-				switch mode := call.Args[1].(type) {
-				case prog.ExecArgConst:
-					flags.Size, flags.Format = mode.Size, mode.Format
-				case prog.ExecArgResult:
-					flags.Size, flags.Format = mode.Size, mode.Format
-				}
-				flags.Value = ctx.target.ConstMap["O_WRONLY"] | ctx.target.ConstMap["O_CREAT"] |
-					ctx.target.ConstMap["O_TRUNC"] | ctx.target.ConstMap["O_NONBLOCK"]
-				call.Meta = ctx.target.SyscallMap["open"]
-				call.Args = []prog.ExecArg{call.Args[0], flags, call.Args[1]}
-			}
-			if flagArg != -1 {
-				args := append([]prog.ExecArg(nil), call.Args...)
-				if flags, ok := args[flagArg].(prog.ExecArgConst); ok {
-					flags.Value |= ctx.target.ConstMap["O_NONBLOCK"]
-					args[flagArg] = flags
-					call.Args = args
-				} else if _, ok := args[flagArg].(prog.ExecArgResult); ok {
-					forceNonblockArg = flagArg
-				}
-			}
-		}
-
-		dynamicFcntlCommand := ctx.opts.CSB && call.Meta.CallName == "fcntl" &&
-			localIOArg(call, localIO) && len(call.Args) > 1
-		if dynamicFcntlCommand {
-			_, dynamicFcntlCommand = call.Args[1].(prog.ExecArgResult)
-		}
-		if dynamicFcntlCommand {
-			cmd := ctx.resultArgToStr(call.Args[1].(prog.ExecArgResult))
-			fmt.Fprintf(w, "\tintptr_t csb_fcntl_cmd_%d = %s;\n", ci, cmd)
-		}
-		emitOpts := emitCallOpts{
-			initCall:            initCall,
-			forceNonblockArg:    forceNonblockArg,
-			dynamicFcntlCommand: dynamicFcntlCommand,
-			csbFIONBIO:          csbFIONBIO,
-			csbMQAttr:           csbMQAttr,
-			dataMmap:            dataMmap,
-		}
-		ctx.emitCall(w, call, ci, resCopyout || argCopyout || closeUnusedDup, trace, emitOpts)
-		if closeUnusedDup {
+		emitOpts := ctx.prepareEmitCall(w, &call, ci, baseEmitOpts, slices.Contains(initIndices, ci),
+			dataMmap, resCopyout)
+		ctx.emitCall(w, call, ci, resCopyout || argCopyout || emitOpts.closeUnusedDup, trace, emitOpts)
+		if emitOpts.closeUnusedDup {
 			fmt.Fprintf(w, "\tif (res > 2) close((int)res);\n")
 		}
 		if call.Props.Rerun > 0 {
@@ -600,103 +453,20 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 			ctx.emitCall(w, call, ci, false, false, emitOpts)
 			fmt.Fprintf(w, "\t}\n")
 		}
-		if ctx.opts.CSB && call.Meta.CallName == "openat2" {
-			fmt.Fprintf(w, "\t}\n")
-		}
+		ctx.finishEmitCall(w, call)
 		// Copyout.
 		if resCopyout || argCopyout {
-			ctx.copyout(w, call, ci, resCopyout, localIO, dynamicFcntlCommand)
+			ctx.copyout(w, call, ci, resCopyout, emitOpts)
 		}
 		calls = append(calls, w.String())
-
-		// get resource indices for filedescriptor related calls
-		if resCopyout {
-			fdRes := call.Index
-			missedFDResources[fdRes] = true
+		msgSize := uint64(0)
+		if ci < len(msgSizes) {
+			msgSize = msgSizes[ci]
 		}
-
-		callName, ok := ctx.sysTarget.SyscallTrampolines[call.Meta.CallName]
-		if !ok {
-			callName = call.Meta.CallName
-		}
-		if callName == "close" {
-			if fdRes, ok := execArgResultIndex(call.Args[0]); ok {
-				missedFDResources[fdRes] = false
-			}
-		}
-
-		if callName == "pipe" || callName == "pipe2" {
-			for i := range call.Copyout {
-				missedFDResources[call.Copyout[i].Index] = true
-			}
-		}
-
-		if callName == "read" || callName == "pread" || callName == "pread64" || callName == "recv" || callName == "recvfrom" {
-			if fdRes, ok := execArgResultIndex(call.Args[0]); ok {
-				arg2 := call.Args[2]
-				size := arg2.(prog.ExecArgConst).Value
-				AddToNetOps(fdRes, NetRead, size)
-			}
-		}
-
-		if callName == "recvmsg" {
-			if fdRes, ok := execArgResultIndex(call.Args[0]); ok {
-				AddToNetOps(fdRes, NetRead, msgSizes[ci])
-			}
-		}
-
-		if callName == "write" || callName == "pwrite" || callName == "pwrite64" || callName == "send" || callName == "sendto" {
-			if fdRes, ok := execArgResultIndex(call.Args[0]); ok {
-				arg2 := call.Args[2]
-				size := arg2.(prog.ExecArgConst).Value
-				AddToNetOps(fdRes, NetWrite, size)
-			}
-		}
-
-		if callName == "sendmsg" {
-			if fdRes, ok := execArgResultIndex(call.Args[0]); ok {
-				AddToNetOps(fdRes, NetWrite, msgSizes[ci])
-			}
-		}
-
-		if callName == "connect" &&
-			(call.Meta.Name == "connect$inet" || call.Meta.Name == "connect$inet6") {
-			if fdRes, ok := execArgResultIndex(call.Args[0]); ok {
-				connectFDs[fdRes] = true
-			}
-		}
-
-		if callName == "listen" {
-			if fdRes, ok := execArgResultIndex(call.Args[0]); ok {
-				listenFDs[fdRes] = true
-			}
-		}
-
-		if (callName == "accept" || callName == "accept4") &&
-			(call.Meta.Name == "accept$inet" || call.Meta.Name == "accept4$inet" ||
-				call.Meta.Name == "accept$inet6" || call.Meta.Name == "accept4$inet6") {
-			acceptCalls++
-			fdRes := call.Index
-
-			acceptFDs[fdRes] = true
-		}
+		ctx.recordCSBCall(call, resCopyout, msgSize)
 	}
 
-	// remove resources from network ops which are not created by a connect
-
-	tmpOps := make(map[uint64]([]NetOpSize))
-	for res := range connectFDs {
-		tmpOps[res] = netOpsOrHandshake(res)
-	}
-
-	NetOpsFDsConnect = tmpOps
-
-	tmpOps = make(map[uint64]([]NetOpSize))
-	for _, res := range sortedUint64AnyKeys(acceptFDs) {
-		tmpOps[res] = netOpsOrHandshake(res)
-	}
-
-	NetOpsFDsAccept = tmpOps
+	finishCSBCalls()
 
 	return calls, p.Vars
 }
@@ -779,27 +549,8 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, ci int, opts emitCallOpts) s
 			}
 			com := ctx.argComment(call.Meta.Args[i], arg)
 
-			PTR_OFFSET_STR := ""
-
-			// DataMmapProg includes adjacent guard pages that move with the mapping.
-			if ctx.opts.CSB && ((opts.dataMmap && i == 0) ||
-				(call.Meta.Name == "ioctl$auto_FIONBIO" && i == 2 &&
-					valInMMapRange(ctx, arg.Value)) ||
-				(arg.IsPointer && valInMMapRange(ctx, arg.Value))) {
-				PTR_OFFSET_STR = "+PTR_OFFSET"
-			}
-
-			value := handleBigEndian(arg, ctx.constArgToStr(arg, native)) + PTR_OFFSET_STR
-			value = ctx.rewriteCSBOpenat2Arg(call, i, ci, value)
-			if opts.csbFIONBIO && i == 2 {
-				value = fmt.Sprintf("(intptr_t)&csb_fionbio_%d", ci)
-			}
-			if opts.csbMQAttr && i == 1 {
-				value = fmt.Sprintf("(intptr_t)&csb_mq_attr_%d", ci)
-			}
-			if opts.dynamicFcntlCommand && i == 2 {
-				value = fmt.Sprintf("(csb_fcntl_cmd_%d == F_SETFL ? (%s | O_NONBLOCK) : %s)", ci, value, value)
-			}
+			value := ctx.formatCSBConstArg(call, arg, i, ci, opts,
+				handleBigEndian(arg, ctx.constArgToStr(arg, native)))
 			argsStrs = append(argsStrs, ctx.protectCSBControlFD(callName, i, com+value))
 		case prog.ExecArgResult:
 			if opts.initCall {
@@ -810,16 +561,7 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, ci int, opts emitCallOpts) s
 			}
 			com := ctx.argComment(call.Meta.Args[i], arg)
 			val := ctx.resultArgToStr(arg)
-			if opts.dynamicFcntlCommand && i == 1 {
-				val = fmt.Sprintf("csb_fcntl_cmd_%d", ci)
-			}
-			if opts.dynamicFcntlCommand && i == 2 {
-				val = fmt.Sprintf("(csb_fcntl_cmd_%d == F_SETFL ? (%s | O_NONBLOCK) : %s)", ci, val, val)
-			}
-			if opts.forceNonblockArg == i {
-				val = fmt.Sprintf("(%s | O_NONBLOCK)", val)
-			}
-			val = ctx.rewriteCSBOpenat2Arg(call, i, ci, val)
+			val = ctx.formatCSBResultArg(call, i, ci, opts, val)
 			if native && ctx.target.PtrSize == 4 {
 				// syscall accepts args as ellipsis, resources are uint64
 				// and take 2 slots without the cast, which would be wrong.
@@ -833,16 +575,8 @@ func (ctx *context) fmtCallBody(call prog.ExecCall, ci int, opts emitCallOpts) s
 	for i := 0; i < call.Meta.MissingArgs; i++ {
 		argsStrs = append(argsStrs, "0")
 	}
-	if ctx.opts.CSB && (callName == "dup2" || callName == "dup3") {
-		argOffset := 0
-		if native {
-			argOffset = 1
-		}
-		src, dst := argsStrs[argOffset], argsStrs[argOffset+1]
-		argsStrs[argOffset] = "csb_dup_src"
-		argsStrs[argOffset+1] = "((uint32)csb_dup_dst <= 2 && (uint32)csb_dup_src != (uint32)csb_dup_dst ? -1 : csb_dup_dst)"
-		return fmt.Sprintf("({ intptr_t csb_dup_src = (%s); intptr_t csb_dup_dst = (%s); %v(%v); })",
-			src, dst, funcName, strings.Join(argsStrs, ", "))
+	if body, ok := ctx.formatCSBCallBody(callName, funcName, argsStrs, native); ok {
+		return body
 	}
 	return fmt.Sprintf("%v(%v)", funcName, strings.Join(argsStrs, ", "))
 }
@@ -955,8 +689,7 @@ func (ctx *context) copyinVal(w *bytes.Buffer, addr, size uint64, val string, bf
 	}
 }
 
-func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, ci int, resCopyout bool,
-	localIO map[uint64]bool, dynamicFcntlCommand bool) {
+func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, ci int, resCopyout bool, opts emitCallOpts) {
 	if ctx.sysTarget.OS == targets.Fuchsia {
 		// On fuchsia we have real system calls that return ZX_OK on success,
 		// and libc calls that are casted to function returning intptr_t,
@@ -969,44 +702,18 @@ func (ctx *context) copyout(w *bytes.Buffer, call prog.ExecCall, ci int, resCopy
 	} else {
 		fmt.Fprintf(w, "\tif (res != -1)")
 	}
-	copyoutMultiple := len(call.Copyout) > 1 || resCopyout && len(call.Copyout) > 0 ||
-		resCopyout && ctx.opts.CSB && ctx.target.OS == targets.Linux && localIO[call.Index]
+	copyoutMultiple := ctx.copyoutMultiple(call, resCopyout, opts)
 	if copyoutMultiple {
 		fmt.Fprintf(w, " {")
 	}
 	fmt.Fprintf(w, "\n")
 	if resCopyout {
-		initFDs[call.Index] = true
-		if ctx.opts.CSB && ctx.target.OS == targets.Linux && localIO[call.Index] {
-			// Set nonblocking mode before publishing the descriptor to concurrent calls.
-			if dynamicFcntlCommand {
-				fmt.Fprintf(w, "\t\tif (csb_fcntl_cmd_%[1]d == F_DUPFD || "+
-					"csb_fcntl_cmd_%[1]d == F_DUPFD_CLOEXEC) "+
-					"{ int flags = fcntl(res, F_GETFL); if (flags != -1) "+
-					"fcntl(res, F_SETFL, flags | O_NONBLOCK); }\n", ci)
-			} else {
-				fmt.Fprintf(w, "\t\t{ int flags = fcntl(res, F_GETFL); "+
-					"if (flags != -1) fcntl(res, F_SETFL, flags | O_NONBLOCK); }\n")
-			}
-		}
-		if dynamicFcntlCommand && localIO[call.Index] {
-			fmt.Fprintf(w, "\t\t%[1]v[%[2]v] = "+
-				"(csb_fcntl_cmd_%[3]d == F_DUPFD || csb_fcntl_cmd_%[3]d == F_DUPFD_CLOEXEC) ? res : -1;\n",
-				ctx.resultArrayName(), call.Index, ci)
-		} else {
-			fmt.Fprintf(w, "\t\t%v[%v] = res;\n", ctx.resultArrayName(), call.Index)
-		}
+		ctx.copyoutCSBResult(w, call, ci, opts)
 	}
 	for _, copyout := range call.Copyout {
-		PTR_OFFSET_STR_ADDR := ""
-		if ctx.opts.CSB && valInMMapRange(ctx, copyout.Addr) {
-			PTR_OFFSET_STR_ADDR = "+PTR_OFFSET"
-		}
+		PTR_OFFSET_STR_ADDR := ctx.sourceDialect().pointerOffset(copyout.Addr)
 		value := fmt.Sprintf("*(uint%v*)(0x%xul%v)", copyout.Size*8, copyout.Addr, PTR_OFFSET_STR_ADDR)
-		if ctx.opts.CSB && ctx.target.OS == targets.Linux && localIO[copyout.Index] {
-			fmt.Fprintf(w, "\t\tNONFAILING({ int fd = %[1]s; int flags = fcntl(fd, F_GETFL); "+
-				"if (flags != -1) fcntl(fd, F_SETFL, flags | O_NONBLOCK); %[2]v[%[3]v] = fd; });\n",
-				value, ctx.resultArrayName(), copyout.Index)
+		if ctx.copyoutCSBArg(w, copyout, value, opts) {
 			continue
 		}
 		fmt.Fprintf(w, "\t\tNONFAILING(%v[%v] = %v);\n", ctx.resultArrayName(), copyout.Index, value)
