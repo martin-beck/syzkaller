@@ -135,11 +135,12 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 		// only close file descriptors that are not part if the reg init function
 		// TODO: check the potential usage of initFDs below, and in the whole file.
 		if _, ok := listenFDs[fdRes]; !ok {
+			resultArray := ctx.sourceDialect().resultArrayName()
 			if ctx.opts.CSB {
 				fmt.Fprintf(closeBuf,
-					"\t{ uint32 fd = (uint32)UNIQUE_VAR(ctx->r)[%[1]v]; if (fd > 2) close(fd); }\n", fdRes)
+					"\t{ uint32 fd = (uint32)%s[%v]; if (fd > 2) close(fd); }\n", resultArray, fdRes)
 			} else {
-				fmt.Fprintf(closeBuf, "\tclose(UNIQUE_VAR(ctx->r)[%v]);\n", fdRes)
+				fmt.Fprintf(closeBuf, "\tclose(%s[%v]);\n", resultArray, fdRes)
 			}
 		}
 	}
@@ -165,9 +166,10 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 	// initialization of resource array in reg function
 	var callsNetSrvReg []string
 	if len(vars) > 0 {
-		callsNetSrvReg = append(callsNetSrvReg, fmt.Sprintf("\tUNIQUE_VAR(ctx->r) = (uint64*)malloc(sizeof(uint64)*%d);\n", len(vars)))
+		resultArray := ctx.sourceDialect().resultArrayName()
+		callsNetSrvReg = append(callsNetSrvReg, fmt.Sprintf("\t%s = (uint64*)malloc(sizeof(uint64)*%d);\n", resultArray, len(vars)))
 		for i, v := range vars {
-			callsNetSrvReg = append(callsNetSrvReg, fmt.Sprintf("\tUNIQUE_VAR(ctx->r)[%d] = 0x%x;\n", i, v))
+			callsNetSrvReg = append(callsNetSrvReg, fmt.Sprintf("\t%s[%d] = 0x%x;\n", resultArray, i, v))
 		}
 	}
 
@@ -203,13 +205,14 @@ func (ctx *context) generateSource() ([]byte, string, error) {
 
 	// Get number of listen annotations
 	var callsNetSrvDereg []string
+	resultArray := ctx.sourceDialect().resultArrayName()
 	for _, rIdx := range sortedUint64AnyKeys(listenFDs) {
-		callsNetSrvDereg = append(callsNetSrvDereg, fmt.Sprintf("\tclose(UNIQUE_VAR(ctx->r)[%d]);", rIdx))
+		callsNetSrvDereg = append(callsNetSrvDereg, fmt.Sprintf("\tclose(%s[%d]);", resultArray, rIdx))
 	}
 	if _, ok := ctx.calls["syz_reapply_affinity"]; ok {
-		callsNetSrvDereg = append(callsNetSrvDereg, "\tUNIQUE_FUNC(cleanup_affinity_mask)();")
+		callsNetSrvDereg = append(callsNetSrvDereg, "\tcleanup_affinity_mask();")
 	}
-	callsNetSrvDereg = append(callsNetSrvDereg, "\tfree(UNIQUE_VAR(ctx->r));")
+	callsNetSrvDereg = append(callsNetSrvDereg, fmt.Sprintf("\tfree(%s);", resultArray))
 	syscallsNetSrvDereg := strings.Join(callsNetSrvDereg, "\n")
 
 	syscalls := syscallsBody

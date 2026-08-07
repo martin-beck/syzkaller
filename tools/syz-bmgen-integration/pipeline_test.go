@@ -189,10 +189,13 @@ func testProg2C(t *testing.T, arch, input, work string) {
 			data := readFile(t, outputs[0])
 			marker := []byte("int main")
 			if variant.csb {
-				marker = []byte("#ifndef UNIQUE_ID")
+				marker = []byte("static inline int bm_dispatch_operation")
 			}
 			if len(data) < 100 || !bytes.Contains(data, marker) {
 				t.Fatalf("implausible generated output %s (%d bytes)", outputs[0], len(data))
+			}
+			if variant.csb && bytes.Contains(data, []byte("UNIQUE_")) {
+				t.Fatalf("CSB output still contains manual identifier namespacing: %s", outputs[0])
 			}
 			if !variant.csb {
 				runOK(t, compiler(t), cSyntaxArgs(outputs[0])...)

@@ -16,17 +16,9 @@
 #define _GNU_SOURCE
 #endif
 
-#define BM_CAT(a, b) a##b
-#define UNIQUE_ID
-#define UNIQUE_ID_TOK_TOK(...) BM_CAT(__VA_OPT__(_), UNIQUE_ID)
-#define UNIQUE_ID_TOK UNIQUE_ID_TOK_TOK(UNIQUE_ID)
-#define RESOLVE(x) x
-#define UNIQUE_NAME(prefix, tok) BM_CAT(prefix, tok)
-#define UNIQUE_VAR(var) UNIQUE_NAME(var, UNIQUE_ID_TOK)
-#define UNIQUE_FUNC(func) UNIQUE_NAME(func, RESOLVE(UNIQUE_ID_TOK))
-#define UNIQUE_GOTO(mark) UNIQUE_NAME(mark, UNIQUE_ID_TOK)
-#define UNIQUE_STR_STR(str) #str
-#define UNIQUE_STR() UNIQUE_STR_STR(UNIQUE_ID)
+#ifndef CSB_PROGRAM_NAME
+#define CSB_PROGRAM_NAME ""
+#endif
 
 #endif
 
@@ -81,29 +73,29 @@ typedef signed int ssize_t;
 #define MMAP_SIZE_TOTAL ((BM_THREAD_NUM) * (MMAP_LEN))
 // #define PTR_OFFSET (((BM_THREAD_IDX)*(MMAP_LEN))+((BM_CTX_TID)*(MMAP_SIZE_TOTAL)))
 
-const static int UNIQUE_VAR(num_subdirs) = /*{{{NUMSUBDIRS}}}*/;
-const static char* UNIQUE_VAR(subdirs)[/*{{{NUMSUBDIRS}}}*/] = {/*{{{SUBDIRS}}}*/};
-const static int UNIQUE_VAR(num_filenames) = /*{{{NUMFILENAMES}}}*/;
-const static char* UNIQUE_VAR(filenames)[/*{{{NUMFILENAMES}}}*/] = {/*{{{FILENAMES}}}*/};
-const static int UNIQUE_VAR(num_filesizes) = /*{{{NUMFILESIZES}}}*/;
-const static uint64 UNIQUE_VAR(filesizes)[/*{{{NUMFILESIZES}}}*/] = {/*{{{FILESIZES}}}*/};
+const static int num_subdirs = /*{{{NUMSUBDIRS}}}*/;
+const static char* subdirs[/*{{{NUMSUBDIRS}}}*/] = {/*{{{SUBDIRS}}}*/};
+const static int num_filenames = /*{{{NUMFILENAMES}}}*/;
+const static char* filenames[/*{{{NUMFILENAMES}}}*/] = {/*{{{FILENAMES}}}*/};
+const static int num_filesizes = /*{{{NUMFILESIZES}}}*/;
+const static uint64 filesizes[/*{{{NUMFILESIZES}}}*/] = {/*{{{FILESIZES}}}*/};
 #endif
 
 #if SYZ_EXECUTOR && !GOOS_linux
 #if !GOOS_windows
 #include <unistd.h>
 #endif
-NORETURN void UNIQUE_FUNC(doexit)(int status)
+NORETURN void doexit(int status)
 {
 	_exit(status); // prevent linter warning: doexit()
 	for (;;) {
 	}
 }
 #if !GOOS_fuchsia
-NORETURN void UNIQUE_FUNC(doexit_thread)(int status)
+NORETURN void doexit_thread(int status)
 {
 	// For BSD systems, _exit seems to do exactly what's needed.
-	UNIQUE_FUNC(doexit)(status);
+	doexit(status);
 }
 #endif
 #endif
@@ -129,7 +121,7 @@ static __thread int clone_ongoing;
 static __thread int skip_segv;
 static __thread jmp_buf segv_env;
 
-static void UNIQUE_FUNC(segv_handler)(int sig, siginfo_t* info, void* ctx)
+static void segv_handler(int sig, siginfo_t* info, void* ctx)
 {
 	// Generated programs can contain bad (unmapped/protected) addresses,
 	// which cause SIGSEGVs during copyin/copyout.
@@ -145,7 +137,7 @@ static void UNIQUE_FUNC(segv_handler)(int sig, siginfo_t* info, void* ctx)
 		// will trigger a seg fault, which in turn causes the child to
 		// jump over the NONFAILING macro and continue execution in
 		// parallel with the parent.
-		UNIQUE_FUNC(doexit_thread)(sig);
+		doexit_thread(sig);
 	}
 
 	uintptr_t addr = (uintptr_t)info->si_addr;
@@ -167,10 +159,10 @@ static void UNIQUE_FUNC(segv_handler)(int sig, siginfo_t* info, void* ctx)
 		_longjmp(segv_env, 1);
 	}
 	debug("SIGSEGV on %p, exiting\n", (void*)addr);
-	UNIQUE_FUNC(doexit)(sig);
+	doexit(sig);
 }
 
-static void UNIQUE_FUNC(install_segv_handler)(void)
+static void install_segv_handler(void)
 {
 	struct sigaction sa;
 #if GOOS_linux
@@ -209,7 +201,7 @@ static void UNIQUE_FUNC(install_segv_handler)(void)
 #include <sys/types.h>
 #include <sys/wait.h>
 
-static void UNIQUE_FUNC(kill_and_wait)(int pid, int* status)
+static void kill_and_wait(int pid, int* status)
 {
 	kill(pid, SIGKILL);
 	while (waitpid(-1, status, 0) != pid) {
@@ -223,7 +215,7 @@ static void UNIQUE_FUNC(kill_and_wait)(int pid, int* status)
     __NR_syz_usb_connect || __NR_syz_usb_connect_ath9k || __NR_syz_sleep_ms ||     \
     __NR_syz_usb_control_io || __NR_syz_usb_ep_read || __NR_syz_usb_ep_write ||    \
     __NR_syz_usb_disconnect
-static void UNIQUE_FUNC(sleep_ms)(uint64 ms)
+static void sleep_ms(uint64 ms)
 {
 	usleep(ms * 1000);
 }
@@ -233,7 +225,7 @@ static void UNIQUE_FUNC(sleep_ms)(uint64 ms)
     SYZ_LEAK
 #include <time.h>
 
-static uint64 UNIQUE_FUNC(current_time_ms)(void)
+static uint64 current_time_ms(void)
 {
 	struct timespec ts;
 	if (clock_gettime(CLOCK_MONOTONIC, &ts))
@@ -248,20 +240,20 @@ static uint64 UNIQUE_FUNC(current_time_ms)(void)
 #include <unistd.h>
 
 #if CSB
-static void UNIQUE_FUNC(use_temporary_dir)(thread_ctx_t* ctx)
+static void use_temporary_dir(thread_ctx_t* ctx)
 #else
-static void UNIQUE_FUNC(use_temporary_dir)(void)
+static void use_temporary_dir(void)
 #endif
 {
 #if CSB
 	if (ctx->iteration == 0 && (!ctx->aggregation_threads || (BM_THREAD_IDX == 0 && ctx->tid == 0))) {
 #endif
 #if SYZ_SANDBOX_ANDROID
-		char tmpdir_template[] = "/data/local/tmp/syzkaller_" UNIQUE_STR() ".XXXXXX";
+		char tmpdir_template[] = "/data/local/tmp/syzkaller_" CSB_PROGRAM_NAME ".XXXXXX";
 #elif GOOS_fuchsia
-	char tmpdir_template[] = "/tmp/syzkaller_" UNIQUE_STR() ".XXXXXX";
+	char tmpdir_template[] = "/tmp/syzkaller_" CSB_PROGRAM_NAME ".XXXXXX";
 #else
-	char tmpdir_template[] = "./syzkaller_" UNIQUE_STR() ".XXXXXX";
+	char tmpdir_template[] = "./syzkaller_" CSB_PROGRAM_NAME ".XXXXXX";
 #endif
 		char* tmpdir = mkdtemp(tmpdir_template);
 		if (!tmpdir)
@@ -278,7 +270,7 @@ static void UNIQUE_FUNC(use_temporary_dir)(void)
 #endif
 
 #if CSB
-static void __attribute__((noinline)) UNIQUE_FUNC(remove_tmp_dir)(const char* dir)
+static void __attribute__((noinline)) remove_tmp_dir(const char* dir)
 {
 	DIR* dp = opendir(dir);
 	if (dp == NULL) {
@@ -304,7 +296,7 @@ static void __attribute__((noinline)) UNIQUE_FUNC(remove_tmp_dir)(const char* di
 		if (lstat(filename, &st))
 			exitf("lstat(%s) failed", filename);
 		if (S_ISDIR(st.st_mode)) {
-			UNIQUE_FUNC(remove_tmp_dir)(filename);
+			remove_tmp_dir(filename);
 			continue;
 		}
 		if (unlink(filename)) {
@@ -330,7 +322,7 @@ static void __attribute__((noinline)) UNIQUE_FUNC(remove_tmp_dir)(const char* di
 
 #if GOOS_freebsd
 // Unset file flags which might inhibit unlinking.
-static void UNIQUE_FUNC(reset_flags)(const char* filename)
+static void reset_flags(const char* filename)
 {
 	struct stat st;
 	if (lstat(filename, &st))
@@ -348,7 +340,7 @@ static void UNIQUE_FUNC(reset_flags)(const char* filename)
 // the result into a buffer of length FILENAME_MAX which is apparently not possible. But this is no
 // problem in our case because file and directory names should be short enough and fit into a buffer
 // of length FILENAME_MAX.
-static void __attribute__((noinline)) UNIQUE_FUNC(remove_dir)(const char* dir)
+static void __attribute__((noinline)) remove_dir(const char* dir)
 {
 	DIR* dp = opendir(dir);
 	if (dp == NULL) {
@@ -374,14 +366,14 @@ static void __attribute__((noinline)) UNIQUE_FUNC(remove_dir)(const char* dir)
 		if (lstat(filename, &st))
 			exitf("lstat(%s) failed", filename);
 		if (S_ISDIR(st.st_mode)) {
-			UNIQUE_FUNC(remove_dir)(filename);
+			remove_dir(filename);
 			continue;
 		}
 		if (unlink(filename)) {
 #if GOOS_freebsd
 			if (errno == EPERM) {
-				UNIQUE_FUNC(reset_flags)(filename);
-				UNIQUE_FUNC(reset_flags)(dir);
+				reset_flags(filename);
+				reset_flags(dir);
 				if (unlink(filename) == 0)
 					continue;
 			}
@@ -393,7 +385,7 @@ static void __attribute__((noinline)) UNIQUE_FUNC(remove_dir)(const char* dir)
 	while (rmdir(dir)) {
 #if GOOS_freebsd
 		if (errno == EPERM) {
-			UNIQUE_FUNC(reset_flags)(dir);
+			reset_flags(dir);
 			if (rmdir(dir) == 0)
 				break;
 		}
@@ -406,21 +398,21 @@ static void __attribute__((noinline)) UNIQUE_FUNC(remove_dir)(const char* dir)
 
 #if !GOOS_linux && !GOOS_netbsd
 #if SYZ_EXECUTOR || SYZ_FAULT
-static int UNIQUE_FUNC(inject_fault)(int nth)
+static int inject_fault(int nth)
 {
 	return 0;
 }
 #endif
 
 #if SYZ_FAULT
-static const char* UNIQUE_FUNC(setup_fault)()
+static const char* setup_fault()
 {
 	return NULL;
 }
 #endif
 
 #if SYZ_EXECUTOR
-static int UNIQUE_FUNC(fault_injected)(int fail_fd)
+static int fault_injected(int fail_fd)
 {
 	return 0;
 }
@@ -432,7 +424,7 @@ static int UNIQUE_FUNC(fault_injected)(int fail_fd)
 #include <errno.h>
 #include <pthread.h>
 
-static void UNIQUE_FUNC(thread_start)(void* (*fn)(void*), void* arg)
+static void thread_start(void* (*fn)(void*), void* arg)
 {
 	pthread_t th;
 	pthread_attr_t attr;
@@ -471,7 +463,7 @@ typedef struct {
 	int state;
 } event_t;
 
-static void UNIQUE_FUNC(event_init)(event_t* ev)
+static void event_init(event_t* ev)
 {
 	if (pthread_mutex_init(&ev->mu, 0))
 		exitf("pthread_mutex_init failed");
@@ -480,12 +472,12 @@ static void UNIQUE_FUNC(event_init)(event_t* ev)
 	ev->state = 0;
 }
 
-static void UNIQUE_FUNC(event_reset)(event_t* ev)
+static void event_reset(event_t* ev)
 {
 	ev->state = 0;
 }
 
-static void UNIQUE_FUNC(event_set)(event_t* ev)
+static void event_set(event_t* ev)
 {
 	pthread_mutex_lock(&ev->mu);
 	if (ev->state)
@@ -495,7 +487,7 @@ static void UNIQUE_FUNC(event_set)(event_t* ev)
 	pthread_cond_broadcast(&ev->cv);
 }
 
-static void UNIQUE_FUNC(event_wait)(event_t* ev)
+static void event_wait(event_t* ev)
 {
 	pthread_mutex_lock(&ev->mu);
 	while (!ev->state)
@@ -503,7 +495,7 @@ static void UNIQUE_FUNC(event_wait)(event_t* ev)
 	pthread_mutex_unlock(&ev->mu);
 }
 
-static int UNIQUE_FUNC(event_isset)(event_t* ev)
+static int event_isset(event_t* ev)
 {
 	pthread_mutex_lock(&ev->mu);
 	int res = ev->state;
@@ -511,9 +503,9 @@ static int UNIQUE_FUNC(event_isset)(event_t* ev)
 	return res;
 }
 
-static int UNIQUE_FUNC(event_timedwait)(event_t* ev, uint64 timeout)
+static int event_timedwait(event_t* ev, uint64 timeout)
 {
-	uint64 start = UNIQUE_FUNC(current_time_ms)();
+	uint64 start = current_time_ms();
 	uint64 now = start;
 	pthread_mutex_lock(&ev->mu);
 	for (;;) {
@@ -524,7 +516,7 @@ static int UNIQUE_FUNC(event_timedwait)(event_t* ev, uint64 timeout)
 		ts.tv_sec = remain / 1000;
 		ts.tv_nsec = (remain % 1000) * 1000 * 1000;
 		pthread_cond_timedwait(&ev->cv, &ev->mu, &ts);
-		now = UNIQUE_FUNC(current_time_ms)();
+		now = current_time_ms();
 		if (now - start > timeout)
 			break;
 	}
@@ -547,12 +539,12 @@ struct csum_inet {
 	uint32 acc;
 };
 
-static void UNIQUE_FUNC(csum_inet_init)(struct csum_inet* csum)
+static void csum_inet_init(struct csum_inet* csum)
 {
 	csum->acc = 0;
 }
 
-static void UNIQUE_FUNC(csum_inet_update)(struct csum_inet* csum, const uint8* data, size_t length)
+static void csum_inet_update(struct csum_inet* csum, const uint8* data, size_t length)
 {
 	if (length == 0)
 		return;
@@ -568,7 +560,7 @@ static void UNIQUE_FUNC(csum_inet_update)(struct csum_inet* csum, const uint8* d
 		csum->acc = (csum->acc & 0xffff) + (csum->acc >> 16);
 }
 
-static uint16 UNIQUE_FUNC(csum_inet_digest)(struct csum_inet* csum)
+static uint16 csum_inet_digest(struct csum_inet* csum)
 {
 	return ~csum->acc;
 }
@@ -598,7 +590,7 @@ static uint16 UNIQUE_FUNC(csum_inet_digest)(struct csum_inet* csum)
 
 #if SYZ_EXECUTOR || __NR_syz_execute_func
 // syz_execute_func(text ptr[in, text[taget]])
-static long UNIQUE_FUNC(syz_execute_func)(volatile long text)
+static long syz_execute_func(volatile long text)
 {
 	// Here we just to random code which is inherently unsafe.
 	// But we only care about coverage in the output region.
@@ -623,36 +615,47 @@ static long UNIQUE_FUNC(syz_execute_func)(volatile long text)
 struct thread_t {
 	int created, call;
 	event_t ready, done;
+#if CSB
+	thread_ctx_t* ctx;
+#endif
 };
 
-static struct thread_t UNIQUE_VAR(threads)[16];
-static void UNIQUE_FUNC(execute_call)(int call);
-static int UNIQUE_VAR(running);
+static struct thread_t threads[16];
+#if CSB
+static void execute_call(thread_ctx_t* ctx, int call);
+#else
+static void execute_call(int call);
+#endif
+static int running;
 
-static void* UNIQUE_FUNC(thr)(void* arg)
+static void* thr(void* arg)
 {
 	struct thread_t* th = (struct thread_t*)arg;
 	for (;;) {
-		UNIQUE_FUNC(event_wait)(&th->ready);
-		UNIQUE_FUNC(event_reset)(&th->ready);
-		UNIQUE_FUNC(execute_call)(th->call);
-		__atomic_fetch_sub(&UNIQUE_VAR(running), 1, __ATOMIC_RELAXED);
-		UNIQUE_FUNC(event_set)(&th->done);
+		event_wait(&th->ready);
+		event_reset(&th->ready);
+#if CSB
+		execute_call(th->ctx, th->call);
+#else
+		execute_call(th->call);
+#endif
+		__atomic_fetch_sub(&running, 1, __ATOMIC_RELAXED);
+		event_set(&th->done);
 	}
 	return 0;
 }
 
 #if SYZ_REPEAT
 #if CSB
-static void UNIQUE_FUNC(execute_one)(thread_ctx_t* ctx)
+static void execute_one(thread_ctx_t* ctx)
 #else
-static void UNIQUE_FUNC(execute_one)(void)
+static void execute_one(void)
 #endif
 #else
 #if CSB
-static void UNIQUE_FUNC(loop)(thread_ctx_t* ctx, size_t op_id)
+static void loop(thread_ctx_t* ctx, size_t op_id)
 #else
-static void UNIQUE_FUNC(loop)(void)
+static void loop(void)
 #endif
 #endif
 {
@@ -669,27 +672,30 @@ static void UNIQUE_FUNC(loop)(void)
 			struct thread_t* th = &threads[thread];
 			if (!th->created) {
 				th->created = 1;
-				UNIQUE_FUNC(event_init)(&th->ready);
-				UNIQUE_FUNC(event_init)(&th->done);
-				UNIQUE_FUNC(event_set)(&th->done);
-				UNIQUE_FUNC(thread_start)(thr, th);
+				event_init(&th->ready);
+				event_init(&th->done);
+				event_set(&th->done);
+				thread_start(thr, th);
 			}
-			if (!UNIQUE_FUNC(event_isset)(&th->done))
+			if (!event_isset(&th->done))
 				continue;
-			UNIQUE_FUNC(event_reset)(&th->done);
+			event_reset(&th->done);
 			th->call = call;
-			__atomic_fetch_add(&UNIQUE_VAR(running), 1, __ATOMIC_RELAXED);
-			UNIQUE_FUNC(event_set)(&th->ready);
+#if CSB
+			th->ctx = ctx;
+#endif
+			__atomic_fetch_add(&running, 1, __ATOMIC_RELAXED);
+			event_set(&th->ready);
 #if SYZ_ASYNC
 			if (/*{{{ASYNC_CONDITIONS}}}*/)
 				break;
 #endif
-			UNIQUE_FUNC(event_timedwait)(&th->done, /*{{{CALL_TIMEOUT_MS}}}*/);
+			event_timedwait(&th->done, /*{{{CALL_TIMEOUT_MS}}}*/);
 			break;
 		}
 	}
-	for (i = 0; i < 100 && __atomic_load_n(&UNIQUE_VAR(running), __ATOMIC_RELAXED); i++)
-		UNIQUE_FUNC(sleep_ms)(1);
+	for (i = 0; i < 100 && __atomic_load_n(&running, __ATOMIC_RELAXED); i++)
+		sleep_ms(1);
 #if SYZ_HAVE_CLOSE_FDS
 	close_fds();
 #endif
@@ -704,9 +710,9 @@ static void UNIQUE_FUNC(loop)(void)
 
 #if SYZ_EXECUTOR || SYZ_REPEAT
 #if CSB
-static void UNIQUE_FUNC(execute_one)(thread_ctx_t* ctx);
+static void execute_one(thread_ctx_t* ctx);
 #else
-static void UNIQUE_FUNC(execute_one)(void);
+static void execute_one(void);
 #endif
 
 #if GOOS_linux
@@ -721,18 +727,18 @@ static void UNIQUE_FUNC(execute_one)(void);
 #include <sys/wait.h>
 
 #if CSB
-static void UNIQUE_FUNC(loop)(thread_ctx_t* ctx, size_t op_id)
+static void loop(thread_ctx_t* ctx, size_t op_id)
 #else
-static void UNIQUE_FUNC(loop)(void)
+static void loop(void)
 #endif
 {
 #if SYZ_HAVE_SETUP_LOOP
-	UNIQUE_FUNC(setup_loop)();
+	setup_loop();
 #endif
 #if SYZ_EXECUTOR
 	// Tell parent that we are ready to serve.
 	if (!flag_snapshot)
-		UNIQUE_FUNC(reply_execute)(0);
+		reply_execute(0);
 #endif
 	int iter = 0;
 #if SYZ_REPEAT_TIMES
@@ -744,19 +750,19 @@ static void UNIQUE_FUNC(loop)(void)
 		// Create a new private work dir for this test (removed at the end of the loop).
 		char cwdbuf[64];
 #if CSB
-		sprintf(cwdbuf, "./%ld_%ld_%d_" UNIQUE_STR(), ctx->tid, op_id, iter);
+		sprintf(cwdbuf, "./%ld_%ld_%d_" CSB_PROGRAM_NAME, ctx->tid, op_id, iter);
 #else
-		sprintf(cwdbuf, "./%d_" UNIQUE_STR(), iter);
+		sprintf(cwdbuf, "./%d_" CSB_PROGRAM_NAME, iter);
 #endif
 		if (mkdir(cwdbuf, 0777))
 			fail("failed to mkdir");
 #endif
 #if SYZ_HAVE_RESET_LOOP
-		UNIQUE_FUNC(reset_loop)();
+		reset_loop();
 #endif
 #if SYZ_EXECUTOR
 		if (!flag_snapshot)
-			UNIQUE_FUNC(receive_execute)();
+			receive_execute();
 #endif
 		int pid = fork();
 		if (pid < 0)
@@ -767,10 +773,10 @@ static void UNIQUE_FUNC(loop)(void)
 				fail("failed to chdir");
 #endif
 #if SYZ_HAVE_SETUP_TEST
-			UNIQUE_FUNC(setup_test)();
+			setup_test();
 #endif
 #if SYZ_HAVE_SETUP_EXT_TEST
-			UNIQUE_FUNC(setup_ext_test)();
+			setup_ext_test();
 #endif
 #if SYZ_EXECUTOR
 			close(kInPipeFd);
@@ -779,15 +785,15 @@ static void UNIQUE_FUNC(loop)(void)
 			close(kOutPipeFd);
 #endif
 #if CSB
-			UNIQUE_FUNC(execute_one)(ctx);
+			execute_one(ctx);
 #else
-			UNIQUE_FUNC(execute_one)();
+			execute_one();
 #endif
 #if !SYZ_EXECUTOR && SYZ_HAVE_CLOSE_FDS && !SYZ_THREADED
 			// Executor's execute_one has already called close_fds.
 			close_fds();
 #endif
-			UNIQUE_FUNC(doexit)(0);
+			doexit(0);
 		}
 		debug("spawned worker pid %d\n", pid);
 
@@ -802,13 +808,13 @@ static void UNIQUE_FUNC(loop)(void)
 		// SIGCHLD should also unblock the usleep below, so the spin loop
 		// should be as efficient as sigtimedwait.
 		int status = 0;
-		uint64 start = UNIQUE_FUNC(current_time_ms)();
+		uint64 start = current_time_ms();
 #if SYZ_EXECUTOR
 		uint64 last_executed = start;
 		uint32 executed_calls = output_data->completed.load(std::memory_order_relaxed);
 #endif
 		for (;;) {
-			UNIQUE_FUNC(sleep_ms)(10);
+			sleep_ms(10);
 			if (waitpid(-1, &status, WNOHANG | WAIT_FLAGS) == pid)
 				break;
 #if SYZ_EXECUTOR
@@ -827,7 +833,7 @@ static void UNIQUE_FUNC(loop)(void)
 			uint64 inactive_timeout_ms = syscall_timeout_ms * 20;
 			uint64 glob_timeout_ms = program_timeout_ms * 120;
 
-			uint64 now = UNIQUE_FUNC(current_time_ms)();
+			uint64 now = current_time_ms();
 			uint32 now_executed = output_data->completed.load(std::memory_order_relaxed);
 			if (executed_calls != now_executed) {
 				executed_calls = now_executed;
@@ -837,7 +843,7 @@ static void UNIQUE_FUNC(loop)(void)
 			// TODO: adjust timeout for progs with syz_usb_connect call.
 			// If the max program timeout is exceeded, kill unconditionally.
 			if ((now - start > program_timeout_ms && request_type != rpc::RequestType::Glob) || (now - start > glob_timeout_ms && request_type == rpc::RequestType::Glob))
-				goto UNIQUE_GOTO(kill_test);
+				goto kill_test;
 			// If the request type is not a normal test program (currently, glob expansion request),
 			// then wait for the full timeout (these requests don't update number of completed calls
 			// + they are more important and we don't want timing flakes).
@@ -849,14 +855,13 @@ static void UNIQUE_FUNC(loop)(void)
 			// If it keeps completing syscalls, then don't kill it.
 			if (now - last_executed < inactive_timeout_ms)
 				continue;
-			UNIQUE_GOTO(kill_test)
-			    :
+		kill_test:
 #else
-			if (UNIQUE_FUNC(current_time_ms)() - start < /*{{{PROGRAM_TIMEOUT_MS}}}*/)
+			if (current_time_ms() - start < /*{{{PROGRAM_TIMEOUT_MS}}}*/)
 				continue;
 #endif
-			      debug("killing hanging pid %d\n", pid);
-			UNIQUE_FUNC(kill_and_wait)(pid, &status);
+			debug("killing hanging pid %d\n", pid);
+			kill_and_wait(pid, &status);
 			break;
 		}
 #if SYZ_EXECUTOR
@@ -864,10 +869,10 @@ static void UNIQUE_FUNC(loop)(void)
 			errno = 0;
 			fail("child failed");
 		}
-		UNIQUE_FUNC(reply_execute)(0);
+		reply_execute(0);
 #endif
 #if SYZ_EXECUTOR || SYZ_USE_TMP_DIR
-		UNIQUE_FUNC(remove_dir)(cwdbuf);
+		remove_dir(cwdbuf);
 #endif
 #if SYZ_LEAK
 		// Note: this will fail under setuid sandbox because we don't have
@@ -878,14 +883,14 @@ static void UNIQUE_FUNC(loop)(void)
 }
 #else
 #if CSB
-static void UNIQUE_FUNC(loop)(thread_ctx_t* ctx, size_t op_id)
+static void loop(thread_ctx_t* ctx, size_t op_id)
 {
-	UNIQUE_FUNC(execute_one)(ctx);
+	execute_one(ctx);
 }
 #else
-static void UNIQUE_FUNC(loop)(void)
+static void loop(void)
 {
-	UNIQUE_FUNC(execute_one)();
+	execute_one();
 }
 #endif
 #endif
@@ -897,18 +902,22 @@ static void UNIQUE_FUNC(loop)(void)
 
 #if SYZ_THREADED || SYZ_REPEAT || SYZ_SANDBOX_NONE || SYZ_SANDBOX_SETUID || SYZ_SANDBOX_NAMESPACE || SYZ_SANDBOX_ANDROID
 #if SYZ_THREADED
-void UNIQUE_FUNC(execute_call)(int call)
+#if CSB
+static void execute_call(thread_ctx_t* ctx, int call)
+#else
+static void execute_call(int call)
+#endif
 #elif SYZ_REPEAT
 #if CSB
-void UNIQUE_FUNC(execute_one)(thread_ctx_t* ctx)
+static void execute_one(thread_ctx_t* ctx)
 #else
-void UNIQUE_FUNC(execute_one)()
+static void execute_one()
 #endif
 #else
 #if CSB
-void UNIQUE_FUNC(loop)(thread_ctx_t* ctx, op_id)
+static void loop(thread_ctx_t* ctx, op_id)
 #else
-void UNIQUE_FUNC(loop)(void)
+static void loop(void)
 #endif
 #endif
 {
@@ -921,13 +930,13 @@ void UNIQUE_FUNC(loop)(void)
 
 #if CSB
 static inline int
-UNIQUE_FUNC(bm_target_reg)(thread_ctx_t* ctx)
+bm_target_reg(thread_ctx_t* ctx)
 {
 	/*{{{SYSCALLS_NET_SRV_REG}}}*/
 	return 0;
 }
 static inline int
-UNIQUE_FUNC(bm_target_dereg)(thread_ctx_t* ctx)
+bm_target_dereg(thread_ctx_t* ctx)
 {
 	/*{{{SYSCALLS_NET_SRV_DEREG}}}*/
 	return 0;
@@ -935,7 +944,7 @@ UNIQUE_FUNC(bm_target_dereg)(thread_ctx_t* ctx)
 #endif
 
 #if CSB
-static inline int UNIQUE_FUNC(bm_dispatch_operation)(thread_ctx_t* ctx, size_t op_id)
+static inline int bm_dispatch_operation(thread_ctx_t* ctx, size_t op_id)
 #else
 // This is the main function for csource.
 int main(void)
@@ -993,9 +1002,9 @@ int main(void)
 #endif
 #if SYZ_USE_TMP_DIR || SYZ_SANDBOX_ANDROID
 #if CSB
-			UNIQUE_FUNC(use_temporary_dir)(ctx);
+			use_temporary_dir(ctx);
 #else
-			UNIQUE_FUNC(use_temporary_dir)();
+			use_temporary_dir();
 #endif
 #endif
 			/*{{{SANDBOX_FUNC}}}*/
