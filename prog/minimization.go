@@ -141,42 +141,6 @@ func Minimize(p0 *Prog, callIndex0 int, mode MinimizeMode, pred0 func(*Prog, int
 	return p0, callIndex0
 }
 
-func RemoveUnrelatedCalls(p0 *Prog, callIndex0 int, pred minimizePred, processedCallsIn map[int]bool) (*Prog, int, map[int]bool) {
-	var processedCalls map[int]bool
-	if callIndex0 >= 0 && callIndex0+2 < len(p0.Calls) {
-		// It's frequently the case that all subsequent calls were not necessary.
-		// Try to drop them all at once.
-		p := p0.Clone()
-		for i := len(p0.Calls) - 1; i > callIndex0; i-- {
-			p.RemoveCall(i)
-		}
-		if pred(p, callIndex0, statMinRemoveCall, "trailing calls") {
-			p0 = p
-		}
-	}
-
-	if callIndex0 != -1 {
-		p0, callIndex0, processedCalls = removeUnrelatedCallsInfo(p0, callIndex0, pred, processedCallsIn)
-	}
-
-	return p0, callIndex0, processedCalls
-}
-
-func RemoveUnrelatedCallsFast(p0 *Prog, callIndex0 int, processedCallsIn []bool, c *Cache) (*Prog, []bool, []bool) {
-	var processedCalls []bool
-	var keepCalls []bool
-	if callIndex0 >= 0 && callIndex0+2 < len(p0.Calls) {
-		// It's frequently the case that all subsequent calls were not necessary.
-		// Try to drop them all at once.
-	}
-
-	if callIndex0 != -1 {
-		p0, processedCalls, keepCalls = removeUnrelatedCallsInfoFast(p0, callIndex0, processedCallsIn, c)
-	}
-
-	return p0, processedCalls, keepCalls
-}
-
 type minimizePred func(*Prog, int, *stat.Val, string) bool
 
 func removeCalls(p0 *Prog, callIndex0 int, pred minimizePred) (*Prog, int) {
@@ -213,51 +177,6 @@ func removeCalls(p0 *Prog, callIndex0 int, pred minimizePred) (*Prog, int) {
 		callIndex0 = callIndex
 	}
 	return p0, callIndex0
-}
-
-func removeUnrelatedCallsInfo(p0 *Prog, callIndex0 int, pred minimizePred, processedCallsIn map[int]bool) (*Prog, int, map[int]bool) {
-	keepCalls := relatedCalls(p0, callIndex0)
-	if len(p0.Calls)-len(keepCalls) < 3 {
-		return p0, callIndex0, processedCallsIn
-	}
-	p, callIndex := p0.Clone(), callIndex0
-	for i := len(p0.Calls) - 1; i >= 0; i-- {
-		if keepCalls[i] {
-			continue
-		}
-		p.RemoveCall(i)
-		if i < callIndex {
-			callIndex--
-		}
-	}
-	if !pred(p, callIndex, statMinRemoveCall, "unrelated calls") {
-		return p0, callIndex0, processedCallsIn
-	}
-	processedCalls := mapsor(processedCallsIn, keepCalls)
-	return p, callIndex, processedCalls
-}
-
-func cardinality(a []bool) int {
-	ret := 0
-	for _, b := range a {
-		if b {
-			ret++
-		}
-	}
-	return ret
-}
-
-func removeUnrelatedCallsInfoFast(p0 *Prog, callIndex0 int, processedCallsIn []bool, c *Cache) (*Prog, []bool, []bool) {
-	keepCalls, removeCalls := relatedCallsFullThread(p0, callIndex0, c, processedCallsIn)
-	// keepCalls, removeCalls := relatedCallsFullProgram(p0, callIndex0, c, processedCallsIn)
-
-	if len(p0.Calls)-cardinality(keepCalls) < 3 {
-		return p0, processedCallsIn, keepCalls
-	}
-	p := p0.CloneFilter(keepCalls)
-
-	processedCalls := Sliceor(processedCallsIn, removeCalls)
-	return p, processedCalls, keepCalls
 }
 
 // ForEachRelatedCallComponentForThread yields dependency-closed call sets in start-call order.
@@ -309,15 +228,6 @@ func ForEachRelatedCallComponentForThread(p *Prog, tid int64, callIndices []int,
 		}
 
 	}
-}
-
-// RelatedCallComponentsForThread collects the streamed form for callers that need a snapshot.
-func RelatedCallComponentsForThread(p *Prog, tid int64, callIndices []int, c *Cache) []RelatedCallComponent {
-	var components []RelatedCallComponent
-	ForEachRelatedCallComponentForThread(p, tid, callIndices, c, func(component RelatedCallComponent) {
-		components = append(components, component)
-	})
-	return components
 }
 
 func buildDependencyIndex(p *Prog, c *Cache) *dependencyIndex {
@@ -422,111 +332,6 @@ func checkAllowedCalls(call *Call) bool {
 	return false
 }
 
-func relatedCallsFullProgram(p0 *Prog, callIndex0 int, c *Cache, processedCallsIn []bool) ([]bool, []bool) {
-	keepCalls := make([]bool, len(p0.Calls))
-	keepCalls[callIndex0] = true
-	usedBF := usesBF(p0.Calls[callIndex0], callIndex0, c)
-	used := usesCache(p0.Calls[callIndex0], callIndex0, c)
-
-	numCalls := len(p0.Calls)
-
-	for {
-		n := len(used)
-		for i := 0; i < numCalls; i++ {
-			if keepCalls[i] || processedCallsIn[i] {
-				continue
-			}
-
-			call := p0.Calls[i]
-			usedBF1 := usesBF(call, i, c)
-			if intersectBFs(usedBF, usedBF1) {
-				used1 := usesCache(call, i, c)
-				if intersects(used, used1) {
-					keepCalls[i] = true
-					usedBF.Merge(usedBF1)
-					for what := range used1 {
-						used[what] = true
-					}
-				}
-			}
-		}
-		if n == len(used) {
-			removeCalls := keepCalls
-			return keepCalls, removeCalls
-		}
-	}
-}
-
-func relatedCallsFullThread(p0 *Prog, callIndex0 int, c *Cache, processedCallsIn []bool) ([]bool, []bool) {
-	return relatedCallsFullThreadIndexed(p0, callIndex0, c, processedCallsIn, getDependencyIndex(p0, c))
-}
-
-func relatedCallsFullThreadIndexed(p0 *Prog, callIndex0 int, c *Cache, processedCallsIn []bool, idx *dependencyIndex) ([]bool, []bool) {
-	keepCalls := make([]bool, len(p0.Calls))
-	keepCalls[callIndex0] = true
-	removeCalls := make([]bool, len(p0.Calls))
-	used := maps.Clone(usesCache(p0.Calls[callIndex0], callIndex0, c))
-	tid := p0.Calls[callIndex0].StraceTid
-	if len(retCache(p0.Calls[callIndex0], callIndex0, c)) == 0 {
-		removeCalls[callIndex0] = true
-	}
-
-	work := make([]any, 0, len(used))
-	for key := range used {
-		work = append(work, key)
-	}
-	seen := make(map[any]bool, len(used))
-
-	keepCall := func(i int) {
-		if keepCalls[i] || processedCallsIn[i] {
-			return
-		}
-		call := p0.Calls[i]
-		keepCalls[i] = true
-		if call.StraceTid == tid && len(retCache(call, i, c)) == 0 && !checkAllowedCalls(call) {
-			removeCalls[i] = true
-		}
-		for key := range usesCache(call, i, c) {
-			if !used[key] {
-				used[key] = true
-				work = append(work, key)
-			}
-		}
-	}
-
-	for len(work) != 0 {
-		key := work[len(work)-1]
-		work = work[:len(work)-1]
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-
-		for _, i := range idx.uses[key] {
-			if keepCalls[i] || processedCallsIn[i] {
-				continue
-			}
-			call := p0.Calls[i]
-			matchingTIDOrAllowed := call.StraceTid == tid || checkAllowedCalls(call)
-			if matchingTIDOrAllowed {
-				keepCall(i)
-			}
-		}
-		for _, i := range idx.rets[key] {
-			if keepCalls[i] || processedCallsIn[i] {
-				continue
-			}
-			call := p0.Calls[i]
-			matchingTIDOrAllowed := call.StraceTid == tid || checkAllowedCalls(call)
-			if !matchingTIDOrAllowed {
-				keepCall(i)
-			}
-		}
-	}
-
-	return keepCalls, removeCalls
-}
-
 func relatedCallsFullThreadSparse(p0 *Prog, callIndex0 int, c *Cache, processed []bool,
 	idx *dependencyIndex, visited []uint32, generation uint32) ([]int, []int) {
 	keepCalls := []int{callIndex0}
@@ -585,105 +390,6 @@ func relatedCallsFullThreadSparse(p0 *Prog, callIndex0 int, c *Cache, processed 
 	return keepCalls, removeCalls
 }
 
-func relatedCallsFullThreadScan(p0 *Prog, callIndex0 int, c *Cache, processedCallsIn []bool) ([]bool, []bool) {
-	keepCalls := make([]bool, len(p0.Calls))
-	keepCalls[callIndex0] = true
-	removeCalls := make([]bool, len(p0.Calls))
-	usedBF := usesBF(p0.Calls[callIndex0], callIndex0, c).Copy()
-	used := maps.Clone(usesCache(p0.Calls[callIndex0], callIndex0, c))
-	tid := p0.Calls[callIndex0].StraceTid
-	if retBF(p0.Calls[callIndex0], callIndex0, c).BitSet().None() {
-		removeCalls[callIndex0] = true
-	}
-	numCalls := len(p0.Calls)
-
-	for {
-		n := len(used)
-		for i := 0; i < numCalls; i++ {
-			if keepCalls[i] || processedCallsIn[i] {
-				continue
-			}
-
-			call := p0.Calls[i]
-			matchingTIDOrAllowed := (call.StraceTid == tid || checkAllowedCalls(call))
-			var used1 map[any]bool
-			var usedBF1 *bloom.BloomFilter
-			if matchingTIDOrAllowed {
-				usedBF1 = usesBF(call, i, c)
-			} else {
-				usedBF1 = retBF(call, i, c)
-			}
-
-			if intersectBFs(usedBF, usedBF1) {
-				if matchingTIDOrAllowed {
-					used1 = usesCache(call, i, c)
-				} else {
-					used1 = retCache(call, i, c)
-				}
-				if intersects(used, used1) {
-					keepCalls[i] = true
-					// dont remove setup calls from parents, they might be necessary to setup for a different thread as well
-					// also dont remove setup calls from this thread, as sibblings might use a shared resource (mysql, file descriptor)
-					if call.StraceTid == tid && retBF(call, i, c).BitSet().None() && !checkAllowedCalls(call) {
-						removeCalls[i] = true
-					}
-
-					// actually include all resources for this syscall so we get dependent resource creation as well
-					if !matchingTIDOrAllowed {
-						usedBF1 = usesBF(call, i, c)
-						used1 = usesCache(call, i, c)
-					}
-
-					usedBF.Merge(usedBF1)
-					for what := range used1 {
-						used[what] = true
-					}
-				}
-			}
-		}
-		if n == len(used) {
-			return keepCalls, removeCalls
-		}
-	}
-}
-func usesToNewBloom(uses map[any](bool)) *bloom.BloomFilter {
-	bf := bloom.NewWithEstimates(500, 1)
-	for what := range uses {
-		switch what := what.(type) {
-		case *ResultArg:
-			res := ptrToBA(what)
-			bf.Add(res)
-		case string:
-			bf.AddString(what)
-		default:
-			panic(fmt.Sprintf("Unclear how to convert %#v into []byte to add it to BloomFilter.\n", what))
-		}
-	}
-	return bf
-}
-
-func usesBF(call *Call, i int, c *Cache) *bloom.BloomFilter {
-	ret := c.UsesBFs[i]
-	if ret == nil {
-		uses := usesCache(call, i, c)
-		bf := usesToNewBloom(uses)
-		c.UsesBFs[i] = bf
-		ret = bf
-	}
-	return ret
-}
-
-func retBF(call *Call, i int, c *Cache) *bloom.BloomFilter {
-	ret := c.RetsBFs[i]
-	if ret == nil {
-		uses := retCache(call, i, c)
-		bf := usesToNewBloom(uses)
-		c.RetsBFs[i] = bf
-		ret = bf
-	}
-	return ret
-}
-
 func usesCache(call *Call, i int, c *Cache) map[any]bool {
 	ret := c.Uses[i]
 	if ret == nil {
@@ -711,10 +417,6 @@ func retCache(call *Call, i int, c *Cache) map[any]bool {
 }
 
 var emptyDependencies = map[any]bool{}
-
-func ptrToBA[T any](p *T) []byte {
-	return []byte(fmt.Sprintf("%p", p))
-}
 
 func usesRet(call *Call) map[any]bool {
 	var used map[any]bool
@@ -785,39 +487,6 @@ func intersects(list, list1 map[any]bool) bool {
 		}
 	}
 	return false
-}
-
-func intersectBFs(bf1 *bloom.BloomFilter, bf2 *bloom.BloomFilter) bool {
-	if bf1.BitSet().IntersectionCardinality(bf2.BitSet()) > 0 {
-		return true
-	}
-	return false
-}
-
-func Sliceor(list []bool, list1 []bool) []bool {
-	if len(list) > len(list1) {
-		for what := range list1 {
-			if list1[what] {
-				list[what] = true
-			}
-		}
-		return list
-	}
-	for what := range list {
-		if list[what] {
-			list1[what] = true
-		}
-	}
-	return list1
-}
-
-func mapsor(list map[int]bool, list1 map[int]bool) map[int]bool {
-	for what := range list1 {
-		if list1[what] {
-			list[what] = true
-		}
-	}
-	return list
 }
 
 func resetCallProps(p0 *Prog, callIndex0 int, pred minimizePred) *Prog {
