@@ -4,6 +4,7 @@
 package csource
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -65,6 +66,49 @@ func TestSourceDialectSandboxCall(t *testing.T) {
 			if got := dialect.sandboxCall(test.sandbox, test.sandboxArg); got != test.want {
 				t.Fatalf("sandboxCall(%q, %d) = %q, want %q",
 					test.sandbox, test.sandboxArg, got, test.want)
+			}
+		})
+	}
+}
+
+func TestCSBDataMmapLength(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const serializedDataOffset = uint64(0x7f0000000000)
+	for _, test := range []struct {
+		name string
+		call string
+		want string
+	}{
+		{
+			name: "default mapping",
+			call: fmt.Sprintf("pread64(0x3, &(0x%x), 0x1000, 0x0)\n", serializedDataOffset),
+			want: "#define MMAP_LENGTH 0x1000000ul",
+		},
+		{
+			name: "oversized output buffer",
+			call: fmt.Sprintf("pread64(0x3, &(0x%x), 0x990000, 0x0)\n", serializedDataOffset+0x7d1000),
+			want: "#define MMAP_LENGTH 0x1161000ul",
+		},
+		{
+			name: "page-rounded output buffer",
+			call: fmt.Sprintf("pread64(0x3, &(0x%x), 0x990001, 0x0)\n", serializedDataOffset+0x7d1000),
+			want: "#define MMAP_LENGTH 0x1162000ul",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			p, err := target.Deserialize([]byte(test.call), prog.NonStrict)
+			if err != nil {
+				t.Fatal(err)
+			}
+			src, _, err := Write(p, Options{CSB: true, Slowdown: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(src), test.want) {
+				t.Fatalf("generated source does not contain %q:\n%s", test.want, src)
 			}
 		})
 	}

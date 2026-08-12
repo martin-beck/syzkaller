@@ -36,7 +36,7 @@ func (dialect *csbDialect) sourceHeader() (string, string, error) {
 		"// clang-format off\n" +
 		"#ifndef CSB_PROGRAM_NAME\n#define CSB_PROGRAM_NAME \"\"\n#endif\n" +
 		fmt.Sprintf("#define MMAP_OFFSET 0x%xul\n", ctx.target.DataOffset) +
-		fmt.Sprintf("#define MMAP_LENGTH 0x%xul\n", ctx.target.NumPages*ctx.target.PageSize) +
+		fmt.Sprintf("#define MMAP_LENGTH 0x%xul\n", dialect.dataMmapLength()) +
 		fmt.Sprintf("const static uint64_t maxWriteBufferSize = %dul;\n", ctx.opts.MaxWriteSize) +
 		fmt.Sprintf("const static uint64_t maxWriteBufferSizeAlignment = %dul;\n", ctx.opts.MaxWriteSizeAlignment)
 	metadata := ""
@@ -57,6 +57,102 @@ func (dialect *csbDialect) sourceHeader() (string, string, error) {
 		metadata += fmt.Sprintf("SERVER_SEQ=%s\n", accept)
 	}
 	return header + "\n", metadata, nil
+}
+
+// dataMmapLength returns the mapping size needed after relocating syzkaller's
+// data area. Non-strict programs can contain a len[buf] value larger than the
+// pointed-to output DataArg, whose recorded size is commonly zero. Account for
+// both representations so a kernel write cannot run beyond the mapping.
+func (dialect *csbDialect) dataMmapLength() uint64 {
+	ctx := dialect.ctx
+	pageSize := ctx.target.PageSize
+	relocatableLength := ctx.target.NumPages * pageSize
+	requiredLength := relocatableLength
+	for _, call := range ctx.p.Calls {
+		for argIndex, arg := range call.Args {
+			ptr, ok := arg.(*prog.PointerArg)
+			if !ok || ptr.IsSpecial() || ptr.Address >= relocatableLength {
+				continue
+			}
+			span := pointerSpan(call, argIndex, ptr)
+			end := saturatedAdd(ptr.Address, span)
+			if end > requiredLength {
+				requiredLength = end
+			}
+		}
+	}
+	return roundUpSaturated(requiredLength, pageSize)
+}
+
+func pointerSpan(call *prog.Call, argIndex int, ptr *prog.PointerArg) uint64 {
+	span := ptr.VmaSize
+	if ptr.Res != nil && ptr.Res.Size() > span {
+		span = ptr.Res.Size()
+	}
+	fieldName := call.Meta.Args[argIndex].Name
+	for lenIndex, field := range call.Meta.Args {
+		lenType, ok := field.Type.(*prog.LenType)
+		if !ok || lenType.Offset || !lenTargetsField(lenType.Path, fieldName) {
+			continue
+		}
+		lenArg, ok := call.Args[lenIndex].(*prog.ConstArg)
+		if !ok {
+			continue
+		}
+		if size := lengthInBytes(ptr, lenType, lenArg.Val); size > span {
+			span = size
+		}
+	}
+	return span
+}
+
+func lenTargetsField(path []string, fieldName string) bool {
+	return len(path) == 1 && path[0] == fieldName ||
+		len(path) == 2 && path[0] == prog.SyscallRef && path[1] == fieldName
+}
+
+func lengthInBytes(ptr *prog.PointerArg, lenType *prog.LenType, value uint64) uint64 {
+	if lenType.BitSize != 0 {
+		return divideRoundUp(saturatedMul(value, lenType.BitSize), 8)
+	}
+	if inner := prog.InnerArg(ptr); inner != nil {
+		if array, ok := inner.Type().(*prog.ArrayType); ok {
+			return saturatedMul(value, array.Elem.Size())
+		}
+	}
+	return value
+}
+
+func saturatedAdd(left, right uint64) uint64 {
+	maxUint64 := ^uint64(0)
+	if right > maxUint64-left {
+		return maxUint64
+	}
+	return left + right
+}
+
+func saturatedMul(left, right uint64) uint64 {
+	maxUint64 := ^uint64(0)
+	if left != 0 && right > maxUint64/left {
+		return maxUint64
+	}
+	return left * right
+}
+
+func divideRoundUp(value, divisor uint64) uint64 {
+	result := value / divisor
+	if value%divisor != 0 {
+		result++
+	}
+	return result
+}
+
+func roundUpSaturated(value, alignment uint64) uint64 {
+	if remainder := value % alignment; remainder != 0 {
+		value = saturatedAdd(value, alignment-remainder)
+		value -= value % alignment
+	}
+	return value
 }
 
 func (*csbDialect) traceEpilogue(w *bytes.Buffer, _ int, _ string) {
