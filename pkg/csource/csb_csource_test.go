@@ -548,24 +548,58 @@ func TestCSBSetsNonblockingBeforePublishingDescriptor(t *testing.T) {
 	}
 }
 
-func TestCSBClosesUnusedDupResults(t *testing.T) {
+func TestCSBClosesUnusedFDResults(t *testing.T) {
 	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := target.Deserialize([]byte("dup(0x3)\n"+
-		"dup3(0x3, 0x5, 0x0)\n"), prog.NonStrict)
+	for call, want := range map[string]bool{
+		"openat": true,
+		"socket": true,
+		"getpid": false,
+	} {
+		assert.Equal(t, want, returnsFD(target.SyscallMap[call]), call)
+	}
+	p, err := target.Deserialize([]byte(
+		"openat(0xffffffffffffff9c, &(0x7f0000000000)='./file\\x00', 0x0, 0x0)\n"+
+			"socket(0x2, 0x1, 0x0)\n"+
+			"dup(0x3)\n"+
+			"dup3(0x3, 0x5, 0x0)\n"+
+			"getpid()\n"), prog.NonStrict)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, opts := range []Options{{CSB: true, Slowdown: 1}, {CSB: true, Threaded: true, Slowdown: 1}} {
+	for _, opts := range []Options{
+		{CSB: true, Trace: true, Slowdown: 1},
+		{CSB: true, Threaded: true, Trace: true, Slowdown: 1},
+	} {
 		src, _, err := Write(p, opts)
 		if err != nil {
 			t.Fatal(err)
 		}
 		assert.Contains(t, string(src), "intptr_t res = 0;\n\tV_UNUSED(res);")
-		assert.Equal(t, 2, strings.Count(string(src), "if (res > 2) close((int)res);"))
+		assert.Equal(t, 4, strings.Count(string(src), "if (res > 2) close((int)res);"))
 	}
+}
+
+func TestCSBDoesNotCloseUsedFDResultImmediately(t *testing.T) {
+	target, err := prog.GetTarget(targets.Linux, targets.AMD64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := target.Deserialize([]byte(
+		"r0 = openat(0xffffffffffffff9c, &(0x7f0000000000)='./file\\x00', 0x0, 0x0)\n"+
+			"read(r0, &(0x7f0000000040), 0x1)\n"), prog.NonStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _, err := Write(p, Options{CSB: true, Trace: true, Slowdown: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.NotContains(t, string(src), "if (res > 2) close((int)res);")
+	assert.Contains(t, string(src),
+		"{ uint32_t fd = (uint32_t)ctx->r[0]; if (fd > 2) close(fd); }")
 }
 
 func assertCSBExecIdentifiersArePlain(t *testing.T, src []byte) {

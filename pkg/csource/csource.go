@@ -443,10 +443,7 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace, addComments bool,
 		argCopyout := len(call.Copyout) != 0
 		emitOpts := ctx.prepareEmitCall(w, &call, ci, baseEmitOpts, slices.Contains(initIndices, ci),
 			dataMmap, resCopyout)
-		ctx.emitCall(w, call, ci, resCopyout || argCopyout || emitOpts.closeUnusedDup, trace, emitOpts)
-		if emitOpts.closeUnusedDup {
-			fmt.Fprintf(w, "\tif (res > 2) close((int)res);\n")
-		}
+		ctx.emitPreparedCall(w, call, ci, resCopyout || argCopyout, trace, emitOpts)
 		if call.Props.Rerun > 0 {
 			fmt.Fprintf(w, "\tfor (int i = 0; i < %v; i++) {\n", call.Props.Rerun)
 			// Rerun invocations should not affect the result value.

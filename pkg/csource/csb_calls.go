@@ -20,7 +20,7 @@ type emitCallOpts struct {
 	csbMQAttr           bool
 	dataMmap            bool
 	localIO             map[uint64]bool
-	closeUnusedDup      bool
+	closeUnusedFD       bool
 }
 
 func csbMessageSizes(p *prog.Prog) []uint64 {
@@ -66,13 +66,27 @@ func (ctx *context) prepareEmitCall(w *bytes.Buffer, call *prog.ExecCall, ci int
 	if !ctx.opts.CSB {
 		return opts
 	}
-	opts.closeUnusedDup = !resCopyout && (call.Meta.CallName == "dup" || call.Meta.CallName == "dup3")
+	opts.closeUnusedFD = !resCopyout && returnsFD(call.Meta)
 	ctx.prepareFIONBIO(w, *call, ci, &opts)
 	ctx.prepareOpenat2(w, *call, ci)
 	ctx.prepareFcntl(call, ci, w, &opts)
 	ctx.prepareMQAttr(w, *call, ci, &opts)
 	ctx.prepareNonblockingOpen(call, &opts)
 	return opts
+}
+
+func returnsFD(call *prog.Syscall) bool {
+	ret, ok := call.Ret.(*prog.ResourceType)
+	// Resource kinds are ordered from the base kind to the most specific kind.
+	return ok && len(ret.Desc.Kind) != 0 && ret.Desc.Kind[0] == "fd"
+}
+
+func (ctx *context) emitPreparedCall(w *bytes.Buffer, call prog.ExecCall, ci int,
+	haveCopyout, trace bool, opts emitCallOpts) {
+	ctx.emitCall(w, call, ci, haveCopyout || opts.closeUnusedFD, trace, opts)
+	if opts.closeUnusedFD {
+		fmt.Fprintf(w, "\tif (res > 2) close((int)res);\n")
+	}
 }
 
 func (ctx *context) copyoutMultiple(call prog.ExecCall, resCopyout bool, opts emitCallOpts) bool {
