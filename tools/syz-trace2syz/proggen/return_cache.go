@@ -11,10 +11,16 @@ import (
 	"github.com/google/syzkaller/tools/syz-trace2syz/parser"
 )
 
-type returnCache map[string]prog.Arg
+type returnCache struct {
+	resources map[string]prog.Arg
+	fds       *fdNamespace
+}
 
-func newRCache() returnCache {
-	return make(map[string]prog.Arg)
+func newRCache() *returnCache {
+	return &returnCache{
+		resources: make(map[string]prog.Arg),
+		fds:       newFDNamespace(),
+	}
 }
 
 func returnCacheKey(syzType prog.Type, traceType parser.IrType) string {
@@ -30,13 +36,19 @@ func returnCacheKey(syzType prog.Type, traceType parser.IrType) string {
 	}
 }
 
-func (r returnCache) cache(syzType prog.Type, traceType parser.IrType, arg prog.Arg) {
+func (r *returnCache) cache(syzType prog.Type, traceType parser.IrType, arg prog.Arg) {
 	log.Logf(2, "caching resource: %v", returnCacheKey(syzType, traceType))
-	r[returnCacheKey(syzType, traceType)] = arg
+	if r.fds.cache(syzType, traceType, arg) {
+		return
+	}
+	r.resources[returnCacheKey(syzType, traceType)] = arg
 }
 
-func (r returnCache) get(syzType prog.Type, traceType parser.IrType) prog.Arg {
-	result := r[returnCacheKey(syzType, traceType)]
+func (r *returnCache) get(syzType prog.Type, traceType parser.IrType) prog.Arg {
+	if result, handled := r.fds.get(syzType, traceType); handled {
+		return result
+	}
+	result := r.resources[returnCacheKey(syzType, traceType)]
 	log.Logf(2, "fetching resource: %s, val: %s", returnCacheKey(syzType, traceType), result)
 	return result
 }

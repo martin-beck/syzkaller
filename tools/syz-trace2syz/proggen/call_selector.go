@@ -60,7 +60,7 @@ type callSelector interface {
 	Select(call *parser.Syscall) *prog.Syscall
 }
 
-func newSelectors(target *prog.Target, returnCache returnCache) []callSelector {
+func newSelectors(target *prog.Target, returnCache *returnCache) []callSelector {
 	sc := newSelectorCommon(target, returnCache)
 	return []callSelector{
 		&defaultCallSelector{
@@ -74,11 +74,11 @@ func newSelectors(target *prog.Target, returnCache returnCache) []callSelector {
 
 type selectorCommon struct {
 	target      *prog.Target
-	returnCache returnCache
+	returnCache *returnCache
 	callCache   map[string][]*prog.Syscall
 }
 
-func newSelectorCommon(target *prog.Target, returnCache returnCache) *selectorCommon {
+func newSelectorCommon(target *prog.Target, returnCache *returnCache) *selectorCommon {
 	return &selectorCommon{
 		target:      target,
 		returnCache: returnCache,

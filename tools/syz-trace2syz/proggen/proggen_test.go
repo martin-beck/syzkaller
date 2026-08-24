@@ -718,19 +718,22 @@ rt_sigprocmask() = 0
 }
 
 func TestExecLifecycleCall(t *testing.T) {
+	target := testTarget(t)
+	ctx := &context{target: target}
+	atEmptyPath := target.ConstMap["AT_EMPTY_PATH"]
 	tests := []struct {
 		call *parser.Syscall
 		want string
 	}{
 		{parser.NewSyscall(1, "execve", nil, 0, false, false), "syz_csb_execve"},
 		{parser.NewSyscall(1, "execveat", nil, 0, false, false), "syz_csb_execveat"},
-		{parser.NewSyscall(1, "execveat", []parser.IrType{nil, &parser.BufferType{Val: ""}, nil, nil, parser.Constant(0x1000)},
+		{parser.NewSyscall(1, "execveat", []parser.IrType{nil, &parser.BufferType{Val: ""}, nil, nil, parser.Constant(atEmptyPath)},
 			0, false, false), "syz_csb_fexecve"},
 		{parser.NewSyscall(1, "execveat", []parser.IrType{nil, &parser.BufferType{Val: "/bin/true"}, nil, nil,
-			parser.Constant(0x1000)}, 0, false, false), "syz_csb_execveat"},
+			parser.Constant(atEmptyPath)}, 0, false, false), "syz_csb_execveat"},
 	}
 	for _, test := range tests {
-		if got := execLifecycleCall(test.call); got != test.want {
+		if got := ctx.execLifecycleCall(test.call); got != test.want {
 			t.Errorf("%s mapped to %q, want %q", test.call.CallName, got, test.want)
 		}
 	}
