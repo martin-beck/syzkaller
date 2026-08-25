@@ -136,7 +136,7 @@ type context struct {
 	builder           *prog.Builder
 	target            *prog.Target
 	selectors         []callSelector
-	returnCache       returnCache
+	returnCache       *returnCache
 	currentStraceCall *parser.Syscall
 	currentSyzCall    *prog.Call
 	randomized        bool
@@ -171,23 +171,28 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 			status = fmt.Sprintf("-- Progress [%03.1f/100%%] --", (100.0 * float32(sIdx) / float32(numCalls)))
 			fmt.Fprintf(os.Stderr, "%s\r", status)
 		}
+		ctx.beginFDCall(sCall)
 		if sCall.Paused {
 			// Probably a case where the call was killed by a signal like the following
 			// 2179  wait4(2180,  <unfinished ...>
 			// 2179  <... wait4 resumed> 0x7fff28981bf8, 0, NULL) = ? ERESTARTSYS
 			// 2179  --- SIGUSR1 {si_signo=SIGUSR1, si_code=SI_USER, si_pid=2180, si_uid=0} ---
+			ctx.completeFDCall(sCall)
 			continue
 		}
 		if skipBootstrapExec && !bootstrapExecSkipped && sCall.Pid == rootPID && isSuccessfulExec(sCall) {
 			bootstrapExecSkipped = true
+			ctx.completeFDCall(sCall)
 			continue
 		}
 		if shouldSkip(sCall) {
+			ctx.completeFDCall(sCall)
 			continue
 		}
 		ctx.currentStraceCall = sCall
 		calls := ctx.genCalls()
 		if len(calls) == 0 {
+			ctx.completeFDCall(sCall)
 			continue
 		}
 		for _, call := range calls {
@@ -196,6 +201,7 @@ func genProg(trace *parser.Trace, target *prog.Target, argLength, randomized, ma
 				log.Fatalf("%v", err)
 			}
 		}
+		ctx.completeFDCall(sCall)
 	}
 	fmt.Fprintf(os.Stderr, "%s\r", strings.Repeat(" ", len(status)))
 	p, err := ctx.builder.Finalize()
@@ -213,7 +219,7 @@ func (ctx *context) genCalls() []*prog.Call {
 	if isExec(ctx.currentStraceCall) && ctx.currentStraceCall.Ret < 0 {
 		return nil
 	}
-	if name := execLifecycleCall(ctx.currentStraceCall); name != "" {
+	if name := ctx.execLifecycleCall(ctx.currentStraceCall); name != "" {
 		return singleCall(ctx.genDefaultSafeCall(name))
 	}
 	switch ctx.currentStraceCall.CallName {
@@ -271,9 +277,9 @@ var sanitizedCallMinArgs = map[string]int{
 // genCloneLifecycleCall preserves the task kind while replacing its workload with a bounded helper.
 func (ctx *context) genCloneLifecycleCall() *prog.Call {
 	name := "syz_csb_fork_wait"
-	if cloneCreatesThread(ctx.currentStraceCall) {
+	if ctx.traceHasCloneFlag(ctx.currentStraceCall, "CLONE_THREAD") {
 		name = "syz_csb_thread_create_join"
-	} else if cloneUsesVfork(ctx.currentStraceCall) {
+	} else if ctx.traceHasCloneFlag(ctx.currentStraceCall, "CLONE_VFORK") {
 		name = "syz_csb_vfork_wait"
 	}
 	return ctx.genTaskLifecycleCall(name)
@@ -290,32 +296,6 @@ func (ctx *context) genTaskLifecycleCall(name string) *prog.Call {
 		call.StraceRetVal = 0
 	}
 	return call
-}
-
-func cloneCreatesThread(call *parser.Syscall) bool {
-	return traceHasCloneFlag(call, "CLONE_THREAD", 0x10000)
-}
-
-func cloneUsesVfork(call *parser.Syscall) bool {
-	return traceHasCloneFlag(call, "CLONE_VFORK", 0x4000)
-}
-
-func traceHasCloneFlag(call *parser.Syscall, name string, value uint64) bool {
-	if len(call.Args) == 0 {
-		return false
-	}
-	for _, arg := range call.Args {
-		if strings.Contains(fmt.Sprint(arg), name) {
-			return true
-		}
-	}
-	flags := call.Args[0]
-	// strace prints clone as clone(child_stack=..., flags=..., ...), while
-	// clone3 keeps flags in the first field of struct clone_args.
-	if call.CallName == "clone" && len(call.Args) > 1 {
-		flags = call.Args[1]
-	}
-	return irHasFlag(flags, value)
 }
 
 func irHasFlag(arg parser.IrType, value uint64) bool {
@@ -352,7 +332,10 @@ func (ctx *context) genCall() *prog.Call {
 		if i < len(straceCall.Args) {
 			strArg = straceCall.Args[i]
 		}
-		res := ctx.genArg(syzCall.Meta.Args[i].Type, prog.DirIn, strArg)
+		res, overridden := ctx.fdArgumentOverride(i, syzCall.Meta.Args[i].Type, strArg)
+		if !overridden {
+			res = ctx.genArg(syzCall.Meta.Args[i].Type, prog.DirIn, strArg)
+		}
 		syzCall.Args = append(syzCall.Args, res)
 	}
 	ctx.genResult(syzCall.Meta.Ret, straceCall.Ret)
@@ -719,9 +702,6 @@ func roundUp(v, unit uint64) uint64 {
 	return ((v + unit - 1) / unit) * unit
 }
 
-// execLifecycleCall selects the bounded helper matching the traced exec entry point.
-const atEmptyPath = 0x1000
-
 func isExec(call *parser.Syscall) bool {
 	return call.CallName == "execve" || call.CallName == "execveat"
 }
@@ -730,7 +710,8 @@ func isSuccessfulExec(call *parser.Syscall) bool {
 	return isExec(call) && call.Ret == 0
 }
 
-func execLifecycleCall(call *parser.Syscall) string {
+// execLifecycleCall selects the bounded helper matching the traced exec entry point.
+func (ctx *context) execLifecycleCall(call *parser.Syscall) string {
 	switch call.CallName {
 	case "execve":
 		return "syz_csb_execve"
@@ -738,7 +719,7 @@ func execLifecycleCall(call *parser.Syscall) string {
 		if len(call.Args) > 4 {
 			path, pathOK := call.Args[1].(*parser.BufferType)
 			flags, flagsOK := call.Args[4].(parser.Constant)
-			if pathOK && path.Val == "" && flagsOK && flags.Val()&atEmptyPath != 0 {
+			if pathOK && path.Val == "" && flagsOK && ctx.traceHasFlag(flags, "AT_EMPTY_PATH") {
 				return "syz_csb_fexecve"
 			}
 		}
@@ -758,7 +739,9 @@ func (ctx *context) Select(syscall *parser.Syscall) *prog.Syscall {
 }
 
 func (ctx *context) genResult(syzType prog.Type, straceRet int64) {
-	if straceRet <= 0 {
+	// Zero is a valid descriptor number, while zero-valued resources of other
+	// kinds retain the historical treatment below.
+	if straceRet < 0 || straceRet == 0 && !isFDResource(syzType) {
 		return
 	}
 	straceExpr := parser.Constant(uint64(straceRet))

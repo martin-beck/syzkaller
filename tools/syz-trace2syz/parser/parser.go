@@ -168,8 +168,17 @@ func joinSplitValues(data []byte) ([]byte, int64) {
 		if start >= 0 && end >= start {
 			pid := strings.TrimSpace(line[:start])
 			if call, ok := pending[pid]; ok && line[start+5:end] == call.name {
-				lines[i] = strings.TrimSuffix(lines[call.line], "<unfinished ...>") + line[end+9:]
-				removed[call.line] = true
+				joined := strings.TrimSuffix(lines[call.line], "<unfinished ...>") + line[end+9:]
+				if taskCreationCall(call.name) {
+					// A child can run before strace prints the parent's resumed return.
+					// Keep task creation at its entry position so FD inheritance is
+					// established before the child's first recorded syscall.
+					lines[call.line] = joined
+					removed[i] = true
+				} else {
+					lines[i] = joined
+					removed[call.line] = true
+				}
 				delete(pending, pid)
 				line = lines[i]
 			}
@@ -222,6 +231,12 @@ func ParseData(data []byte, splitThreads bool, numLines int) (*TraceTree, *Trace
 		} else {
 			if !call.Resumed {
 				lastCalls[call.Pid] = call
+				if call.Paused && taskCreationCall(call.CallName) {
+					// Retain the pointer at task-creation entry order. The
+					// resumed record below fills in its return value in place.
+					trace.Calls = append(trace.Calls, call)
+					continue
+				}
 			} else {
 				lastCall := lastCalls[call.Pid]
 				if lastCall == nil {
@@ -234,6 +249,9 @@ func ParseData(data []byte, splitThreads bool, numLines int) (*TraceTree, *Trace
 				lastCall.Paused = false
 				lastCall.Ret = call.Ret
 				call = lastCall
+				if taskCreationCall(call.CallName) {
+					continue
+				}
 			}
 
 			if !call.Paused {

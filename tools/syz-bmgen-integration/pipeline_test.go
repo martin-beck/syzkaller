@@ -189,10 +189,13 @@ func testProg2C(t *testing.T, arch, input, work string) {
 			data := readFile(t, outputs[0])
 			marker := []byte("int main")
 			if variant.csb {
-				marker = []byte("#ifndef UNIQUE_ID")
+				marker = []byte("static inline int bm_dispatch_operation")
 			}
 			if len(data) < 100 || !bytes.Contains(data, marker) {
 				t.Fatalf("implausible generated output %s (%d bytes)", outputs[0], len(data))
+			}
+			if variant.csb && bytes.Contains(data, []byte("UNIQUE_")) {
+				t.Fatalf("CSB output still contains manual identifier namespacing: %s", outputs[0])
 			}
 			if !variant.csb {
 				runOK(t, compiler(t), cSyntaxArgs(outputs[0])...)
@@ -372,7 +375,10 @@ func mustMkdir(t *testing.T, path string) {
 
 func runOK(t *testing.T, command string, args ...string) {
 	t.Helper()
-	if output, err := run(command, args...); err != nil {
+	output, err := run(command, args...)
+	if ex_err, ok := err.(*exec.ExitError); ok {
+		t.Fatalf("%s %s failed: %v\n%s", command, strings.Join(args, " "), ex_err, ex_err.Stderr)
+	} else if err != nil {
 		t.Fatalf("%s %s failed: %v\n%s", command, strings.Join(args, " "), err, output)
 	}
 }
@@ -393,7 +399,7 @@ func run(command string, args ...string) ([]byte, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = repoRoot
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output()
 	if ctx.Err() != nil {
 		return output, fmt.Errorf("timed out: %w", ctx.Err())
 	}
